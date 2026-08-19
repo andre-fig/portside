@@ -4,7 +4,7 @@
 
 Portside is a native SwiftUI macOS wrapper that prepares a private compatibility workspace and launches the official Windows Steam client. It does not replace Steam’s library UI, collect Steam credentials, distribute games, or bypass DRM/anti-cheat.
 
-This repository contains a compilable MVP shell for Apple silicon. It downloads `SteamSetup.exe` from Valve’s official CDN during setup. A compatibility runtime is deliberately not bundled: commercial redistribution requires a separately reviewed license. For local development, an authorized runtime executable may be placed at `~/Library/Application Support/Portside/Runtime/bin/wine` or `wine64`.
+This repository contains a native Apple silicon MVP. During setup it downloads a pinned Wine Staging 11.15 macOS build, verifies its SHA-256, safely extracts it into Portside’s private runtime directory, downloads the official GStreamer 1.28.5 runtime package, verifies and extracts it locally, creates a win64 prefix, and downloads `SteamSetup.exe` from Steam’s official Fastly CDN. WineD3D is the default graphics layer for Direct3D 9/10/11. No runtime or Steam binary is bundled in the app.
 
 ## Build and test
 
@@ -15,14 +15,18 @@ swift test
 open build/Portside.app
 ```
 
-The package targets macOS 13+ and builds the current architecture by default. `package_app.sh` produces an arm64 `.app` bundle and does not claim signing or notarization.
+The package targets macOS 13+ and builds the current architecture by default. `package_app.sh` produces an arm64 ad-hoc-signed `.app` bundle; it is not notarized.
 
 ## MVP behavior
 
-- First launch performs Apple silicon and storage checks, creates the Portside directory tree, and downloads the official Steam installer over HTTPS.
-- If an authorized runtime is available, the installer is invoked with a fixed argument list and the expected Steam executable is verified.
-- Without a runtime, setup stops with a user-facing explanation rather than silently installing an unlicensed component.
+- Rosetta is detected by executing a harmless x86-64 `/usr/bin/true`; if missing, Portside offers the official macOS installation flow.
+- The runtime manifest is fixed to Wine 11.15 and includes release checksum, source, architecture, license note, and validation date.
+- The installer is invoked with a fixed argument list and the expected Steam executable is verified.
+- The Windows installer is run silently with the separate, case-sensitive `/S` argument; its output is captured internally and never shown in the Portside UI.
+- Steam bootstrap is attempted with `-silent`, validated using its installed-client marker, and followed by a normal Steam launch for login.
+- Download interruptions leave a `.part` file and resume with HTTP Range requests.
+- Archive entries are preflighted for absolute paths and `..` traversal before extraction.
 - Support includes environment checks, repair guidance, diagnostic export, storage access, cache clearing, and destructive reset confirmation.
-- Compatibility profiles are optional metadata keyed by numeric Steam App ID. `3139440` (GunZ: The Duel) is not allowlisted and is not bundled.
+- Portside has no game catalog or App ID allowlist; Steam remains responsible for the library and game installation.
 
-The real Steam/game validation matrix remains pending until Steam and an authorized runtime can be run on the target Mac. See `docs/VALIDATION.md`.
+The real Steam/game validation matrix still requires completing the first setup on this Mac. See `docs/VALIDATION.md`.

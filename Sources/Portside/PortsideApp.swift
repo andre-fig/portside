@@ -31,65 +31,217 @@ final class PortsideModel: ObservableObject {
 
     let store = EnvironmentStore()
     let logger = PortsideLogger()
-    let runtimeLocator = RuntimeLocator()
+    let runtimeProvider = FreeWineRuntimeProvider()
     let supervisor = ProcessSupervisor()
+    let steamMonitor = SteamReadinessMonitor()
 
-    enum SetupStep: String { case welcome, checking, preparing, downloading, installing, ready, failed }
+    enum SetupStep: String { case welcome, checking, rosettaRequired, preparing, downloading, installing, ready, failed }
 
     init() {
+        try? store.prepareDirectories()
         state = store.load()
         requirements = SystemRequirements()
-        if state.setupCompleted { setupStep = .ready }
+        if state.setupCompleted && state.steamInstalled && (state.runtimeRecord != nil || state.runtime != nil) {
+            setupStep = .ready
+        }
     }
 
     func setUp() {
         guard !isWorking else { return }
-        isWorking = true; errorMessage = nil; progress = 0; setupStep = .checking
+        isWorking = true; errorMessage = nil; progress = 0; setupStep = .checking; message = "Preparando o Portside…"
+        let started = Date()
+        if state.phase == .failedRecoverable { state.retryCount += 1 }
+        state.lastError = nil; state.lastErrorCode = nil; state.lastProcessType = nil; state.lastExitCode = nil
         Task {
             do {
                 logger.write("Starting Portside setup")
+                updateProgress(0, phase: .requirementsChecking)
                 try requirements.validate()
-                setupStep = .preparing; message = "Preparing your Portside workspace…"; progress = 0.15
+                let rosetta = await RosettaManager.status()
+                guard rosetta.installed else {
+                    state.phase = .rosettaRequired; persistState(); setupStep = .rosettaRequired; message = "Rosetta is required and is provided by macOS."; isWorking = false; return
+                }
+                setupStep = .preparing; updateProgress(0.08, phase: .graphicsInstalling)
                 try store.prepareDirectories()
-                try await Task.sleep(for: .milliseconds(250))
-                setupStep = .downloading; message = "Downloading the official Steam installer from Valve…"; progress = 0.3
-                _ = try await SteamInstaller.download { [weak self] value in
-                    Task { @MainActor in self?.progress = 0.3 + (value * 0.5) }
+                let result = try await runtimeProvider.install { [weak self] value, phase in
+                    Task { @MainActor in
+                        self?.updateProgress(value, phase: phase)
+                    }
                 }
-                setupStep = .installing; message = "Steam installer is ready. Looking for an authorized compatibility runtime…"; progress = 0.85
-                let runtime = runtimeLocator.locate()
-                state.runtime = runtime
-                state.steamInstalled = false
+                state.runtimeRecord = result.record
+                state.runtime = RuntimeDescriptor(name: result.record.manifest.identifier, version: result.record.manifest.version, executablePath: result.record.executablePath.path, redistributable: false, licenseNote: result.record.manifest.license)
+                let existingSteam = SteamInstaller.locateInstalledExecutable()
+                if existingSteam == nil {
+                    setupStep = .downloading
+                    _ = try await SteamInstaller.download { [weak self] value in
+                        Task { @MainActor in self?.updateProgress(0.72 + (value * 0.08), phase: .steamDownloading) }
+                    }
+                    setupStep = .installing
+                    state.lastProcessType = "steam-installer"
+                    updateProgress(0.84, phase: .steamInstalling)
+                    try await SteamInstaller.install(using: state.runtime!, logger: logger)
+                }
+                updateProgress(0.92, phase: .validatingInstallation)
+                guard let steamExecutable = SteamInstaller.locateInstalledExecutable() else {
+                    throw PortsideError.processLaunchFailed("Steam installer finished without creating steam.exe.")
+                }
+                state.steamExecutablePath = steamExecutable.path
+                state.steamInstalled = true
                 state.setupCompleted = false
-                state.lastError = runtime == nil ? PortsideError.runtimeUnavailable.localizedDescription : nil
-                if let runtime {
-                    message = "Installing Steam in Portside’s private environment…"
-                    try await SteamInstaller.install(using: runtime, logger: logger)
-                    state.steamInstalled = FileManager.default.fileExists(atPath: PortsidePaths.steamPrefix.appendingPathComponent("drive_c/Program Files (x86)/Steam/Steam.exe").path)
-                    guard state.steamInstalled else { throw PortsideError.processLaunchFailed("Steam installation finished without a Steam client. See Support for diagnostics.") }
+                updateProgress(0.88, phase: .steamUpdating)
+                if !steamMonitor.bootstrapComplete(prefix: PortsidePaths.steamPrefix) {
+                    state.lastProcessType = "steam-bootstrap"
+                    try supervisor.launchSteam(state: state, arguments: SteamInstaller.bootstrapArguments)
+                    guard await steamMonitor.waitForBootstrap(prefix: PortsidePaths.steamPrefix) else {
+                        throw PortsideError.processLaunchFailed("Steam bootstrap did not complete before the timeout.")
+                    }
+                    supervisor.requestStop()
                 }
-                state.setupCompleted = state.steamInstalled
-                state.lastError = state.setupCompleted ? nil : PortsideError.runtimeUnavailable.localizedDescription
-                state.lastUpdated = Date()
-                try store.save(state)
-                if runtime == nil { throw PortsideError.runtimeUnavailable }
-                setupStep = .ready; message = "Portside is ready. Steam will open in its own window."; progress = 1
+                updateProgress(0.96, phase: .validatingInstallation)
+                try await openSteamAndWait(executable: steamExecutable)
+                state.lastSetupDuration = Date().timeIntervalSince(started)
+                setupStep = .ready; updateProgress(1, phase: .steamReady)
                 logger.write("Setup completed")
             } catch {
-                setupStep = .failed; errorMessage = error.localizedDescription; message = "Setup needs your attention."; logger.write(error.localizedDescription, level: .error)
+                if supervisor.isRunning { supervisor.requestStop() }
+                state.phase = .failedRecoverable
+                state.lastError = error.localizedDescription
+                state.lastErrorCode = errorCode(for: error)
+                if let pipelineError = error as? RuntimePipelineError, case .processFailed(_, let exitCode) = pipelineError {
+                    state.lastExitCode = exitCode
+                }
+                state.lastSetupDuration = Date().timeIntervalSince(started)
+                persistState()
+                setupStep = .failed
+                errorMessage = error.localizedDescription
+                message = "Não foi possível concluir a preparação."
+                logger.write(error.localizedDescription, level: .error)
             }
             isWorking = false
         }
     }
 
+    func installRosetta() {
+        guard !isWorking else { return }
+        isWorking = true; message = "Requesting Rosetta from macOS…"
+        Task {
+            do {
+                let result = try await RosettaManager.install()
+                guard result.status == 0, (await RosettaManager.status()).installed else { throw RuntimePipelineError.rosettaUnavailable }
+                setupStep = .checking; isWorking = false; setUp()
+            } catch {
+                isWorking = false; setupStep = .failed; errorMessage = "macOS could not install Rosetta. Use Software Update, then try again."; logger.write(error.localizedDescription, level: .error)
+            }
+        }
+    }
+
     func launchSteam() {
-        errorMessage = nil
-        do { try supervisor.launchSteam(state: state); message = "Steam is starting…" }
-        catch { errorMessage = error.localizedDescription; logger.write(error.localizedDescription, level: .error) }
+        guard !isWorking else { return }
+        isWorking = true; errorMessage = nil; message = "Preparando o Portside…"
+        Task {
+            do {
+                try requirements.validate()
+                guard (await RosettaManager.status()).installed else { throw RuntimePipelineError.rosettaUnavailable }
+                let storedSteamExecutable = state.steamExecutablePath.map(URL.init(fileURLWithPath:))
+                guard let steamExecutable = (storedSteamExecutable.flatMap { FileManager.default.isExecutableFile(atPath: $0.path) ? $0 : nil }) ?? SteamInstaller.locateInstalledExecutable() else {
+                    throw PortsideError.processLaunchFailed("Steam is not installed yet. Run Set Up Portside first.")
+                }
+                guard FileManager.default.isExecutableFile(atPath: state.runtimeRecord?.executablePath.path ?? state.runtime?.executablePath ?? ""),
+                      FileManager.default.fileExists(atPath: PortsidePaths.steamPrefix.appendingPathComponent("system.reg").path) else {
+                    throw PortsideError.runtimeUnavailable
+                }
+                state.steamExecutablePath = steamExecutable.path
+                state.phase = .steamLaunching; persistState(); message = "Abrindo a Steam…"
+                try await openSteamAndWait(executable: steamExecutable)
+                message = "Tudo pronto"; NSApp.hide(nil)
+            } catch {
+                if supervisor.isRunning { supervisor.requestStop() }
+                errorMessage = error.localizedDescription
+                state.phase = .failedRecoverable; state.lastError = error.localizedDescription; state.lastErrorCode = errorCode(for: error); persistState()
+                logger.write(error.localizedDescription, level: .error)
+                NSApp.unhide(nil)
+            }
+            isWorking = false
+        }
+    }
+
+    private func friendlyMessage(for phase: EnvironmentPhase) -> String {
+        switch phase {
+        case .requirementsChecking: return "Preparando o Portside…"
+        case .rosettaRequired: return "Preparando o Portside…"
+        case .runtimeDownloading: return "Baixando componentes"
+        case .runtimeVerifying, .runtimeInstalling, .prefixCreating, .graphicsInstalling: return "Preparando o ambiente"
+        case .steamDownloading, .steamInstalling: return "Instalando a Steam"
+        case .steamUpdating: return "Atualizando a Steam"
+        case .steamLaunching, .validatingInstallation, .steamReady: return "Tudo pronto"
+        case .failedRecoverable, .failedFatal: return "Não foi possível concluir a preparação."
+        }
+    }
+
+    private func updateProgress(_ value: Double, phase: EnvironmentPhase) {
+        if let currentPhase = state.phase, phaseRank(phase) < phaseRank(currentPhase), value < progress { return }
+        state.phase = phase
+        progress = max(progress, min(1, value))
+        message = friendlyMessage(for: phase)
+        persistState()
+    }
+
+    private func phaseRank(_ phase: EnvironmentPhase) -> Int {
+        switch phase {
+        case .requirementsChecking: return 0
+        case .rosettaRequired: return 1
+        case .graphicsInstalling: return 2
+        case .runtimeDownloading: return 3
+        case .runtimeVerifying: return 4
+        case .runtimeInstalling: return 5
+        case .prefixCreating: return 6
+        case .steamDownloading: return 7
+        case .steamInstalling: return 8
+        case .steamUpdating: return 9
+        case .steamLaunching: return 10
+        case .validatingInstallation: return 11
+        case .steamReady: return 12
+        case .failedRecoverable, .failedFatal: return 99
+        }
+    }
+
+    private func errorCode(for error: Error) -> String {
+        if let pipelineError = error as? RuntimePipelineError {
+            return String(describing: pipelineError).split(separator: "(").first.map(String.init) ?? "runtime_error"
+        }
+        if let portsideError = error as? PortsideError {
+            return String(describing: portsideError).split(separator: "(").first.map(String.init) ?? "portside_error"
+        }
+        return String(describing: type(of: error))
+    }
+
+    private func openSteamAndWait(executable: URL) async throws {
+        state.lastProcessType = "steam-launch"
+        state.phase = .steamLaunching; persistState()
+        try supervisor.launchSteam(state: state)
+        let status = await steamMonitor.waitForSteam(executable: executable)
+        state.lastSteamStatus = status
+        guard status == .windowVisible else {
+            throw PortsideError.processLaunchFailed("Steam started but its window did not appear before the timeout.")
+        }
+        state.phase = .steamReady; state.setupCompleted = true; state.lastError = nil; persistState()
+        NSApp.hide(nil)
+    }
+
+    private func persistState() {
+        state.lastUpdated = Date()
+        try? store.save(state)
     }
 
     func stopSteam() {
         supervisor.requestStop(); message = "Steam was asked to close safely."
+    }
+
+    func repair() {
+        state.setupCompleted = false
+        state.steamInstalled = SteamInstaller.locateInstalledExecutable() != nil
+        setupStep = .checking
+        setUp()
     }
 
     func exportReport() {
@@ -123,7 +275,7 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            if model.setupStep == .welcome || model.setupStep == .failed { OnboardingView(model: model) }
+            if model.setupStep == .welcome || model.setupStep == .failed || model.setupStep == .rosettaRequired { OnboardingView(model: model) }
             else if model.setupStep == .ready { DashboardView(model: model) }
             else { SetupProgressView(model: model) }
         }
@@ -144,6 +296,7 @@ struct BrandMark: View {
 struct OnboardingView: View {
     @ObservedObject var model: PortsideModel
     @State private var showResetConfirmation = false
+    @State private var showDetails = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -151,10 +304,13 @@ struct OnboardingView: View {
                 .padding(.top, 42)
             Spacer()
             VStack(spacing: 14) {
-                Text(model.setupStep == .failed ? "Setup needs attention" : "Welcome to Portside").font(.system(size: 30, weight: .bold, design: .rounded))
+                Text(model.setupStep == .failed ? "Não foi possível concluir a preparação." : model.setupStep == .rosettaRequired ? "Rosetta is required" : "Welcome to Portside").font(.system(size: 30, weight: .bold, design: .rounded))
                 Text("Play supported Windows Steam games on your Mac.").font(.title3).foregroundStyle(.secondary)
                 Text("Install and try any Windows Steam game. Compatibility may vary by title.").multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 450)
-                if let error = model.errorMessage { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).multilineTextAlignment(.center).padding(.top, 8) }
+                if model.setupStep == .rosettaRequired { Text("Portside uses Apple’s official Rosetta component to run the fixed x86-64 Wine runtime. macOS may ask for administrator approval.").multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 470).padding(.top, 8) }
+                if model.setupStep == .failed, showDetails, let error = model.errorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).multilineTextAlignment(.center).padding(.top, 8)
+                }
             }
             Spacer()
             VStack(spacing: 12) {
@@ -162,8 +318,21 @@ struct OnboardingView: View {
                     RequirementBadge(icon: "cpu", title: "Apple silicon", value: model.requirements.isAppleSilicon ? "Detected" : "Required")
                     RequirementBadge(icon: "internaldrive", title: "Storage", value: ByteCountFormatter.string(fromByteCount: model.requirements.availableStorage, countStyle: .file) + " free")
                 }
-                Button(model.setupStep == .failed ? "Try Again" : "Set Up Portside", action: model.setUp)
+                if model.setupStep == .failed {
+                    HStack(spacing: 12) {
+                        Button("Tentar novamente") { model.setUp() }.buttonStyle(.borderedProminent)
+                        Button("Reparar") { model.repair() }.buttonStyle(.bordered)
+                        Button("Salvar diagnóstico") { model.exportReport() }.buttonStyle(.bordered)
+                        Button(showDetails ? "Ocultar detalhes" : "Ver detalhes") { showDetails.toggle() }.buttonStyle(.bordered)
+                    }.disabled(model.isWorking)
+                } else {
+                    Button {
+                        if model.setupStep == .rosettaRequired { model.installRosetta() } else { model.setUp() }
+                    } label: {
+                        Text(model.setupStep == .rosettaRequired ? "Install Rosetta" : "Set Up Portside")
+                    }
                     .buttonStyle(.borderedProminent).controlSize(.large).keyboardShortcut(.defaultAction).disabled(model.isWorking)
+                }
                 HStack(spacing: 18) {
                     Link("Privacy", destination: URL(string: "https://portside.example/privacy")!)
                     Link("Compatibility info", destination: URL(string: "https://portside.example/compatibility")!)
@@ -208,12 +377,15 @@ struct DashboardView: View {
                 Text("Your Steam library, now on Mac.").font(.system(size: 28, weight: .bold, design: .rounded))
                 Text("Portside will open the official Steam for Windows client in a separate window. Your library, downloads, updates and authentication stay with Steam.").multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 510)
                 if let error = model.errorMessage { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).multilineTextAlignment(.center) }
-                if !model.state.steamInstalled { Text("Steam setup is prepared, but a licensed compatibility runtime and Steam installation are still required for execution.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 500) }
+                if !model.state.steamInstalled { Text("Steam has not finished installing yet. Run setup to prepare the free compatibility components and the official Steam client.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 500) }
                 HStack { Button("Open Steam", action: model.launchSteam).buttonStyle(.borderedProminent).controlSize(.large); Button("Stop Steam", action: model.stopSteam).buttonStyle(.bordered).disabled(!model.supervisor.isRunning) }
                 Spacer()
             }.padding(32)
         }
         .sheet(isPresented: $showSupport) { SupportView(model: model) }
+        .onAppear {
+            if model.state.setupCompleted && model.state.steamInstalled && !model.supervisor.isRunning { model.launchSteam() }
+        }
     }
 }
 

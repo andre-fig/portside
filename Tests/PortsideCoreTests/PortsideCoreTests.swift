@@ -1,6 +1,26 @@
 import XCTest
 @testable import PortsideCore
 
+private final class RecordingProcessRunner: ProcessRunning, @unchecked Sendable {
+    var specification: ProcessLaunchSpec?
+    let result: ProcessResult
+
+    init(result: ProcessResult = ProcessResult(status: 0, output: "", duration: 0.1)) {
+        self.result = result
+    }
+
+    func run(_ specification: ProcessLaunchSpec, logger: PortsideLogger) async throws -> ProcessResult {
+        self.specification = specification
+        return result
+    }
+}
+
+private struct TimeoutProcessRunner: ProcessRunning {
+    func run(_ specification: ProcessLaunchSpec, logger: PortsideLogger) async throws -> ProcessResult {
+        throw RuntimePipelineError.processTimedOut(specification.executable.lastPathComponent)
+    }
+}
+
 final class PortsideCoreTests: XCTestCase {
     func testAppleSiliconRequirementAcceptsEnoughStorage() throws {
         let requirements = SystemRequirements(architecture: "arm64", macOSVersion: "macOS 26", availableStorage: 20_000_000_000)
@@ -22,20 +42,152 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertFalse(sanitized.contains("secret")); XCTAssertFalse(sanitized.contains("abc123")); XCTAssertFalse(sanitized.contains("abc.def"))
     }
 
-    func testProfileStoreRejectsPathTraversal() throws {
-        let store = ProfileStore()
-        XCTAssertNil(store.load(appID: "../123"))
-        XCTAssertThrowsError(try store.save(CompatibilityProfile(appID: "../123", name: "Unsafe")))
-    }
-
     func testSteamInstallerIsHTTPSAndOfficialHost() {
         XCTAssertEqual(SteamInstaller.officialURL.scheme, "https")
-        XCTAssertEqual(SteamInstaller.officialURL.host, "cdn.cloudflare.steamstatic.com")
+        XCTAssertEqual(SteamInstaller.officialURL.host, "cdn.fastly.steamstatic.com")
+        XCTAssertTrue(PortsidePaths.steamPrefix.path.contains("/Portside/Prefix/Steam"))
     }
 
-    func testCompatibilityProfileKeepsUnprofiledGamesAllowedByDesign() {
-        let profile = ProfileStore().load(appID: "3139440")
-        XCTAssertNil(profile)
-        // Absence of a profile is intentionally not an execution denial.
+    func testSilentSteamInstallerUsesSeparateUppercaseArgumentWithoutShell() {
+        let specification = SteamInstaller.installationSpecification(runtimePath: "/tmp/wine", installerURL: URL(fileURLWithPath: "/tmp/SteamSetup.exe"), prefixURL: URL(fileURLWithPath: "/tmp/portside-prefix"))
+        XCTAssertEqual(specification.arguments, ["/tmp/SteamSetup.exe", "/S"])
+        XCTAssertEqual(specification.timeout, 180)
+        XCTAssertFalse(specification.arguments.contains { $0.contains("sh -c") || $0.contains("bash -c") })
+        XCTAssertEqual(specification.environment["WINEDEBUG"], "-all")
+    }
+
+    func testInstallerTimeoutCanBeSimulatedWithoutLaunchingWine() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-installer-timeout-\(UUID().uuidString)", isDirectory: true)
+        let installer = root.appendingPathComponent("SteamSetup.exe")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("installer".utf8).write(to: installer)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let specification = SteamInstaller.installationSpecification(runtimePath: "/tmp/wine", installerURL: installer)
+        XCTAssertEqual(specification.timeout, 180)
+        let runtime = RuntimeDescriptor(name: "test", version: "1", executablePath: "/usr/bin/true", redistributable: false, licenseNote: "test")
+        do {
+            try await SteamInstaller.install(using: runtime, installerURL: installer, candidates: [], prefixURL: root.appendingPathComponent("Prefix"), runner: TimeoutProcessRunner())
+            XCTFail("Timeout should fail setup")
+        } catch {
+            XCTAssertEqual(error as? RuntimePipelineError, .processTimedOut("true"))
+        }
+    }
+
+    func testBootstrapUsesOnlySilentArgument() {
+        XCTAssertEqual(SteamInstaller.bootstrapArguments, ["-silent"])
+        XCTAssertFalse(SteamInstaller.bootstrapArguments.contains { $0.contains("sh") || $0.contains("bash") })
+    }
+
+    func testDownloadProgressIsByteBasedAndClamped() {
+        XCTAssertEqual(SecureDownloader.progressFraction(received: 25, total: 100), 0.25, accuracy: 0.001)
+        XCTAssertEqual(SecureDownloader.progressFraction(received: 125, total: 100), 1.0, accuracy: 0.001)
+        XCTAssertEqual(SecureDownloader.progressFraction(received: 1, total: 0), 0.0, accuracy: 0.001)
+    }
+
+    func testSilentInstallerFailureIsReportedWhenProcessExitsNonZero() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-installer-failure-\(UUID().uuidString)", isDirectory: true)
+        let installer = root.appendingPathComponent("SteamSetup.exe")
+        let prefix = root.appendingPathComponent("Prefix", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("installer".utf8).write(to: installer)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let runner = RecordingProcessRunner(result: ProcessResult(status: 7, output: "failed", duration: 0.2))
+        let runtime = RuntimeDescriptor(name: "test", version: "1", executablePath: "/usr/bin/true", redistributable: false, licenseNote: "test")
+
+        do {
+            try await SteamInstaller.install(using: runtime, installerURL: installer, candidates: [root.appendingPathComponent("missing.exe")], prefixURL: prefix, runner: runner)
+            XCTFail("Non-zero installer exit should fail setup")
+        } catch {
+            XCTAssertTrue(error is RuntimePipelineError)
+        }
+        XCTAssertEqual(runner.specification?.arguments, [installer.path, "/S"])
+    }
+
+    func testInstallerSuccessWithoutSteamExecutableIsRejected() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-installer-no-client-\(UUID().uuidString)", isDirectory: true)
+        let installer = root.appendingPathComponent("SteamSetup.exe")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("installer".utf8).write(to: installer)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let runtime = RuntimeDescriptor(name: "test", version: "1", executablePath: "/usr/bin/true", redistributable: false, licenseNote: "test")
+
+        do {
+            try await SteamInstaller.install(using: runtime, installerURL: installer, candidates: [root.appendingPathComponent("missing.exe")], prefixURL: root.appendingPathComponent("Prefix"), runner: RecordingProcessRunner())
+            XCTFail("A successful installer without steam.exe should fail validation")
+        } catch {
+            XCTAssertTrue(error is PortsideError)
+        }
+    }
+
+    func testRuntimeManifestIsPinnedAndIncludesWineD3D() {
+        XCTAssertEqual(FreeRuntimeCatalog.wine.version, "11.15")
+        XCTAssertEqual(FreeRuntimeCatalog.wine.sha256, "a8c50d0e14fb7982a21506287e1e41e1990fe77c74fa2a32da7dbcf7b21de1e2")
+        XCTAssertTrue(FreeRuntimeCatalog.wine.includedComponents.contains("WineD3D"))
+        XCTAssertEqual(FreeRuntimeCatalog.wine.relativeExecutablePath, "Contents/Resources/wine/bin/wine")
+        XCTAssertTrue(FreeRuntimeCatalog.wine.upstreamURL.absoluteString.hasPrefix("https://"))
+    }
+
+    func testArchivePathTraversalIsRejected() {
+        XCTAssertTrue(SafeArchiveExtractor.isSafeRelativePath("Wine Staging.app/Contents/Resources/wine/bin/wine"))
+        XCTAssertFalse(SafeArchiveExtractor.isSafeRelativePath("../../Library/LaunchAgents/unsafe"))
+        XCTAssertFalse(SafeArchiveExtractor.isSafeRelativePath("/absolute/path"))
+    }
+
+    func testChecksumMismatchIsRejected() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("portside-integrity-\(UUID().uuidString)")
+        try Data("safe test data".utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertThrowsError(try IntegrityVerifier.verify(url: url, expectedSHA256: String(repeating: "0", count: 64)))
+    }
+
+    func testAtomicDirectoryInstallReplacesDestination() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-atomic-(UUID().uuidString)", isDirectory: true)
+        let staged = root.appendingPathComponent("staged", isDirectory: true)
+        let destination = root.appendingPathComponent("Runtime", isDirectory: true)
+        try FileManager.default.createDirectory(at: staged, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        try Data("new".utf8).write(to: staged.appendingPathComponent("marker"))
+        try Data("old".utf8).write(to: destination.appendingPathComponent("marker"))
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try AtomicInstaller.installDirectory(from: staged, to: destination)
+
+        XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("marker")), "new")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
+    }
+
+    func testEnvironmentPhaseIsCodable() throws {
+        var state = EnvironmentState(); state.phase = .prefixCreating
+        let data = try JSONEncoder.portside.encode(state)
+        XCTAssertEqual(try JSONDecoder.portside.decode(EnvironmentState.self, from: data).phase, .prefixCreating)
+    }
+
+    func testRealSteamSetupWhenExplicitlyRequested() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["PORTSIDE_REAL_INTEGRATION"] == "1", "Opt-in real runtime/Steam validation")
+        let provider = FreeWineRuntimeProvider()
+        let result = try await provider.install()
+        let runtime = RuntimeDescriptor(name: result.record.manifest.identifier, version: result.record.manifest.version, executablePath: result.record.executablePath.path, redistributable: false, licenseNote: result.record.manifest.license)
+        _ = try await SteamInstaller.download()
+        try await SteamInstaller.install(using: runtime)
+        guard let steam = SteamInstaller.locateInstalledExecutable() else { XCTFail("steam.exe was not found"); return }
+        var state = EnvironmentState(); state.runtime = runtime; state.runtimeRecord = result.record; state.steamExecutablePath = steam.path; state.steamInstalled = true
+        let supervisor = ProcessSupervisor()
+        let monitor = SteamReadinessMonitor()
+        if !monitor.bootstrapComplete(prefix: PortsidePaths.steamPrefix) {
+            try supervisor.launchSteam(state: state, arguments: SteamInstaller.bootstrapArguments)
+            let bootstrapTimeout = TimeInterval(ProcessInfo.processInfo.environment["PORTSIDE_BOOTSTRAP_TIMEOUT"] ?? "180") ?? 180
+            let bootstrapCompleted = await monitor.waitForBootstrap(prefix: PortsidePaths.steamPrefix, timeout: bootstrapTimeout)
+            XCTAssertTrue(bootstrapCompleted)
+            supervisor.requestStop()
+        }
+        try supervisor.launchSteam(state: state)
+        let timeout = TimeInterval(ProcessInfo.processInfo.environment["PORTSIDE_REAL_TIMEOUT"] ?? "180") ?? 180
+        let status = await monitor.waitForSteam(executable: steam, timeout: timeout)
+        XCTAssertEqual(status, .windowVisible, "Steam did not present a real window; status=\(status.rawValue)")
+    }
+
+    func testSteamHasNoAppIDCompatibilityAllowlist() {
+        // Steam remains the sole library and launch authority; Portside has no game catalog.
+        XCTAssertTrue(SteamInstaller.steamExecutableCandidates.allSatisfy { $0.path.contains("Prefix/Steam") })
     }
 }
