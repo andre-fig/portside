@@ -39,6 +39,7 @@ final class PortsideModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var isWorking = false
     @Published var didExportReport = false
+    @Published var showsInstaller = true
 
     let store = EnvironmentStore()
     let logger = PortsideLogger()
@@ -55,15 +56,18 @@ final class PortsideModel: ObservableObject {
         try? store.prepareDirectories()
         state = store.load()
         requirements = SystemRequirements()
+        showsInstaller = !(state.setupCompleted && state.steamInstalled && hasValidInstalledEnvironment)
     }
 
     func startAutomatically() {
         guard !didStartAutomatically else { return }
         didStartAutomatically = true
         if state.setupCompleted && state.steamInstalled && hasValidInstalledEnvironment {
+            showsInstaller = false
             NSApp.hide(nil)
             launchSteam()
         } else {
+            showsInstaller = true
             setUp()
         }
     }
@@ -77,6 +81,7 @@ final class PortsideModel: ObservableObject {
 
     func setUp() {
         guard !isWorking else { return }
+        showsInstaller = true
         isWorking = true; errorMessage = nil; progress = 0; progressIsIndeterminate = false; setupStep = .checking; message = "Checking your Mac…"
         let started = Date()
         if state.phase == .failedRecoverable { state.retryCount += 1 }
@@ -192,13 +197,16 @@ final class PortsideModel: ObservableObject {
                 state.steamExecutablePath = steamExecutable.path
                 state.phase = .steamLaunching; persistState(); message = "Opening Steam…"
                 try await openSteamAndWait(executable: steamExecutable)
+                showsInstaller = false
                 message = "Ready"; NSApp.hide(nil)
             } catch {
                 if supervisor.isRunning { supervisor.requestStop() }
                 errorMessage = "Could not complete setup."
+                setupStep = .failed
                 state.phase = .failedRecoverable; state.lastError = PortsideLogger.sanitize(error.localizedDescription); state.lastErrorCode = errorCode(for: error); persistState()
                 logger.write(error.localizedDescription, level: .error)
                 diagnostics.capture(error: error, context: diagnosticContext(stage: "launch", errorCode: errorCode(for: error)))
+                showsInstaller = true
                 NSApp.unhide(nil)
             }
             isWorking = false
@@ -309,6 +317,7 @@ final class PortsideModel: ObservableObject {
         }
         let policyResult = try await WinePrefixManager.configureSilentCrashHandling(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix, logger: logger)
         guard policyResult.status == 0 else { throw RuntimePipelineError.processFailed("Wine crash-dialog configuration", policyResult.status) }
+        await stopLegacySteamIfNeeded(runtimePath: runtimePath)
         if await steamMonitor.activateVisibleSteamWindow() {
             state.lastSteamStatus = .windowVisible
             state.phase = .steamReady; state.setupCompleted = true; state.lastError = nil; persistState()
@@ -332,6 +341,14 @@ final class PortsideModel: ObservableObject {
         NSApp.hide(nil)
     }
 
+    private func stopLegacySteamIfNeeded(runtimePath: URL) async {
+        let legacyPrefix = PortsidePaths.legacyPrefixes.appendingPathComponent("Steam", isDirectory: true)
+        let legacyExecutable = legacyPrefix.appendingPathComponent("drive_c/Program Files (x86)/Steam/steam.exe")
+        guard FileManager.default.fileExists(atPath: legacyExecutable.path) else { return }
+        logger.write("Stopping Steam from the legacy prefix before opening the managed prefix")
+        await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: legacyPrefix, forceRemainingProcesses: false)
+    }
+
     private func persistState() {
         state.lastUpdated = Date()
         try? store.save(state)
@@ -345,6 +362,7 @@ final class PortsideModel: ObservableObject {
         diagnostics.breadcrumb("repair_requested", context: diagnosticContext(stage: "repair"))
         state.setupCompleted = false
         state.steamInstalled = SteamInstaller.locateInstalledExecutable() != nil
+        showsInstaller = true
         setupStep = .checking
         setUp()
     }
@@ -388,16 +406,25 @@ struct RootView: View {
     @ObservedObject var model: PortsideModel
 
     var body: some View {
-        VStack(spacing: 0) {
-            InstallerHeader(model: model)
-            Divider()
-            if model.setupStep == .failed { FailureView(model: model) }
-            else { SetupProgressView(model: model) }
+        Group {
+            if model.showsInstaller {
+                VStack(spacing: 0) {
+                    InstallerHeader(model: model)
+                    Divider()
+                    if model.setupStep == .failed { FailureView(model: model) }
+                    else { SetupProgressView(model: model) }
+                }
+            } else {
+                Color.clear
+            }
         }
         .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
-            WindowConfigurator(contentSize: model.setupStep == .failed ? CGSize(width: 620, height: 400) : CGSize(width: 520, height: 320))
+            WindowConfigurator(
+                contentSize: model.setupStep == .failed ? CGSize(width: 620, height: 400) : CGSize(width: 520, height: 320),
+                isVisible: model.showsInstaller
+            )
                 .frame(width: 0, height: 0)
         }
     }
@@ -410,9 +437,9 @@ struct InstallerHeader: View {
         HStack(spacing: 12) {
             PortsideLogoView(size: 34)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Portside Installer")
+                Text(model.state.setupCompleted ? "Portside" : "Portside Installer")
                     .font(.headline)
-                Text(model.setupStep == .failed ? "Setup could not be completed" : "Preparing Steam for your Mac")
+                Text(model.state.setupCompleted && model.setupStep == .failed ? "Steam could not be opened" : "Preparing Steam for your Mac")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -425,26 +452,32 @@ struct InstallerHeader: View {
 
 struct WindowConfigurator: NSViewRepresentable {
     let contentSize: CGSize
+    let isVisible: Bool
 
     func makeNSView(context: Context) -> ConfiguringView { ConfiguringView() }
 
     func updateNSView(_ nsView: ConfiguringView, context: Context) {
-        nsView.apply(contentSize: contentSize)
+        nsView.apply(contentSize: contentSize, isVisible: isVisible)
     }
 
     final class ConfiguringView: NSView {
         private var lastSize: CGSize?
+        private var lastVisibility: Bool?
         private var desiredSize = CGSize(width: 520, height: 300)
+        private var desiredVisibility = true
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            apply(contentSize: desiredSize)
+            apply(contentSize: desiredSize, isVisible: desiredVisibility)
         }
 
-        func apply(contentSize: CGSize) {
+        func apply(contentSize: CGSize, isVisible: Bool) {
             desiredSize = contentSize
-            guard let window, lastSize != contentSize else { return }
+            desiredVisibility = isVisible
+            guard let window else { return }
+            guard lastSize != contentSize || lastVisibility != isVisible else { return }
             lastSize = contentSize
+            lastVisibility = isVisible
             window.title = "Portside Installer"
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
@@ -458,6 +491,7 @@ struct WindowConfigurator: NSViewRepresentable {
             window.setContentSize(contentSize)
             window.minSize = contentSize
             window.maxSize = contentSize
+            if isVisible { window.makeKeyAndOrderFront(nil) } else { window.orderOut(nil) }
         }
     }
 }

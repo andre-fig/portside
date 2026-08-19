@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import CryptoKit
+import Darwin
 
 public enum EnvironmentPhase: String, Codable, CaseIterable, Sendable {
     case requirementsChecking
@@ -485,10 +486,7 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             let snapshot = await processSnapshot()
-            if snapshot.contains("winedbg") {
-                logger.write("Wine debugger detected during Steam bootstrap", level: .error)
-                return false
-            }
+            terminateWineDebuggersIfNeeded(in: snapshot, stage: "Steam bootstrap")
             let markerExists = FileManager.default.fileExists(atPath: marker.path) || FileManager.default.fileExists(atPath: alternateMarker.path)
             if markerExists && (snapshot.contains("steam.exe") || snapshot.contains("steamwebhelper")) {
                 logger.write("Steam bootstrap marker detected")
@@ -505,10 +503,7 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         var loggedUIReadiness = false
         while Date() < deadline {
             let snapshot = await processSnapshot()
-            if snapshot.contains("winedbg") {
-                logger.write("Wine debugger detected while waiting for Steam", level: .error)
-                return .exitedUnexpectedly
-            }
+            terminateWineDebuggersIfNeeded(in: snapshot, stage: "Steam startup")
             if snapshot.contains("steam.exe") || snapshot.contains("steamwebhelper") { sawSteam = true }
             if sawSteam, let processIdentifier = visibleSteamWindowProcessIdentifier(processSnapshot: snapshot) {
                 NSRunningApplication(processIdentifier: processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
@@ -531,18 +526,36 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         return snapshot.contains("steam.exe") || snapshot.contains("steamwebhelper")
     }
 
-    public func stopSteam(runtimeExecutable: URL, prefix: URL) async {
+    public func stopSteam(runtimeExecutable: URL, prefix: URL, forceRemainingProcesses: Bool = true) async {
         let wineserver = runtimeExecutable.deletingLastPathComponent().appendingPathComponent("wineserver")
         guard FileManager.default.isExecutableFile(atPath: wineserver.path) else {
             logger.write("Could not locate wineserver while stopping Steam", level: .error)
             return
         }
-        _ = try? await DirectProcess.run(
+        let result = try? await DirectProcess.run(
             executable: wineserver,
             arguments: ["-k"],
             environment: ["WINEPREFIX": prefix.path, "WINEDEBUG": WineRuntimePolicy.debug],
             logger: logger
         )
+        guard forceRemainingProcesses else { return }
+        let processStillRunning = await isSteamProcessRunning()
+        if result?.status != 0 || processStillRunning {
+            let processIDs = await steamProcessIDs()
+            for processID in processIDs { _ = Darwin.kill(processID, SIGTERM) }
+            if !processIDs.isEmpty {
+                logger.write("Terminated \(processIDs.count) remaining Steam process(es)")
+            } else {
+                for pattern in ["steamwebhelper.exe", "steam.exe"] {
+                    _ = try? await DirectProcess.run(
+                        executable: URL(fileURLWithPath: "/usr/bin/pkill"),
+                        arguments: ["-TERM", "-f", pattern],
+                        logger: logger
+                    )
+                }
+                logger.write("Requested termination of remaining Steam processes by executable name")
+            }
+        }
     }
 
     public func waitForSteamToStop(timeout: TimeInterval = 20) async -> Bool {
@@ -574,6 +587,29 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         return result?.output.lowercased() ?? ""
     }
 
+    private func terminateWineDebuggersIfNeeded(in snapshot: String, stage: String) {
+        let processIDs = snapshot.split(whereSeparator: \.isNewline).compactMap { line -> pid_t? in
+            let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
+            guard fields.count == 3, let processID = Int32(String(fields[0])) else { return nil }
+            let processArguments = String(fields[1...].joined(separator: " "))
+            return processArguments.contains("winedbg") ? pid_t(processID) : nil
+        }
+        guard !processIDs.isEmpty else { return }
+        for processID in processIDs { _ = Darwin.kill(processID, SIGTERM) }
+        logger.write("Terminated \(processIDs.count) Wine debugger process(es) during \(stage)", level: .error)
+    }
+
+    private func steamProcessIDs() async -> [pid_t] {
+        let snapshot = await processSnapshot()
+        return snapshot.split(whereSeparator: \.isNewline).compactMap { line in
+            let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
+            guard fields.count == 3, let processID = Int32(String(fields[0])) else { return nil }
+            let processArguments = String(fields[1...].joined(separator: " "))
+            guard processArguments.contains("steam.exe") || processArguments.contains("steamwebhelper") else { return nil }
+            return pid_t(processID)
+        }
+    }
+
     public func activateVisibleSteamWindow() async -> Bool {
         let snapshot = await processSnapshot()
         guard let processIdentifier = visibleSteamWindowProcessIdentifier(processSnapshot: snapshot) else { return false }
@@ -582,12 +618,17 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
     }
 
     private func visibleSteamWindowProcessIdentifier(processSnapshot: String) -> pid_t? {
-        guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
+        guard let windows = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else { return nil }
         return windows.compactMap { window -> pid_t? in
             let owner = (window[kCGWindowOwnerName as String] as? String)?.lowercased() ?? ""
             let name = (window[kCGWindowName as String] as? String)?.lowercased() ?? ""
             let steamTitle = ["steam", "login", "sign in", "update", "store", "library"].contains { name.contains($0) }
             guard let ownerPID = (window[kCGWindowOwnerPID as String] as? NSNumber).map({ pid_t($0.intValue) }) else { return nil }
+            let isOnscreen = (window[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? false
+            let bounds = window[kCGWindowBounds as String] as? [String: Any]
+            let width = (bounds?["Width"] as? NSNumber)?.doubleValue ?? 0
+            let height = (bounds?["Height"] as? NSNumber)?.doubleValue ?? 0
+            guard isOnscreen || (width >= 200 && height >= 120) else { return nil }
             let isSteamProcess = processSnapshot.split(whereSeparator: \.isNewline).contains { line in
                 let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
                 guard fields.count == 3, Int32(String(fields[0])) == Int32(ownerPID) else { return false }
