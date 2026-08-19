@@ -263,10 +263,12 @@ public struct SystemProcessRunner: ProcessRunning, Sendable {
 
 public enum SafeArchiveExtractor {
     public static func extractTarXZ(_ archive: URL, to directory: URL, logger: PortsideLogger = PortsideLogger()) async throws {
-        let list = try await DirectProcess.run(executable: URL(fileURLWithPath: "/usr/bin/tar"), arguments: ["-tf", archive.path], logger: logger)
+        let list = try await DirectProcess.run(executable: URL(fileURLWithPath: "/usr/bin/tar"), arguments: ["-tvf", archive.path], logger: logger)
         guard list.status == 0 else { throw RuntimePipelineError.archiveExtractionFailed(list.output) }
         for entry in list.output.split(separator: "\n", omittingEmptySubsequences: true).map(String.init) {
-            guard isSafeRelativePath(entry) else { throw RuntimePipelineError.unexpectedArchiveEntry(entry) }
+            guard !entry.hasPrefix("l") && !entry.hasPrefix("h") else { throw RuntimePipelineError.unexpectedArchiveEntry(entry) }
+            let path = entry.split(separator: " ", maxSplits: 8, omittingEmptySubsequences: true).last.map(String.init) ?? entry
+            guard isSafeRelativePath(path) else { throw RuntimePipelineError.unexpectedArchiveEntry(path) }
         }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let result = try await DirectProcess.run(executable: URL(fileURLWithPath: "/usr/bin/tar"), arguments: ["-xJf", archive.path, "-C", directory.path], logger: logger)
@@ -292,16 +294,19 @@ public enum RosettaManager {
     }
 
     public static func install() async throws -> ProcessResult {
-        try await DirectProcess.run(executable: URL(fileURLWithPath: "/usr/sbin/softwareupdate"), arguments: ["--install-rosetta", "--agree-to-license"])
+        try await DirectProcess.run(executable: URL(fileURLWithPath: "/usr/sbin/softwareupdate"), arguments: ["--install-rosetta"])
     }
 }
 
 public enum GStreamerManager {
-    public static var frameworkURL: URL {
-        let privateURL = PortsidePaths.runtime.appendingPathComponent("Dependencies/GStreamer.framework")
-        return FileManager.default.fileExists(atPath: privateURL.path) ? privateURL : URL(fileURLWithPath: "/Library/Frameworks/GStreamer.framework")
+    public static var privateFrameworkURL: URL {
+        PortsidePaths.runtime.appendingPathComponent("Dependencies/GStreamer.framework")
     }
-    public static var isInstalled: Bool { FileManager.default.fileExists(atPath: frameworkURL.appendingPathComponent("Versions/1.0/lib/libgstreamer-1.0.0.dylib").path) }
+
+    public static var frameworkURL: URL {
+        FileManager.default.fileExists(atPath: privateFrameworkURL.path) ? privateFrameworkURL : URL(fileURLWithPath: "/Library/Frameworks/GStreamer.framework")
+    }
+    public static var isInstalled: Bool { FileManager.default.fileExists(atPath: privateFrameworkURL.appendingPathComponent("Versions/1.0/lib/libgstreamer-1.0.0.dylib").path) }
 
     public static func install(using downloader: SecureDownloader = SecureDownloader(), logger: PortsideLogger = PortsideLogger()) async throws {
         let pkgURL = PortsidePaths.downloads.appendingPathComponent("gstreamer-\(FreeRuntimeCatalog.gstreamer.version).pkg")
@@ -309,7 +314,7 @@ public enum GStreamerManager {
             _ = try await downloader.download(from: FreeRuntimeCatalog.gstreamer.upstreamURL, to: pkgURL)
         }
         do {
-            try IntegrityVerifier.verify(url: pkgURL, expectedSHA256: FreeRuntimeCatalog.gstreamer.sha256)
+            try IntegrityVerifier.verify(url: pkgURL, expectedSHA256: FreeRuntimeCatalog.gstreamer.sha256, expectedSize: FreeRuntimeCatalog.gstreamer.expectedSize)
         } catch {
             try? FileManager.default.removeItem(at: pkgURL)
             throw error
@@ -318,7 +323,7 @@ public enum GStreamerManager {
         defer { try? FileManager.default.removeItem(at: temporary) }
         let result = try await DirectProcess.run(executable: URL(fileURLWithPath: "/usr/sbin/pkgutil"), arguments: ["--expand-full", pkgURL.path, temporary.path], logger: logger)
         guard result.status == 0 else { throw RuntimePipelineError.gstreamerInstallFailed(result.status, result.output) }
-        let destination = PortsidePaths.runtime.appendingPathComponent("Dependencies/GStreamer.framework", isDirectory: true)
+        let destination = privateFrameworkURL
         try? FileManager.default.removeItem(at: destination)
         let versionedRoot = destination.appendingPathComponent("Versions/1.0", isDirectory: true)
         try FileManager.default.createDirectory(at: versionedRoot, withIntermediateDirectories: true)

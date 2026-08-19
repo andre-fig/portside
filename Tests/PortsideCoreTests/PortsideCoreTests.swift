@@ -38,8 +38,29 @@ final class PortsideCoreTests: XCTestCase {
     }
 
     func testSanitizerRedactsSecrets() {
-        let sanitized = PortsideLogger.sanitize("password=secret token:abc123 bearer abc.def")
+        let sanitized = PortsideLogger.sanitize("password=secret token:abc123 bearer abc.def email user@example.com steam 76561198012345678 path \(NSHomeDirectory())?token=secret")
         XCTAssertFalse(sanitized.contains("secret")); XCTAssertFalse(sanitized.contains("abc123")); XCTAssertFalse(sanitized.contains("abc.def"))
+        XCTAssertFalse(sanitized.contains("user@example.com")); XCTAssertFalse(sanitized.contains("76561198012345678")); XCTAssertFalse(sanitized.contains(NSHomeDirectory()))
+    }
+
+    func testDiagnosticContextContainsOnlyTechnicalFields() {
+        let context = DiagnosticContext(stage: "steam_update", errorCode: "steam_update_failed", macOSVersion: "macOS 26", architecture: "arm64", runtimeVersion: "11.15", processType: "steam-bootstrap", exitCode: 7, duration: 2.5, retryCount: 1)
+        XCTAssertEqual(context.fields["error_code"], "steam_update_failed")
+        XCTAssertEqual(context.fields["architecture"], "arm64")
+        XCTAssertFalse(context.fields.keys.contains("user"))
+        XCTAssertFalse(context.fields.keys.contains("email"))
+        XCTAssertFalse(context.fields.keys.contains("steam_id"))
+    }
+
+    func testDownloaderRejectsUnapprovedHostBeforeNetworkAccess() async {
+        let downloader = SecureDownloader(allowedHosts: ["cdn.fastly.steamstatic.com"])
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent("portside-blocked-download-\(UUID().uuidString)")
+        do {
+            _ = try await downloader.download(from: URL(string: "https://example.com/component.zip")!, to: destination)
+            XCTFail("Unapproved download origin should be rejected")
+        } catch {
+            XCTAssertEqual(error as? PortsideError, .steamInstallerUnavailable)
+        }
     }
 
     func testSteamInstallerIsHTTPSAndOfficialHost() {

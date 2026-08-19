@@ -24,11 +24,12 @@ The package targets macOS 13+ and builds the current architecture by default. `p
 - The installer is invoked with a fixed argument list and the expected Steam executable is verified.
 - The Windows installer is run silently with the separate, case-sensitive `/S` argument; its output is captured internally and never shown in the Portside UI.
 - Steam bootstrap is attempted with `-silent`, validated using its installed-client marker, and followed by a normal Steam launch for login.
+- The first launch starts setup automatically in a single native progress window; after a valid installation, later launches open Steam directly and hide Portside.
 - Wine crash dialogs are disabled in the private prefix and `winedbg.exe` is disabled for Portside-owned processes; failures are logged and surfaced as recoverable Portside errors.
-- Sentry starts with the app and reports handled setup and launch failures with tracing enabled.
+- Sentry starts invisibly through `DiagnosticsService`; Release events use sanitized technical context only, with PII and tracing disabled by default.
 - Download interruptions leave a `.part` file and resume with HTTP Range requests.
 - Archive entries are preflighted for absolute paths and `..` traversal before extraction.
-- Support includes environment checks, repair guidance, diagnostic export, storage access, cache clearing, and destructive reset confirmation.
+- Recoverable failures provide retry, repair, sanitized details, and an explicit technical diagnostic submission.
 - Portside has no game catalog or App ID allowlist; Steam remains responsible for the library and game installation.
 
-The real Steam/game validation matrix still requires completing the first setup on this Mac. See `docs/VALIDATION.md`.
+The real Steam/game validation matrix still requires completing the first zero-click setup on an interactive GUI session. See `docs/VALIDATION.md`.

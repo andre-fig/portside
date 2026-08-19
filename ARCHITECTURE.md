@@ -9,13 +9,14 @@
 - `SecureDownloader` accepts HTTPS URLs only, downloads to a private destination, and records SHA-256.
 - `SteamInstaller` owns the Valve installer URL and invokes it only through a discovered runtime, never through a shell.
 - `FreeWineRuntimeProvider` is the concrete provider: pinned Wine 11.15, SHA-256 verification, resumable download, safe tar extraction, user-local GStreamer extraction, Rosetta detection, idempotent prefix initialization, and runtime record persistence.
-- `RosettaManager` validates and, only after an explicit user action, requests Apple’s official Rosetta installation.
+- `RosettaManager` validates and requests Apple’s official Rosetta installation automatically when required; any protected macOS confirmation remains owned by macOS.
 - `SteamReadinessMonitor` combines process snapshots with public CoreGraphics window inspection; a started process is not treated as a ready Steam session.
 - `ProcessSupervisor` owns the Steam process lifecycle.
 - `WinePrefixManager` writes `ShowCrashDialog=0` to the Portside prefix and applies a `winedbg.exe=d` process policy. Supervisor shutdown targets only the Portside prefix through its exact `wineserver` path.
-- `DiagnosticReport` writes a sanitized report without credentials or tokens.
+- `DiagnosticsService` is the domain boundary for invisible Sentry monitoring, stable error codes, high-level breadcrumbs, and manual sanitized reports. The SDK adapter is isolated in the app target.
+- `DiagnosticReport` writes a compact sanitized report without credentials or tokens.
 
-The SwiftUI target owns onboarding, progress, dashboard, and Support. The Steam UI remains the Steam client. DXMT is not installed because its current upstream repository reports no asserted license; WineD3D, which ships with Wine, is used for Direct3D 9/10/11.
+The SwiftUI target owns the single automatic progress/failure window. It has no onboarding, dashboard, settings, or consent screen. The Steam UI remains the Steam client. DXMT is not installed because its current upstream repository reports no asserted license; WineD3D, which ships with Wine, is used for Direct3D 9/10/11.
 
 ## Security decisions
 
@@ -23,7 +24,7 @@ All remote downloads are HTTPS and the installer host is fixed. Process launch u
 
 ## Lifecycle
 
-1. Load persisted state.
+1. Load persisted state and automatically choose direct launch or resumable setup.
 2. Validate machine and storage.
 3. Create the private workspace.
 4. Verify/install GStreamer locally and download Wine 11.15.
@@ -35,4 +36,4 @@ All remote downloads are HTTPS and the installer host is fixed. Process launch u
 10. Bootstrap Steam with `-silent` and wait for the installed-client marker.
 11. Start Steam normally and wait for its window.
 
-No process-start event is treated as a compatibility result. Actual game classifications require a real test report.
+No process-start event is treated as a compatibility result. Actual game classifications require a real test report. Release Sentry uses no default PII, no user object, no replay, no network breadcrumbs, and no tracing sample by default; optional dSYM upload occurs only outside the app when `SENTRY_AUTH_TOKEN` is supplied to the packaging environment.

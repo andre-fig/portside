@@ -4,7 +4,13 @@ The current environment is an Apple silicon Mac (`arm64`, Apple M4 Pro reported 
 
 ## Automated status
 
-`swift test` covers architecture/storage checks, secret redaction, HTTPS installer origin, pinned manifest metadata, checksum rejection, safe archive paths, atomic installation, singular prefix layout, Codable setup phases, byte-based progress, silent argument construction, simulated non-zero installer exits, missing `steam.exe` validation, and the absence of a game allowlist. The opt-in real test uses the actual runtime only when `PORTSIDE_REAL_INTEGRATION=1` is set.
+`swift test` covers architecture/storage checks, secret and personal-data redaction, approved HTTPS origins, pinned manifest metadata, checksum rejection, safe archive paths, atomic installation, singular prefix layout, Codable setup phases, byte-based progress, silent argument construction, simulated non-zero installer exits, missing `steam.exe` validation, technical diagnostics context, and the absence of a game allowlist. The opt-in real test uses the actual runtime only when `PORTSIDE_REAL_INTEGRATION=1` is set.
+
+## Automatic launch and diagnostics
+
+The app starts setup from `PortsideApp.init` without an onboarding action. A valid persisted environment goes directly to the normal Steam launch path; an incomplete environment enters the single progress window and resumes idempotently. Failure is the only state with recovery actions.
+
+`DiagnosticsService` keeps Sentry out of the core pipeline. Release configuration uses the supplied DSN, `sendDefaultPii=false`, zero tracing sample rate, no network breadcrumbs, no replay, no user object, a `beforeSend` allowlist, and a 30-event cache limit. Debug builds intentionally use no DSN. Manual diagnostics require an explicit confirmation and attach only a capped sanitized report. `scripts/package_app.sh` creates `build/Portside.app.dSYM`; upload is optional and requires an external `sentry-cli` plus `SENTRY_AUTH_TOKEN`.
 
 ## Runtime pipeline
 

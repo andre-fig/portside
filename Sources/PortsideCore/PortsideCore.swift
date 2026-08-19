@@ -114,6 +114,70 @@ public struct EnvironmentState: Codable, Equatable, Sendable {
     public init() {}
 }
 
+public struct DiagnosticContext: Sendable, Equatable {
+    public var stage: String?
+    public var errorCode: String?
+    public var portsideVersion: String
+    public var portsideBuild: String
+    public var macOSVersion: String?
+    public var architecture: String?
+    public var runtimeName: String?
+    public var runtimeVersion: String?
+    public var graphicsBackend: String?
+    public var processType: String?
+    public var exitCode: Int32?
+    public var duration: TimeInterval?
+    public var retryCount: Int
+
+    public init(
+        stage: String? = nil,
+        errorCode: String? = nil,
+        portsideVersion: String = "0.1.0",
+        portsideBuild: String = "1",
+        macOSVersion: String? = nil,
+        architecture: String? = nil,
+        runtimeName: String? = nil,
+        runtimeVersion: String? = nil,
+        graphicsBackend: String? = nil,
+        processType: String? = nil,
+        exitCode: Int32? = nil,
+        duration: TimeInterval? = nil,
+        retryCount: Int = 0
+    ) {
+        self.stage = stage; self.errorCode = errorCode; self.portsideVersion = portsideVersion; self.portsideBuild = portsideBuild
+        self.macOSVersion = macOSVersion; self.architecture = architecture; self.runtimeName = runtimeName; self.runtimeVersion = runtimeVersion
+        self.graphicsBackend = graphicsBackend; self.processType = processType; self.exitCode = exitCode; self.duration = duration; self.retryCount = retryCount
+    }
+
+    public var fields: [String: String] {
+        var values: [String: String] = [
+            "portside_version": portsideVersion,
+            "portside_build": portsideBuild,
+            "retry_count": String(retryCount)
+        ]
+        let optionalValues: [(String, String?)] = [
+            ("stage", stage), ("error_code", errorCode), ("macos_version", macOSVersion), ("architecture", architecture),
+            ("runtime_name", runtimeName), ("runtime_version", runtimeVersion), ("graphics_backend", graphicsBackend),
+            ("process_type", processType), ("exit_code", exitCode.map(String.init)), ("duration", duration.map { String(format: "%.2f", $0) })
+        ]
+        for (key, value) in optionalValues where value != nil { values[key] = value! }
+        return values
+    }
+}
+
+public protocol DiagnosticsService: Sendable {
+    func breadcrumb(_ name: String, context: DiagnosticContext)
+    func capture(error: Error, context: DiagnosticContext)
+    func submitManualDiagnostic(report: Data, context: DiagnosticContext) -> String?
+}
+
+public struct NoopDiagnosticsService: DiagnosticsService {
+    public init() {}
+    public func breadcrumb(_ name: String, context: DiagnosticContext) {}
+    public func capture(error: Error, context: DiagnosticContext) {}
+    public func submitManualDiagnostic(report: Data, context: DiagnosticContext) -> String? { nil }
+}
+
 public final class EnvironmentStore: @unchecked Sendable {
     private let fileManager: FileManager
     private let stateURL: URL
@@ -163,7 +227,8 @@ public final class PortsideLogger: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         try? fileManager.createDirectory(at: PortsidePaths.logs, withIntermediateDirectories: true)
         let timestamp = ISO8601DateFormatter().string(from: Date())
-        let line = "[\(timestamp)] [\(level.rawValue.uppercased())] \(Self.sanitize(message))\n"
+        let sanitized = String(Self.sanitize(message).prefix(8_000))
+        let line = "[\(timestamp)] [\(level.rawValue.uppercased())] \(sanitized)\n"
         if let data = line.data(using: .utf8) {
             if fileManager.fileExists(atPath: logURL.path), let handle = try? FileHandle(forWritingTo: logURL) {
                 _ = try? handle.seekToEnd(); _ = try? handle.write(contentsOf: data); _ = try? handle.close()
@@ -172,10 +237,17 @@ public final class PortsideLogger: @unchecked Sendable {
         rotateIfNeeded()
     }
 
-    public func read() -> String { (try? String(contentsOf: logURL, encoding: .utf8)) ?? "No Portside log entries yet." }
+    public func read() -> String {
+        guard let contents = try? String(contentsOf: logURL, encoding: .utf8) else { return "No Portside log entries yet." }
+        return String(Self.sanitize(contents).suffix(128_000))
+    }
 
     public static func sanitize(_ value: String) -> String {
         var result = value
+        result = result.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        result = result.replacingOccurrences(of: #"(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"#, with: "[EMAIL_REDACTED]", options: .regularExpression)
+        result = result.replacingOccurrences(of: #"(?<!\d)\d{17}(?!\d)"#, with: "[STEAM_ID_REDACTED]", options: .regularExpression)
+        result = result.replacingOccurrences(of: #"(?i)(https?://[^\s?]+)(\?[^\s]+)?"#, with: "$1?[REDACTED_QUERY]", options: .regularExpression)
         result = result.replacingOccurrences(
             of: #"(?i)(password|passwd|token|cookie|authorization|secret)\s*[:=]\s*[^\s,;]+"#,
             with: "$1=[REDACTED]",
@@ -186,12 +258,13 @@ public final class PortsideLogger: @unchecked Sendable {
             with: "bearer [REDACTED]",
             options: .regularExpression
         )
+        result = result.replacingOccurrences(of: #"(?i)(WINEPREFIX|HOME|USER|USERNAME|SENTRY_AUTH_TOKEN)\s*=\s*[^\s,;]+"#, with: "$1=[REDACTED]", options: .regularExpression)
         return result
     }
 
     private func rotateIfNeeded() {
         guard let attributes = try? fileManager.attributesOfItem(atPath: logURL.path),
-              let size = attributes[.size] as? NSNumber, size.int64Value > 2_000_000 else { return }
+              let size = attributes[.size] as? NSNumber, size.int64Value > 512_000 else { return }
         let rotated = PortsidePaths.logs.appendingPathComponent("portside.log.1")
         try? fileManager.removeItem(at: rotated)
         try? fileManager.moveItem(at: logURL, to: rotated)
@@ -209,10 +282,12 @@ public final class SecureDownloader: NSObject, @unchecked Sendable {
     private let session: URLSession
     private let fileManager: FileManager
     private let logger: PortsideLogger
+    private let allowedHosts: Set<String>
 
-    public init(fileManager: FileManager = .default, logger: PortsideLogger = PortsideLogger()) {
+    public init(fileManager: FileManager = .default, logger: PortsideLogger = PortsideLogger(), allowedHosts: Set<String> = ["github.com", "gstreamer.freedesktop.org", "cdn.fastly.steamstatic.com"]) {
         self.fileManager = fileManager
         self.logger = logger
+        self.allowedHosts = allowedHosts
         let configuration = URLSessionConfiguration.ephemeral
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         self.session = URLSession(configuration: configuration, delegate: nil, delegateQueue: nil)
@@ -225,7 +300,7 @@ public final class SecureDownloader: NSObject, @unchecked Sendable {
     }
 
     public func download(from source: URL, to destination: URL, progress: ProgressHandler? = nil) async throws -> DownloadResult {
-        guard source.scheme == "https", source.host != nil else { throw PortsideError.steamInstallerUnavailable }
+        guard source.scheme == "https", let host = source.host, allowedHosts.contains(host.lowercased()) else { throw PortsideError.steamInstallerUnavailable }
         var request = URLRequest(url: source)
         request.timeoutInterval = 120
         let partialURL = destination.appendingPathExtension("part")
@@ -369,7 +444,7 @@ public final class ProcessSupervisor: @unchecked Sendable {
         let storedSteamExecutable = state.steamExecutablePath.map(URL.init(fileURLWithPath:))
         let steamExecutable = (storedSteamExecutable.flatMap { FileManager.default.isExecutableFile(atPath: $0.path) ? $0 : nil }) ?? SteamInstaller.locateInstalledExecutable()
         guard let steamExecutable else {
-            throw PortsideError.processLaunchFailed("Steam is not installed yet. Run Set Up Portside first.")
+            throw PortsideError.processLaunchFailed("Steam is not installed yet.")
         }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: runtimePath)
@@ -389,7 +464,7 @@ public final class ProcessSupervisor: @unchecked Sendable {
         task.standardOutput = FileHandle.nullDevice
         task.standardError = FileHandle.nullDevice
         do { try task.run(); process = task; logger.write("Steam process started") }
-        catch { throw PortsideError.processLaunchFailed("Steam could not be started. See Support for diagnostics.") }
+        catch { throw PortsideError.processLaunchFailed("Steam could not be started.") }
     }
 
     public func requestStop() {

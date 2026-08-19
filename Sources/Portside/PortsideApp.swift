@@ -1,19 +1,16 @@
 import SwiftUI
 import AppKit
 import PortsideCore
-import Sentry
 
 @main
 struct PortsideApp: App {
-    @StateObject private var model = PortsideModel()
+    @StateObject private var model: PortsideModel
 
     init() {
-        SentrySDK.start { options in
-            options.dsn = "https://5aa6a3d7a22bd8bb4b718bc2d6cfaac7@o4511935178080256.ingest.us.sentry.io/4511935182405632"
-            options.debug = false
-            options.sendDefaultPii = true
-            options.tracesSampleRate = 1.0
-        }
+        let diagnostics = SentryDiagnosticsService()
+        let model = PortsideModel(diagnostics: diagnostics)
+        _model = StateObject(wrappedValue: model)
+        Task { @MainActor in model.startAutomatically() }
     }
 
     var body: some Scene {
@@ -32,8 +29,9 @@ struct PortsideApp: App {
 final class PortsideModel: ObservableObject {
     @Published var state: EnvironmentState
     @Published var requirements: SystemRequirements
-    @Published var setupStep: SetupStep = .welcome
+    @Published var setupStep: SetupStep = .checking
     @Published var progress: Double = 0
+    @Published var progressIsIndeterminate = false
     @Published var message = ""
     @Published var errorMessage: String?
     @Published var isWorking = false
@@ -44,35 +42,57 @@ final class PortsideModel: ObservableObject {
     let runtimeProvider = FreeWineRuntimeProvider()
     let supervisor = ProcessSupervisor()
     let steamMonitor = SteamReadinessMonitor()
+    let diagnostics: DiagnosticsService
+    private var didStartAutomatically = false
 
-    enum SetupStep: String { case welcome, checking, rosettaRequired, preparing, downloading, installing, ready, failed }
+    enum SetupStep: String { case checking, rosettaRequired, preparing, downloading, installing, ready, failed }
 
-    init() {
+    init(diagnostics: DiagnosticsService = NoopDiagnosticsService()) {
+        self.diagnostics = diagnostics
         try? store.prepareDirectories()
         state = store.load()
         requirements = SystemRequirements()
-        if state.setupCompleted && state.steamInstalled && (state.runtimeRecord != nil || state.runtime != nil) {
-            setupStep = .ready
+    }
+
+    func startAutomatically() {
+        guard !didStartAutomatically else { return }
+        didStartAutomatically = true
+        if state.setupCompleted && state.steamInstalled && hasValidInstalledEnvironment {
+            NSApp.hide(nil)
+            launchSteam()
+        } else {
+            setUp()
         }
+    }
+
+    private var hasValidInstalledEnvironment: Bool {
+        let runtimePath = state.runtimeRecord?.executablePath.path ?? state.runtime?.executablePath ?? ""
+        return FileManager.default.isExecutableFile(atPath: runtimePath)
+            && FileManager.default.fileExists(atPath: PortsidePaths.steamPrefix.appendingPathComponent("system.reg").path)
+            && SteamInstaller.locateInstalledExecutable() != nil
     }
 
     func setUp() {
         guard !isWorking else { return }
-        isWorking = true; errorMessage = nil; progress = 0; setupStep = .checking; message = "Preparando o Portside…"
+        isWorking = true; errorMessage = nil; progress = 0; progressIsIndeterminate = false; setupStep = .checking; message = "Verificando o Mac…"
         let started = Date()
         if state.phase == .failedRecoverable { state.retryCount += 1 }
         state.lastError = nil; state.lastErrorCode = nil; state.lastProcessType = nil; state.lastExitCode = nil
         Task {
             do {
+                diagnostics.breadcrumb("setup_started", context: diagnosticContext(stage: "checking_requirements"))
                 logger.write("Starting Portside setup")
                 updateProgress(0, phase: .requirementsChecking)
                 try requirements.validate()
-                let rosetta = await RosettaManager.status()
-                guard rosetta.installed else {
-                    state.phase = .rosettaRequired; persistState(); setupStep = .rosettaRequired; message = "Rosetta is required and is provided by macOS."; isWorking = false; return
+                diagnostics.breadcrumb("requirements_checked", context: diagnosticContext(stage: "checking_requirements"))
+                if !(await RosettaManager.status()).installed {
+                    state.phase = .rosettaRequired; persistState(); setupStep = .rosettaRequired; message = "Preparando o Rosetta…"; progressIsIndeterminate = true
+                    let result = try await RosettaManager.install()
+                    guard result.status == 0, (await RosettaManager.status()).installed else { throw RuntimePipelineError.rosettaUnavailable }
                 }
                 setupStep = .preparing; updateProgress(0.08, phase: .graphicsInstalling)
                 try store.prepareDirectories()
+                diagnostics.breadcrumb("runtime_download_started", context: diagnosticContext(stage: "runtime"))
                 let result = try await runtimeProvider.install { [weak self] value, phase in
                     Task { @MainActor in
                         self?.updateProgress(value, phase: phase)
@@ -80,9 +100,12 @@ final class PortsideModel: ObservableObject {
                 }
                 state.runtimeRecord = result.record
                 state.runtime = RuntimeDescriptor(name: result.record.manifest.identifier, version: result.record.manifest.version, executablePath: result.record.executablePath.path, redistributable: false, licenseNote: result.record.manifest.license)
+                diagnostics.breadcrumb("runtime_verified", context: diagnosticContext(stage: "runtime", runtimeVersion: result.record.manifest.version))
+                diagnostics.breadcrumb("prefix_created", context: diagnosticContext(stage: "prefix", runtimeVersion: result.record.manifest.version))
                 let existingSteam = SteamInstaller.locateInstalledExecutable()
                 if existingSteam == nil {
                     setupStep = .downloading
+                    diagnostics.breadcrumb("steam_install_started", context: diagnosticContext(stage: "steam_download"))
                     _ = try await SteamInstaller.download { [weak self] value in
                         Task { @MainActor in self?.updateProgress(0.72 + (value * 0.08), phase: .steamDownloading) }
                     }
@@ -99,6 +122,7 @@ final class PortsideModel: ObservableObject {
                 state.steamInstalled = true
                 state.setupCompleted = false
                 updateProgress(0.88, phase: .steamUpdating)
+                diagnostics.breadcrumb("steam_update_started", context: diagnosticContext(stage: "steam_update"))
                 if !steamMonitor.bootstrapComplete(prefix: PortsidePaths.steamPrefix) {
                     state.lastProcessType = "steam-bootstrap"
                     try supervisor.launchSteam(state: state, arguments: SteamInstaller.bootstrapArguments)
@@ -114,9 +138,8 @@ final class PortsideModel: ObservableObject {
                 logger.write("Setup completed")
             } catch {
                 if supervisor.isRunning { supervisor.requestStop() }
-                SentrySDK.capture(error: error)
                 state.phase = .failedRecoverable
-                state.lastError = error.localizedDescription
+                state.lastError = PortsideLogger.sanitize(error.localizedDescription)
                 state.lastErrorCode = errorCode(for: error)
                 if let pipelineError = error as? RuntimePipelineError, case .processFailed(_, let exitCode) = pipelineError {
                     state.lastExitCode = exitCode
@@ -124,9 +147,10 @@ final class PortsideModel: ObservableObject {
                 state.lastSetupDuration = Date().timeIntervalSince(started)
                 persistState()
                 setupStep = .failed
-                errorMessage = error.localizedDescription
+                errorMessage = "Não foi possível concluir a preparação."
                 message = "Não foi possível concluir a preparação."
                 logger.write(error.localizedDescription, level: .error)
+                diagnostics.capture(error: error, context: diagnosticContext(stage: "failed", errorCode: errorCode(for: error), duration: Date().timeIntervalSince(started)))
             }
             isWorking = false
         }
@@ -141,8 +165,8 @@ final class PortsideModel: ObservableObject {
                 guard result.status == 0, (await RosettaManager.status()).installed else { throw RuntimePipelineError.rosettaUnavailable }
                 setupStep = .checking; isWorking = false; setUp()
             } catch {
-                isWorking = false; setupStep = .failed; errorMessage = "macOS could not install Rosetta. Use Software Update, then try again."; logger.write(error.localizedDescription, level: .error)
-                SentrySDK.capture(error: error)
+                isWorking = false; setupStep = .failed; errorMessage = "Não foi possível concluir a preparação."; logger.write(error.localizedDescription, level: .error)
+                diagnostics.capture(error: error, context: diagnosticContext(stage: "rosetta", errorCode: errorCode(for: error)))
             }
         }
     }
@@ -156,7 +180,7 @@ final class PortsideModel: ObservableObject {
                 guard (await RosettaManager.status()).installed else { throw RuntimePipelineError.rosettaUnavailable }
                 let storedSteamExecutable = state.steamExecutablePath.map(URL.init(fileURLWithPath:))
                 guard let steamExecutable = (storedSteamExecutable.flatMap { FileManager.default.isExecutableFile(atPath: $0.path) ? $0 : nil }) ?? SteamInstaller.locateInstalledExecutable() else {
-                    throw PortsideError.processLaunchFailed("Steam is not installed yet. Run Set Up Portside first.")
+                    throw PortsideError.processLaunchFailed("Steam is not installed yet.")
                 }
                 guard FileManager.default.isExecutableFile(atPath: state.runtimeRecord?.executablePath.path ?? state.runtime?.executablePath ?? ""),
                       FileManager.default.fileExists(atPath: PortsidePaths.steamPrefix.appendingPathComponent("system.reg").path) else {
@@ -168,10 +192,10 @@ final class PortsideModel: ObservableObject {
                 message = "Tudo pronto"; NSApp.hide(nil)
             } catch {
                 if supervisor.isRunning { supervisor.requestStop() }
-                SentrySDK.capture(error: error)
-                errorMessage = error.localizedDescription
-                state.phase = .failedRecoverable; state.lastError = error.localizedDescription; state.lastErrorCode = errorCode(for: error); persistState()
+                errorMessage = "Não foi possível concluir a preparação."
+                state.phase = .failedRecoverable; state.lastError = PortsideLogger.sanitize(error.localizedDescription); state.lastErrorCode = errorCode(for: error); persistState()
                 logger.write(error.localizedDescription, level: .error)
+                diagnostics.capture(error: error, context: diagnosticContext(stage: "launch", errorCode: errorCode(for: error)))
                 NSApp.unhide(nil)
             }
             isWorking = false
@@ -180,13 +204,13 @@ final class PortsideModel: ObservableObject {
 
     private func friendlyMessage(for phase: EnvironmentPhase) -> String {
         switch phase {
-        case .requirementsChecking: return "Preparando o Portside…"
-        case .rosettaRequired: return "Preparando o Portside…"
-        case .runtimeDownloading: return "Baixando componentes"
-        case .runtimeVerifying, .runtimeInstalling, .prefixCreating, .graphicsInstalling: return "Preparando o ambiente"
-        case .steamDownloading, .steamInstalling: return "Instalando a Steam"
-        case .steamUpdating: return "Atualizando a Steam"
-        case .steamLaunching, .validatingInstallation, .steamReady: return "Tudo pronto"
+        case .requirementsChecking: return "Verificando o Mac…"
+        case .rosettaRequired: return "Preparando o Rosetta…"
+        case .runtimeDownloading, .runtimeVerifying: return "Baixando os componentes necessários…"
+        case .runtimeInstalling, .prefixCreating, .graphicsInstalling: return "Preparando o ambiente de jogos…"
+        case .steamDownloading, .steamInstalling: return "Instalando a Steam…"
+        case .steamUpdating: return "Atualizando a Steam…"
+        case .steamLaunching, .validatingInstallation, .steamReady: return "Finalizando…"
         case .failedRecoverable, .failedFatal: return "Não foi possível concluir a preparação."
         }
     }
@@ -195,8 +219,13 @@ final class PortsideModel: ObservableObject {
         if let currentPhase = state.phase, phaseRank(phase) < phaseRank(currentPhase), value < progress { return }
         state.phase = phase
         progress = max(progress, min(1, value))
+        progressIsIndeterminate = false
         message = friendlyMessage(for: phase)
         persistState()
+    }
+
+    private func setIndeterminate(_ value: Bool) {
+        progressIsIndeterminate = value
     }
 
     private func phaseRank(_ phase: EnvironmentPhase) -> Int {
@@ -220,12 +249,46 @@ final class PortsideModel: ObservableObject {
 
     private func errorCode(for error: Error) -> String {
         if let pipelineError = error as? RuntimePipelineError {
-            return String(describing: pipelineError).split(separator: "(").first.map(String.init) ?? "runtime_error"
+            switch pipelineError {
+            case .checksumMismatch: return "runtime_checksum_failed"
+            case .unexpectedArchiveEntry, .archiveExtractionFailed, .runtimeStructureInvalid: return "runtime_extraction_failed"
+            case .rosettaUnavailable: return "rosetta_unavailable"
+            case .gstreamerInstallFailed: return "gstreamer_setup_failed"
+            case .processTimedOut: return "setup_timeout"
+            case .processFailed(let process, _):
+                let normalized = process.lowercased()
+                if normalized.contains("steam installer") { return "steam_install_failed" }
+                if normalized.contains("prefix") { return "prefix_creation_failed" }
+                if normalized.contains("steam") { return "steam_update_failed" }
+                return "child_process_exited"
+            }
         }
         if let portsideError = error as? PortsideError {
-            return String(describing: portsideError).split(separator: "(").first.map(String.init) ?? "portside_error"
+            switch portsideError {
+            case .unsupportedArchitecture, .unsupportedOperatingSystem, .insufficientStorage: return "requirements_check_failed"
+            case .runtimeUnavailable: return "runtime_download_failed"
+            case .steamInstallerUnavailable: return "steam_download_failed"
+            case .processLaunchFailed: return "steam_launch_failed"
+            case .invalidPath: return "permission_denied"
+            }
         }
-        return String(describing: type(of: error))
+        return "portside_error"
+    }
+
+    private func diagnosticContext(stage: String? = nil, errorCode: String? = nil, runtimeVersion: String? = nil, duration: TimeInterval? = nil) -> DiagnosticContext {
+        DiagnosticContext(
+            stage: stage,
+            errorCode: errorCode,
+            macOSVersion: requirements.macOSVersion,
+            architecture: requirements.architecture,
+            runtimeName: state.runtime?.name,
+            runtimeVersion: runtimeVersion ?? state.runtime?.version,
+            graphicsBackend: state.runtimeRecord?.graphicsBackend.rawValue,
+            processType: state.lastProcessType,
+            exitCode: state.lastExitCode,
+            duration: duration ?? state.lastSetupDuration,
+            retryCount: state.retryCount
+        )
     }
 
     private func openSteamAndWait(executable: URL) async throws {
@@ -234,6 +297,8 @@ final class PortsideModel: ObservableObject {
         guard let runtimePath = state.runtimeRecord?.executablePath ?? state.runtime?.executablePath.map(URL.init(fileURLWithPath:)) else {
             throw PortsideError.runtimeUnavailable
         }
+        diagnostics.breadcrumb("steam_launch_requested", context: diagnosticContext(stage: "launching_steam"))
+        setIndeterminate(true)
         let policyResult = try await WinePrefixManager.configureSilentCrashHandling(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix, logger: logger)
         guard policyResult.status == 0 else { throw RuntimePipelineError.processFailed("Wine crash-dialog configuration", policyResult.status) }
         try supervisor.launchSteam(state: state)
@@ -256,6 +321,7 @@ final class PortsideModel: ObservableObject {
     }
 
     func repair() {
+        diagnostics.breadcrumb("repair_requested", context: diagnosticContext(stage: "repair"))
         state.setupCompleted = false
         state.steamInstalled = SteamInstaller.locateInstalledExecutable() != nil
         setupStep = .checking
@@ -268,9 +334,22 @@ final class PortsideModel: ObservableObject {
             didExportReport = true
             NSWorkspace.shared.activateFileViewerSelecting([url])
         } catch {
-            SentrySDK.capture(error: error)
             errorMessage = "Could not export the diagnostic report."
+            diagnostics.capture(error: error, context: diagnosticContext(stage: "diagnostic_report", errorCode: "diagnostic_report_failed"))
         }
+    }
+
+    func sendDiagnostic() {
+        let code = state.lastErrorCode ?? "portside_error"
+        let context = diagnosticContext(stage: "manual_diagnostic", errorCode: code)
+        var reportCode: String?
+        if let reportURL = try? DiagnosticReport.create(state: state, requirements: requirements, logger: logger),
+           let report = try? Data(contentsOf: reportURL) {
+            reportCode = diagnostics.submitManualDiagnostic(report: report, context: context)
+        } else {
+            diagnostics.capture(error: NSError(domain: "Portside", code: 1, userInfo: nil), context: context)
+        }
+        message = reportCode.map { "Diagnóstico enviado: \($0)" } ?? "Diagnóstico técnico enviado."
     }
 
     func openStorage() { NSWorkspace.shared.open(PortsidePaths.root) }
@@ -281,18 +360,18 @@ final class PortsideModel: ObservableObject {
             try FileManager.default.createDirectory(at: PortsidePaths.cache, withIntermediateDirectories: true)
             message = "Download cache cleared. Installed games were preserved."
         } catch {
-            SentrySDK.capture(error: error)
             errorMessage = "Could not clear the download cache."
+            diagnostics.capture(error: error, context: diagnosticContext(stage: "cache", errorCode: "permission_denied"))
         }
     }
 
     func reset() {
         do {
             try FileManager.default.removeItem(at: PortsidePaths.root)
-            state = EnvironmentState(); setupStep = .welcome; message = "Portside was reset. Installed Steam and game files were removed."; errorMessage = nil
+            state = EnvironmentState(); setupStep = .checking; message = "Portside was reset."; errorMessage = nil
         } catch {
-            SentrySDK.capture(error: error)
             errorMessage = "Could not reset Portside."
+            diagnostics.capture(error: error, context: diagnosticContext(stage: "reset", errorCode: "permission_denied"))
         }
     }
 }
@@ -301,152 +380,46 @@ struct RootView: View {
     @ObservedObject var model: PortsideModel
 
     var body: some View {
-        Group {
-            if model.setupStep == .welcome || model.setupStep == .failed || model.setupStep == .rosettaRequired { OnboardingView(model: model) }
-            else if model.setupStep == .ready { DashboardView(model: model) }
-            else { SetupProgressView(model: model) }
-        }
+        Group { model.setupStep == .failed ? AnyView(FailureView(model: model)) : AnyView(SetupProgressView(model: model)) }
         .background(Color(nsColor: .windowBackgroundColor))
-        .alert("Reset Portside?", isPresented: .constant(false)) { Button("Cancel", role: .cancel) {} }
     }
-}
-
-struct BrandMark: View {
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 14).fill(LinearGradient(colors: [.indigo, .blue], startPoint: .topLeading, endPoint: .bottomTrailing))
-            Image(systemName: "arrow.triangle.2.circlepath.icloud.fill").font(.system(size: 30, weight: .medium)).foregroundStyle(.white)
-        }.frame(width: 64, height: 64)
-    }
-}
-
-struct OnboardingView: View {
-    @ObservedObject var model: PortsideModel
-    @State private var showResetConfirmation = false
-    @State private var showDetails = false
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack { BrandMark(); Spacer(); Text("Portside").font(.title2.weight(.semibold)); Spacer(); Color.clear.frame(width: 64) }
-                .padding(.top, 42)
-            Spacer()
-            VStack(spacing: 14) {
-                Text(model.setupStep == .failed ? "Não foi possível concluir a preparação." : model.setupStep == .rosettaRequired ? "Rosetta is required" : "Welcome to Portside").font(.system(size: 30, weight: .bold, design: .rounded))
-                Text("Play supported Windows Steam games on your Mac.").font(.title3).foregroundStyle(.secondary)
-                Text("Install and try any Windows Steam game. Compatibility may vary by title.").multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 450)
-                if model.setupStep == .rosettaRequired { Text("Portside uses Apple’s official Rosetta component to run the fixed x86-64 Wine runtime. macOS may ask for administrator approval.").multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 470).padding(.top, 8) }
-                if model.setupStep == .failed, showDetails, let error = model.errorMessage {
-                    Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).multilineTextAlignment(.center).padding(.top, 8)
-                }
-            }
-            Spacer()
-            VStack(spacing: 12) {
-                HStack(spacing: 24) {
-                    RequirementBadge(icon: "cpu", title: "Apple silicon", value: model.requirements.isAppleSilicon ? "Detected" : "Required")
-                    RequirementBadge(icon: "internaldrive", title: "Storage", value: ByteCountFormatter.string(fromByteCount: model.requirements.availableStorage, countStyle: .file) + " free")
-                }
-                if model.setupStep == .failed {
-                    HStack(spacing: 12) {
-                        Button("Tentar novamente") { model.setUp() }.buttonStyle(.borderedProminent)
-                        Button("Reparar") { model.repair() }.buttonStyle(.bordered)
-                        Button("Salvar diagnóstico") { model.exportReport() }.buttonStyle(.bordered)
-                        Button(showDetails ? "Ocultar detalhes" : "Ver detalhes") { showDetails.toggle() }.buttonStyle(.bordered)
-                    }.disabled(model.isWorking)
-                } else {
-                    Button {
-                        if model.setupStep == .rosettaRequired { model.installRosetta() } else { model.setUp() }
-                    } label: {
-                        Text(model.setupStep == .rosettaRequired ? "Install Rosetta" : "Set Up Portside")
-                    }
-                    .buttonStyle(.borderedProminent).controlSize(.large).keyboardShortcut(.defaultAction).disabled(model.isWorking)
-                }
-                HStack(spacing: 18) {
-                    Link("Privacy", destination: URL(string: "https://portside.example/privacy")!)
-                    Link("Compatibility info", destination: URL(string: "https://portside.example/compatibility")!)
-                }.font(.caption)
-                Text("Portside is independent and is not affiliated with or endorsed by Valve Corporation. Steam is a trademark of Valve Corporation.")
-                    .font(.caption2).foregroundStyle(.tertiary).multilineTextAlignment(.center).frame(maxWidth: 520)
-            }.padding(.bottom, 28)
-        }.padding(.horizontal, 64)
-    }
-}
-
-struct RequirementBadge: View {
-    let icon: String; let title: String; let value: String
-    var body: some View { HStack { Image(systemName: icon).foregroundStyle(.blue); VStack(alignment: .leading) { Text(title).font(.caption).foregroundStyle(.secondary); Text(value).font(.callout.weight(.medium)) } }.frame(width: 190, alignment: .leading) }
 }
 
 struct SetupProgressView: View {
     @ObservedObject var model: PortsideModel
     var body: some View {
-        VStack(spacing: 26) {
-            Spacer(); BrandMark()
-            Text(model.message).font(.title3.weight(.medium))
-            ProgressView(value: model.progress).frame(width: 360)
-            Text("You can cancel safely by closing this window. No credentials are collected by Portside.").font(.caption).foregroundStyle(.secondary)
+        VStack(spacing: 22) {
             Spacer()
-        }.padding(40)
+            Text(model.message.isEmpty ? "Preparando o Portside…" : model.message).font(.title3.weight(.medium))
+            if model.progressIsIndeterminate { ProgressView().frame(width: 360) }
+            else { ProgressView(value: model.progress).frame(width: 360) }
+            Spacer()
+        }.padding(40).frame(minWidth: 520, minHeight: 240)
     }
 }
 
-struct DashboardView: View {
+struct FailureView: View {
     @ObservedObject var model: PortsideModel
-    @State private var showSupport = false
-    @State private var showResetConfirmation = false
+    @State private var showDetails = false
+    @State private var showDiagnosticConfirmation = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack { BrandMark().scaleEffect(0.62).frame(width: 40, height: 40); Text("Portside").font(.title2.weight(.bold)); Spacer(); Button("Support") { showSupport = true }.buttonStyle(.bordered); Button { model.launchSteam() } label: { Label("Open Steam", systemImage: "play.fill") }.buttonStyle(.borderedProminent) }.padding(.horizontal, 28).padding(.vertical, 16)
-            Divider()
-            VStack(spacing: 16) {
-                Spacer()
-                Image(systemName: "shippingbox.and.arrow.backward.fill").font(.system(size: 48)).foregroundStyle(.blue)
-                Text("Your Steam library, now on Mac.").font(.system(size: 28, weight: .bold, design: .rounded))
-                Text("Portside will open the official Steam for Windows client in a separate window. Your library, downloads, updates and authentication stay with Steam.").multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 510)
-                if let error = model.errorMessage { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).multilineTextAlignment(.center) }
-                if !model.state.steamInstalled { Text("Steam has not finished installing yet. Run setup to prepare the free compatibility components and the official Steam client.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 500) }
-                HStack { Button("Open Steam", action: model.launchSteam).buttonStyle(.borderedProminent).controlSize(.large); Button("Stop Steam", action: model.stopSteam).buttonStyle(.bordered).disabled(!model.supervisor.isRunning) }
-                Spacer()
-            }.padding(32)
-        }
-        .sheet(isPresented: $showSupport) { SupportView(model: model) }
-        .onAppear {
-            if model.state.setupCompleted && model.state.steamInstalled && !model.supervisor.isRunning { model.launchSteam() }
-        }
-    }
-}
-
-struct SupportView: View {
-    @ObservedObject var model: PortsideModel
-    @Environment(\.dismiss) private var dismiss
-    @State private var showResetConfirmation = false
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack { Text("Support").font(.title.bold()); Spacer(); Button("Done") { dismiss() } }
-            Form {
-                Section("Environment") {
-                    LabeledContent("Portside", value: "0.1.0 MVP")
-                    LabeledContent("macOS", value: model.requirements.macOSVersion)
-                    LabeledContent("Architecture", value: model.requirements.architecture)
-                    LabeledContent("Runtime", value: model.state.runtime?.version ?? "Not detected")
-                    LabeledContent("Steam", value: model.state.steamInstalled ? "Installed" : "Not installed")
-                    LabeledContent("Storage", value: ByteCountFormatter.string(fromByteCount: model.requirements.availableStorage, countStyle: .file))
-                }
-                Section("Actions") {
-                    Button("Check for Problems") { model.message = model.requirements.meetsMinimum ? "No basic system problems found." : "This Mac does not meet the minimum requirements." }
-                    Button("Repair Steam Environment") { model.message = "Repair is safe to run after a failed setup; installed game files are preserved." }
-                    Button("Export Diagnostic Report") { model.exportReport() }
-                    Button("Open Storage Location") { model.openStorage() }
-                    Button("Clear Download Cache") { model.clearCache() }
-                    Button("Reset Portside", role: .destructive) { showResetConfirmation = true }
-                }
-            }
-            if !model.message.isEmpty { Text(model.message).font(.caption).foregroundStyle(.secondary) }
-        }.padding(24).frame(width: 520, height: 500)
-        .confirmationDialog("Reset Portside?", isPresented: $showResetConfirmation, titleVisibility: .visible) {
-            Button("Reset and remove Portside files", role: .destructive) { model.reset(); dismiss() }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("This removes the Portside environment, Steam prefix, downloads, logs and installed games. Your Steam account is not deleted.") }
+        VStack(spacing: 18) {
+            Spacer()
+            Text("Não foi possível concluir a preparação.").font(.title3.weight(.medium))
+            HStack(spacing: 12) {
+                Button("Tentar novamente") { model.setUp() }.buttonStyle(.borderedProminent)
+                Button("Reparar Portside") { model.repair() }.buttonStyle(.bordered)
+                Button("Enviar diagnóstico") { showDiagnosticConfirmation = true }.buttonStyle(.bordered)
+                Button(showDetails ? "Ocultar detalhes" : "Ver detalhes") { showDetails.toggle() }.buttonStyle(.bordered)
+            }.disabled(model.isWorking)
+            if showDetails { Text(model.state.lastError ?? "Nenhum detalhe disponível.").font(.caption).foregroundStyle(.secondary).textSelection(.enabled).frame(maxWidth: 520) }
+            Spacer()
+        }.padding(40).frame(minWidth: 640, minHeight: 240)
+        .confirmationDialog("Enviar diagnóstico?", isPresented: $showDiagnosticConfirmation, titleVisibility: .visible) {
+            Button("Enviar dados técnicos") { model.sendDiagnostic() }
+            Button("Cancelar", role: .cancel) {}
+        } message: { Text("Serão enviados somente dados técnicos sanitizados para corrigir falhas. Nenhuma credencial, conta Steam ou lista de jogos será enviada.") }
     }
 }
 
