@@ -1,0 +1,240 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum LicenseStatus {
+  active
+  suspended
+  revoked
+  expired
+}
+enum ActivationStatus {
+  active
+  deactivated
+  revoked
+}
+enum ArtifactStatus {
+  discovered
+  downloading
+  quarantined
+  verified
+  testing
+  approved
+  production
+  rejected
+  deprecated
+}
+enum Channel {
+  staging
+  production
+}
+enum SyncStatus {
+  running
+  succeeded
+  failed
+  skipped
+}
+enum AuditAction {
+  activation
+  deactivation
+  revocation
+  artifact_sync
+  artifact_promote
+  artifact_rollback
+  manifest_publish
+  admin_login
+}
+
+model Customer {
+  id         String     @id @default(cuid())
+  email      String?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  purchases  Purchase[]
+  licenses   License[]
+  @@index([email])
+}
+
+model Purchase {
+  id          String   @id @default(cuid())
+  customerId  String
+  provider    String
+  providerRef String
+  amountCents Int?
+  currency    String?
+  createdAt   DateTime @default(now())
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  licenses    License[]
+  @@unique([provider, providerRef])
+  @@index([customerId, createdAt])
+}
+
+model License {
+  id              String        @id @default(cuid())
+  customerId      String?
+  purchaseId      String?
+  keyPrefix       String
+  keyHmac         String        @unique
+  plan            String
+  status          LicenseStatus @default(active)
+  offlineGraceDays Int          @default(14)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  revokedAt       DateTime?
+  customer        Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  purchase        Purchase?     @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+  activations     Activation[]
+  challenges      ActivationChallenge[]
+  revocations     Revocation[]
+  @@index([status, createdAt])
+  @@index([keyPrefix])
+}
+
+model Device {
+  id             String       @id @default(cuid())
+  publicKey      String
+  publicKeyHash  String       @unique
+  createdAt      DateTime     @default(now())
+  lastSeenAt     DateTime?
+  activations    Activation[]
+  challenges     ActivationChallenge[]
+  @@index([lastSeenAt])
+}
+
+model Activation {
+  id           String           @id @default(cuid())
+  licenseId    String
+  deviceId     String
+  status       ActivationStatus @default(active)
+  activatedAt  DateTime         @default(now())
+  deactivatedAt DateTime?
+  lastValidatedAt DateTime?
+  license      License          @relation(fields: [licenseId], references: [id], onDelete: Restrict)
+  device       Device           @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  @@unique([licenseId, deviceId])
+  @@index([licenseId, status])
+  @@index([deviceId, status])
+}
+
+model ActivationChallenge {
+  id            String    @id @default(cuid())
+  licenseId     String
+  deviceId      String
+  nonceHash     String    @unique
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+  license       License   @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+  device        Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  @@index([licenseId, deviceId, expiresAt])
+}
+
+model Artifact {
+  id               String         @id @default(cuid())
+  component        String
+  version          String
+  channel          Channel
+  sourceURL        String
+  sourceRepository String?
+  sourceCommitOrTag String?
+  license          String
+  fileName         String
+  size             BigInt
+  sha256           String
+  signature        String?
+  storageKey       String
+  status           ArtifactStatus @default(discovered)
+  createdAt        DateTime       @default(now())
+  verifiedAt       DateTime?
+  promotedAt       DateTime?
+  versions         ArtifactVersion[]
+  @@unique([component, version, channel])
+  @@index([component, channel, status])
+  @@index([sha256])
+}
+
+model ArtifactVersion {
+  id         String   @id @default(cuid())
+  artifactId String
+  metadata   Json
+  createdAt  DateTime @default(now())
+  artifact   Artifact @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+  @@index([artifactId, createdAt])
+}
+
+model UpdateChannel {
+  id          String   @id @default(cuid())
+  channel     Channel  @unique
+  appcastURL  String
+  manifestURL String
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model RuntimeManifest {
+  id                 String   @id @default(cuid())
+  channel            Channel
+  manifestVersion    String
+  minimumPortsideVersion String
+  payload            Json
+  signature          String
+  signatureKeyId     String
+  status             String   @default("draft")
+  publishedAt        DateTime?
+  createdAt          DateTime @default(now())
+  @@unique([channel, manifestVersion])
+  @@index([channel, status, publishedAt])
+}
+
+model UpstreamSource {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  repository  String
+  allowlisted Boolean  @default(true)
+  license     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  syncExecutions SyncExecution[]
+}
+
+model SyncExecution {
+  id             String     @id @default(cuid())
+  sourceId       String?
+  status         SyncStatus
+  idempotencyKey String     @unique
+  discovered     Int        @default(0)
+  verified       Int        @default(0)
+  errorCode      String?
+  startedAt      DateTime   @default(now())
+  finishedAt     DateTime?
+  source         UpstreamSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  @@index([sourceId, startedAt])
+}
+
+model AuditEvent {
+  id         String      @id @default(cuid())
+  action     AuditAction
+  actor      String
+  subjectType String
+  subjectId  String?
+  metadata   Json
+  createdAt  DateTime    @default(now())
+  @@index([action, createdAt])
+  @@index([subjectType, subjectId, createdAt])
+}
+
+model Revocation {
+  id         String   @id @default(cuid())
+  licenseId  String
+  reason     String
+  actor      String
+  createdAt  DateTime @default(now())
+  license    License  @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+  @@index([licenseId, createdAt])
+}
