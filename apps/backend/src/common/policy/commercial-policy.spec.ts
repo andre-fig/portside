@@ -6,7 +6,7 @@ import {
   newChallenge,
   offlineUntil,
   verifyDigest,
-} from "../src/common/policy/commercial-policy.js";
+} from "./commercial-policy.js";
 
 describe("commercial license and artifact policy", () => {
   it("allows the first activation and refuses a second device", () => {
@@ -16,9 +16,7 @@ describe("commercial license and artifact policy", () => {
   });
 
   it("allows deactivation followed by a new activation", () => {
-    let active: string | null = "device-a";
-    active = null;
-    expect(canActivate(active, "device-b")).toBe(true);
+    expect(canActivate(null, "device-b")).toBe(true);
   });
 
   it("expires and consumes challenges exactly once", () => {

@@ -17,7 +17,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
       - name: Run Swift tests
-        run: swift test
+        run: swift test --package-path apps/desktop
 
   backend:
     name: Backend tests and build
@@ -40,6 +40,10 @@ jobs:
         run: npm ci
       - name: Validate Prisma schema
         run: npm run prisma:validate
+      - name: Type-check backend
+        run: npm run typecheck
+      - name: Lint backend
+        run: npm run lint
       - name: Run backend tests
         run: npm test
       - name: Build backend

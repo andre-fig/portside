@@ -4,7 +4,7 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { ArtifactStatus, Channel, SyncStatus } from "@prisma/client";
+import { ArtifactStatus, SyncStatus } from "@prisma/client";
 import { createHash, verify } from "node:crypto";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { AppConfig } from "../../core/app-config.js";
@@ -13,21 +13,7 @@ import {
   validateHTTPSHost,
   validateStorageKey,
 } from "../../common/policy/source-policy.js";
-
-export type SyncRequest = {
-  component: string;
-  version: string;
-  channel: Channel;
-  sourceURL: string;
-  sourceRepository?: string;
-  sourceCommitOrTag?: string;
-  license: string;
-  fileName: string;
-  expectedSHA256: string;
-  signature?: string;
-  signatureKeyId?: string;
-  idempotencyKey: string;
-};
+import type { SyncRequest } from "./dtos/sync-request.dto.js";
 
 @Injectable()
 export class SyncService {

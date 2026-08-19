@@ -21,6 +21,8 @@ export function validateStorageKey(key: string): string {
     key.startsWith("/") ||
     key.includes("..") ||
     key.includes("\\") ||
+    // Control characters are invalid in object keys and must be rejected.
+    // eslint-disable-next-line no-control-regex
     /[\u0000-\u001f]/.test(key)
   ) {
     throw new Error("unsafe storage key");

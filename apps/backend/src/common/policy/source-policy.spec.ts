@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateHTTPSHost, validateStorageKey } from "../src/common/policy/source-policy.js";
+import { validateHTTPSHost, validateStorageKey } from "./source-policy.js";
 
 describe("source policy", () => {
   const hosts = new Set(["github.com"]);

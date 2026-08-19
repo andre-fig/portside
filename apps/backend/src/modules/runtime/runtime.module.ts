@@ -1,9 +1,9 @@
 import { Module } from "@nestjs/common";
-import { CoreModule } from "../../core/core.module.js";
 import { RuntimeController } from "./runtime.controller.js";
+import { RuntimeService } from "./runtime.service.js";
 
 @Module({
-  imports: [CoreModule],
   controllers: [RuntimeController],
+  providers: [RuntimeService],
 })
 export class RuntimeModule {}

@@ -2,37 +2,21 @@ import {
   Controller,
   Get,
   Header,
-  ServiceUnavailableException,
 } from "@nestjs/common";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { AppConfig } from "../../core/app-config.js";
+import { RuntimeService } from "./runtime.service.js";
 
 @Controller("/v1")
 export class RuntimeController {
-  constructor(private readonly config: AppConfig) {}
+  constructor(private readonly runtimeService: RuntimeService) {}
 
   @Get("appcast.xml")
   @Header("Content-Type", "application/rss+xml; charset=utf-8")
-  async appcast(): Promise<string> {
-    return readFile(
-      join(process.cwd(), "manifests", "appcast.xml"),
-      "utf8",
-    ).catch(
-      () =>
-        '<rss version="2.0"><channel><title>Portside</title><link>https://example.invalid</link><description>Portside updates</description></channel></rss>',
-    );
+  appcast(): Promise<string> {
+    return this.runtimeService.appcast();
   }
 
   @Get("runtime/manifest")
-  async manifest(): Promise<unknown> {
-    const path = join(process.cwd(), "manifests", "runtime-manifest.json");
-    try {
-      return JSON.parse(await readFile(path, "utf8"));
-    } catch {
-      throw new ServiceUnavailableException(
-        "production runtime manifest is not published",
-      );
-    }
+  manifest(): Promise<unknown> {
+    return this.runtimeService.manifest();
   }
 }

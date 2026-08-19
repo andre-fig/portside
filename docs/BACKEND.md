@@ -43,10 +43,17 @@ cp .env.example .env
 npm ci
 npx prisma generate
 npx prisma migrate deploy
+npm run typecheck
+npm run lint
 npm run build
 npm test
 npm start
 ```
+
+Unit tests use the `*.spec.ts` convention and live beside the source file they
+cover. DTOs are grouped under each feature's `dtos/` directory. The backend
+build excludes specs, while CI runs type-checking, linting, tests and the
+production build.
 
 The example environment is intentionally nonfunctional. PostgreSQL, object
 storage and all signing secrets must be supplied separately.
