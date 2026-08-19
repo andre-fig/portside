@@ -101,6 +101,56 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertTrue(WineRuntimePolicy.dllOverrides.contains("winedbg.exe=d"))
     }
 
+    func testSteamCEFStrategiesAreSeparateLimitedAndSecure() {
+        XCTAssertEqual(SteamInstaller.uiArguments, ["-cef-disable-gpu"])
+        XCTAssertEqual(SteamInstaller.fallbackUIArguments, ["-cef-disable-gpu", "-cef-disable-gpu-compositing"])
+        XCTAssertEqual(SteamInstaller.uiLaunchConfigurations.count, 2)
+        XCTAssertFalse(SteamInstaller.uiLaunchConfigurations.flatMap(\.arguments).contains("-no-cef-sandbox"))
+        XCTAssertFalse(SteamInstaller.uiLaunchConfigurations.flatMap(\.arguments).contains { $0.contains("steamapps") })
+    }
+
+    func testSteamCEFStrategyDoesNotChangeGameArguments() {
+        let gameArguments = ["-novid", "-fullscreen"]
+        let launch = SteamLaunchConfiguration(disableCEFGPU: true, additionalArguments: gameArguments)
+        XCTAssertEqual(gameArguments, ["-novid", "-fullscreen"])
+        XCTAssertFalse(launch.arguments.contains("-no-cef-sandbox"))
+        XCTAssertEqual(launch.arguments.prefix(1), ["-cef-disable-gpu"])
+    }
+
+    func testSteamCEFLogAnalyzerReadsRelevantTailAndCountsRestarts() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-cef-logs-\(UUID().uuidString)", isDirectory: true)
+        let logs = root.appendingPathComponent("drive_c/Program Files (x86)/Steam/logs", isDirectory: true)
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        try "GPU process crashed\nRestart webhelper process, counter 1\nsteamwebhelper exited with code 7\nAccess denied while loading cache\n".write(to: logs.appendingPathComponent("cef_log.txt"), atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let analysis = SteamCEFLogAnalyzer.analyze(prefix: root)
+        XCTAssertEqual(analysis.webhelperRestartCount, 1)
+        XCTAssertEqual(analysis.webhelperExitCode, 7)
+        XCTAssertTrue(analysis.cacheCorruptionLikely)
+        XCTAssertTrue(analysis.findings.contains { $0.category == "gpu" })
+        XCTAssertTrue(analysis.findings.contains { $0.category == "cache" })
+        XCTAssertEqual(analysis.filesRead, ["cef_log.txt"])
+    }
+
+    func testSteamHTMLCacheRecoveryRenamesOnlyHTMLCacheAndPreservesSteamData() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-cache-recovery-\(UUID().uuidString)", isDirectory: true)
+        let userRoot = root.appendingPathComponent("drive_c/users/test/AppData/Local/Steam", isDirectory: true)
+        let htmlCache = userRoot.appendingPathComponent("htmlcache", isDirectory: true)
+        let steamApps = root.appendingPathComponent("drive_c/Program Files (x86)/Steam/steamapps", isDirectory: true)
+        try FileManager.default.createDirectory(at: htmlCache, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: steamApps, withIntermediateDirectories: true)
+        try Data("cache".utf8).write(to: htmlCache.appendingPathComponent("index"))
+        try Data("game".utf8).write(to: steamApps.appendingPathComponent("appmanifest.acf"))
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let backups = try SteamHTMLCacheRecovery.renameHTMLCache(prefix: root)
+        XCTAssertEqual(backups.count, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: htmlCache.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: backups[0].appendingPathComponent("index").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: steamApps.appendingPathComponent("appmanifest.acf").path))
+    }
+
     func testDownloadProgressIsByteBasedAndClamped() {
         XCTAssertEqual(SecureDownloader.progressFraction(received: 25, total: 100), 0.25, accuracy: 0.001)
         XCTAssertEqual(SecureDownloader.progressFraction(received: 125, total: 100), 1.0, accuracy: 0.001)
@@ -164,7 +214,7 @@ final class PortsideCoreTests: XCTestCase {
     }
 
     func testAtomicDirectoryInstallReplacesDestination() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-atomic-(UUID().uuidString)", isDirectory: true)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-atomic-\(UUID().uuidString)", isDirectory: true)
         let staged = root.appendingPathComponent("staged", isDirectory: true)
         let destination = root.appendingPathComponent("Runtime", isDirectory: true)
         try FileManager.default.createDirectory(at: staged, withIntermediateDirectories: true)
@@ -211,12 +261,18 @@ final class PortsideCoreTests: XCTestCase {
         let provider = FreeWineRuntimeProvider()
         let result = try await provider.install()
         let runtime = RuntimeDescriptor(name: result.record.manifest.identifier, version: result.record.manifest.version, executablePath: result.record.executablePath.path, redistributable: false, licenseNote: result.record.manifest.license)
-        _ = try await SteamInstaller.download()
-        try await SteamInstaller.install(using: runtime)
+        if SteamInstaller.locateInstalledExecutable() == nil {
+            _ = try await SteamInstaller.download()
+            try await SteamInstaller.install(using: runtime)
+        }
         guard let steam = SteamInstaller.locateInstalledExecutable() else { XCTFail("steam.exe was not found"); return }
         var state = EnvironmentState(); state.runtime = runtime; state.runtimeRecord = result.record; state.steamExecutablePath = steam.path; state.steamInstalled = true
         let supervisor = ProcessSupervisor()
         let monitor = SteamReadinessMonitor()
+        let windows10 = try await WinePrefixManager.ensureWindows10(runtimeExecutable: result.record.executablePath, prefix: PortsidePaths.steamPrefix)
+        XCTAssertEqual(windows10.status, 0)
+        await monitor.stopSteam(runtimeExecutable: result.record.executablePath, prefix: PortsidePaths.steamPrefix)
+        _ = await monitor.waitForSteamToStop(timeout: 10)
         if !monitor.bootstrapComplete(prefix: PortsidePaths.steamPrefix) {
             try supervisor.launchSteam(state: state, arguments: SteamInstaller.bootstrapArguments)
             let bootstrapTimeout = TimeInterval(ProcessInfo.processInfo.environment["PORTSIDE_BOOTSTRAP_TIMEOUT"] ?? "180") ?? 180
@@ -224,10 +280,11 @@ final class PortsideCoreTests: XCTestCase {
             XCTAssertTrue(bootstrapCompleted)
             supervisor.requestStop()
         }
-        try supervisor.launchSteam(state: state, arguments: SteamInstaller.uiArguments)
+        try supervisor.launchSteam(state: state, arguments: SteamInstaller.uiLaunchConfigurations[0].arguments)
         let timeout = TimeInterval(ProcessInfo.processInfo.environment["PORTSIDE_REAL_TIMEOUT"] ?? "180") ?? 180
-        let status = await monitor.waitForSteam(executable: steam, timeout: timeout)
-        XCTAssertEqual(status, .windowVisible, "Steam did not present a real window; status=\(status.rawValue)")
+        let report = await monitor.waitForSteamReport(executable: steam, strategy: .primary, timeout: timeout)
+        XCTAssertEqual(report.status, .windowVisible, "Steam did not present a verified real window; status=\(report.status.rawValue)")
+        XCTAssertTrue(report.webhelperStarted)
     }
 
     func testSteamHasNoAppIDCompatibilityAllowlist() {

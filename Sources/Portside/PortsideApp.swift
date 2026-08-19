@@ -129,6 +129,11 @@ final class PortsideModel: ObservableObject {
                 state.steamExecutablePath = steamExecutable.path
                 state.steamInstalled = true
                 state.setupCompleted = false
+                guard let runtimePath = state.runtimeRecord?.executablePath ?? state.runtime?.executablePath.map(URL.init(fileURLWithPath:)) else {
+                    throw PortsideError.runtimeUnavailable
+                }
+                let windows10Result = try await WinePrefixManager.ensureWindows10(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix, logger: logger)
+                guard windows10Result.status == 0 else { throw RuntimePipelineError.processFailed("Windows 10 prefix configuration", windows10Result.status) }
                 updateProgress(0.88, phase: .steamUpdating)
                 diagnostics.breadcrumb("steam_update_started", context: diagnosticContext(stage: "steam_update"))
                 if !steamMonitor.bootstrapComplete(prefix: PortsidePaths.steamPrefix) {
@@ -288,7 +293,7 @@ final class PortsideModel: ObservableObject {
         return "portside_error"
     }
 
-    private func diagnosticContext(stage: String? = nil, errorCode: String? = nil, runtimeVersion: String? = nil, duration: TimeInterval? = nil) -> DiagnosticContext {
+    private func diagnosticContext(stage: String? = nil, errorCode: String? = nil, runtimeVersion: String? = nil, duration: TimeInterval? = nil, cefStrategy: String? = nil, webhelperRestartCount: Int? = nil) -> DiagnosticContext {
         DiagnosticContext(
             stage: stage,
             errorCode: errorCode,
@@ -300,7 +305,9 @@ final class PortsideModel: ObservableObject {
             processType: state.lastProcessType,
             exitCode: state.lastExitCode,
             duration: duration ?? state.lastSetupDuration,
-            retryCount: state.retryCount
+            retryCount: state.retryCount,
+            cefStrategy: cefStrategy,
+            webhelperRestartCount: webhelperRestartCount
         )
     }
 
@@ -317,6 +324,8 @@ final class PortsideModel: ObservableObject {
         }
         let policyResult = try await WinePrefixManager.configureSilentCrashHandling(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix, logger: logger)
         guard policyResult.status == 0 else { throw RuntimePipelineError.processFailed("Wine crash-dialog configuration", policyResult.status) }
+        let windows10Result = try await WinePrefixManager.ensureWindows10(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix, logger: logger)
+        guard windows10Result.status == 0 else { throw RuntimePipelineError.processFailed("Windows 10 prefix configuration", windows10Result.status) }
         await stopLegacySteamIfNeeded(runtimePath: runtimePath)
         if await steamMonitor.activateVisibleSteamWindow() {
             state.lastSteamStatus = .windowVisible
@@ -331,14 +340,44 @@ final class PortsideModel: ObservableObject {
                 throw PortsideError.processLaunchFailed("Steam could not be restarted after its update.")
             }
         }
-        try supervisor.launchSteam(state: state, arguments: SteamInstaller.uiArguments)
-        let status = await steamMonitor.waitForSteam(executable: executable, prefix: PortsidePaths.steamPrefix)
-        state.lastSteamStatus = status
-        guard status == .windowVisible || status == .ready else {
-            throw PortsideError.processLaunchFailed("Steam started but its window did not appear before the timeout.")
+        let strategies = SteamInstaller.uiLaunchConfigurations
+        var lastReport: SteamReadinessReport?
+        for (index, strategy) in strategies.enumerated() {
+            if index > 0 {
+                if let previous = lastReport, previous.logAnalysis.cacheCorruptionLikely {
+                    let backups = try SteamHTMLCacheRecovery.renameHTMLCache(prefix: PortsidePaths.steamPrefix, logger: logger)
+                    if !backups.isEmpty {
+                        diagnostics.event("steam_html_cache_recovery_attempted", context: diagnosticContext(stage: "cef_fallback", cefStrategy: strategy.identifier, webhelperRestartCount: previous.webhelperRestartCount))
+                    }
+                }
+                if supervisor.isRunning { supervisor.requestStop() }
+                await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
+                _ = await steamMonitor.waitForSteamToStop(timeout: 10)
+            }
+            diagnostics.event("steam_started", context: diagnosticContext(stage: "launching_steam", cefStrategy: strategy.identifier))
+            try supervisor.launchSteam(state: state, arguments: strategy.arguments)
+            let report = await steamMonitor.waitForSteamReport(executable: executable, prefix: PortsidePaths.steamPrefix, strategy: strategy)
+            lastReport = report
+            state.lastSteamStatus = report.status
+            if let exitCode = report.webhelperExitCode { state.lastExitCode = exitCode }
+            let reportContext = diagnosticContext(stage: "steam_readiness", duration: report.webhelperStableDuration, cefStrategy: strategy.identifier, webhelperRestartCount: report.webhelperRestartCount)
+            if report.webhelperStarted { diagnostics.event("steamwebhelper_started", context: reportContext) }
+            if report.webhelperExitCode != nil {
+                diagnostics.event("steamwebhelper_exit_code", context: reportContext)
+            }
+            if report.webhelperRestartCount >= 3 { diagnostics.event("steamwebhelper_crash_loop", context: reportContext) }
+            if report.windowDetected { diagnostics.event("steam_window_detected", context: reportContext) }
+            if report.status == .windowVisible || report.status == .ready {
+                state.phase = .steamReady; state.setupCompleted = true; state.lastError = nil; persistState()
+                NSApp.hide(nil)
+                return
+            }
+            if report.windowDetected { diagnostics.event("steam_login_ui_unverified", context: reportContext) }
+            logger.write("CEF strategy \(strategy.identifier) did not produce a verified Steam UI: status=\(report.status.rawValue), webhelper_started=\(report.webhelperStarted), restarts=\(report.webhelperRestartCount), stable_seconds=\(String(format: "%.2f", report.webhelperStableDuration))", level: .warning)
+            diagnostics.event(report.webhelperStarted ? "steam_cef_initialization_failed" : "steam_webhelper_not_started", context: reportContext)
         }
-        state.phase = .steamReady; state.setupCompleted = true; state.lastError = nil; persistState()
-        NSApp.hide(nil)
+        diagnostics.event("steamwebhelper_timeout", context: diagnosticContext(stage: "steam_readiness", cefStrategy: lastReport?.cefStrategy, webhelperRestartCount: lastReport?.webhelperRestartCount))
+        throw PortsideError.processLaunchFailed("Steam started but its interface could not be verified.")
     }
 
     private func stopLegacySteamIfNeeded(runtimePath: URL) async {
@@ -346,7 +385,7 @@ final class PortsideModel: ObservableObject {
         let legacyExecutable = legacyPrefix.appendingPathComponent("drive_c/Program Files (x86)/Steam/steam.exe")
         guard FileManager.default.fileExists(atPath: legacyExecutable.path) else { return }
         logger.write("Stopping Steam from the legacy prefix before opening the managed prefix")
-        await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: legacyPrefix, forceRemainingProcesses: false)
+        await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: legacyPrefix)
     }
 
     private func persistState() {

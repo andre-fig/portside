@@ -128,6 +128,8 @@ public struct DiagnosticContext: Sendable, Equatable {
     public var exitCode: Int32?
     public var duration: TimeInterval?
     public var retryCount: Int
+    public var cefStrategy: String?
+    public var webhelperRestartCount: Int?
 
     public init(
         stage: String? = nil,
@@ -142,11 +144,14 @@ public struct DiagnosticContext: Sendable, Equatable {
         processType: String? = nil,
         exitCode: Int32? = nil,
         duration: TimeInterval? = nil,
-        retryCount: Int = 0
+        retryCount: Int = 0,
+        cefStrategy: String? = nil,
+        webhelperRestartCount: Int? = nil
     ) {
         self.stage = stage; self.errorCode = errorCode; self.portsideVersion = portsideVersion; self.portsideBuild = portsideBuild
         self.macOSVersion = macOSVersion; self.architecture = architecture; self.runtimeName = runtimeName; self.runtimeVersion = runtimeVersion
         self.graphicsBackend = graphicsBackend; self.processType = processType; self.exitCode = exitCode; self.duration = duration; self.retryCount = retryCount
+        self.cefStrategy = cefStrategy; self.webhelperRestartCount = webhelperRestartCount
     }
 
     public var fields: [String: String] {
@@ -158,7 +163,8 @@ public struct DiagnosticContext: Sendable, Equatable {
         let optionalValues: [(String, String?)] = [
             ("stage", stage), ("error_code", errorCode), ("macos_version", macOSVersion), ("architecture", architecture),
             ("runtime_name", runtimeName), ("runtime_version", runtimeVersion), ("graphics_backend", graphicsBackend),
-            ("process_type", processType), ("exit_code", exitCode.map(String.init)), ("duration", duration.map { String(format: "%.2f", $0) })
+            ("process_type", processType), ("exit_code", exitCode.map(String.init)), ("duration", duration.map { String(format: "%.2f", $0) }),
+            ("cef_strategy", cefStrategy), ("webhelper_restart_count", webhelperRestartCount.map(String.init))
         ]
         for (key, value) in optionalValues where value != nil { values[key] = value! }
         return values
@@ -167,12 +173,14 @@ public struct DiagnosticContext: Sendable, Equatable {
 
 public protocol DiagnosticsService: Sendable {
     func breadcrumb(_ name: String, context: DiagnosticContext)
+    func event(_ name: String, context: DiagnosticContext)
     func capture(error: Error, context: DiagnosticContext)
 }
 
 public struct NoopDiagnosticsService: DiagnosticsService {
     public init() {}
     public func breadcrumb(_ name: String, context: DiagnosticContext) {}
+    public func event(_ name: String, context: DiagnosticContext) {}
     public func capture(error: Error, context: DiagnosticContext) {}
 }
 
@@ -343,7 +351,9 @@ public final class SecureDownloader: NSObject, @unchecked Sendable {
 public enum SteamInstaller {
     public static let officialURL = URL(string: "https://cdn.fastly.steamstatic.com/client/installer/SteamSetup.exe")!
     public static let bootstrapArguments = ["-silent"]
-    public static let uiArguments = ["-cef-disable-gpu"]
+    public static let uiArguments = SteamLaunchConfiguration.primary.arguments
+    public static let fallbackUIArguments = SteamLaunchConfiguration.fallback.arguments
+    public static let uiLaunchConfigurations = [SteamLaunchConfiguration.primary, SteamLaunchConfiguration.fallback]
     public static var localURL: URL { PortsidePaths.downloads.appendingPathComponent("SteamSetup.exe") }
 
     public static var steamExecutableCandidates: [URL] {
@@ -404,6 +414,32 @@ public enum SteamInstaller {
             throw PortsideError.processLaunchFailed("Steam installer finished without creating steam.exe.")
         }
     }
+}
+
+public struct SteamLaunchConfiguration: Equatable, Sendable {
+    public let disableCEFGPU: Bool
+    public let disableCEFGPUCompositing: Bool
+    public let additionalArguments: [String]
+
+    public init(disableCEFGPU: Bool, disableCEFGPUCompositing: Bool = false, additionalArguments: [String] = []) {
+        self.disableCEFGPU = disableCEFGPU
+        self.disableCEFGPUCompositing = disableCEFGPUCompositing
+        self.additionalArguments = additionalArguments
+    }
+
+    public var arguments: [String] {
+        var result: [String] = []
+        if disableCEFGPU { result.append("-cef-disable-gpu") }
+        if disableCEFGPUCompositing { result.append("-cef-disable-gpu-compositing") }
+        return result + additionalArguments
+    }
+
+    public var identifier: String {
+        arguments.isEmpty ? "default" : arguments.joined(separator: " ")
+    }
+
+    public static let primary = SteamLaunchConfiguration(disableCEFGPU: true)
+    public static let fallback = SteamLaunchConfiguration(disableCEFGPU: true, disableCEFGPUCompositing: true)
 }
 
 public protocol RuntimeLocating {

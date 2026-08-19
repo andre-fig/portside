@@ -7,11 +7,15 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
     private static let release = "com.portside.app@0.1.0+1"
     private static let allowedTagKeys: Set<String> = [
         "stage", "error_code", "portside_version", "portside_build", "macos_version", "architecture",
-        "runtime_name", "runtime_version", "graphics_backend", "process_type", "exit_code", "duration", "retry_count"
+        "runtime_name", "runtime_version", "graphics_backend", "process_type", "exit_code", "duration", "retry_count",
+        "cef_strategy", "webhelper_restart_count"
     ]
     private static let allowedBreadcrumbs: Set<String> = [
         "setup_started", "requirements_checked", "runtime_download_started", "runtime_verified", "prefix_created",
-        "steam_install_started", "steam_update_started", "steam_launch_requested", "process_exited", "repair_requested"
+        "steam_install_started", "steam_update_started", "steam_launch_requested", "process_exited", "repair_requested",
+        "steam_started", "steamwebhelper_started", "steamwebhelper_exit_code", "steamwebhelper_crash_loop",
+        "steamwebhelper_timeout", "steam_login_ui_unverified", "steam_html_cache_recovery_attempted",
+        "steam_cef_initialization_failed", "steam_window_detected"
     ]
 
     public init() {
@@ -47,6 +51,14 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
         guard Self.allowedBreadcrumbs.contains(name) else { return }
         let crumb = Breadcrumb(level: .info, category: "portside")
         crumb.message = name
+        SentrySDK.addBreadcrumb(crumb)
+    }
+
+    public func event(_ name: String, context: DiagnosticContext) {
+        guard Self.allowedBreadcrumbs.contains(name) else { return }
+        let crumb = Breadcrumb(level: .info, category: "portside.event")
+        crumb.message = name
+        for (key, value) in context.fields { crumb.setData(value: value, key: key) }
         SentrySDK.addBreadcrumb(crumb)
     }
 
