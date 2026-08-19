@@ -16,10 +16,10 @@ struct PortsideApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(model: model)
-                .frame(width: model.setupStep == .failed ? 620 : 520,
-                       height: model.setupStep == .failed ? 400 : 320)
+                .frame(width: model.setupStep == .failed ? InstallerLayout.failureWidth : InstallerLayout.width,
+                       height: model.setupStep == .failed ? InstallerLayout.failureContentHeight : InstallerLayout.contentHeight)
         }
-        .defaultSize(width: 520, height: 320)
+        .defaultSize(width: InstallerLayout.width, height: InstallerLayout.contentHeight)
         .windowResizability(.contentSize)
         .windowStyle(.hiddenTitleBar)
         .commands {
@@ -406,7 +406,9 @@ struct RootView: View {
     @ObservedObject var model: PortsideModel
 
     var body: some View {
-        Group {
+        ZStack {
+            Color(nsColor: .windowBackgroundColor)
+                .ignoresSafeArea()
             if model.showsInstaller {
                 VStack(spacing: 0) {
                     InstallerHeader(model: model)
@@ -418,16 +420,24 @@ struct RootView: View {
                 Color.clear
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
             WindowConfigurator(
-                contentSize: model.setupStep == .failed ? CGSize(width: 620, height: 400) : CGSize(width: 520, height: 320),
+                contentSize: model.setupStep == .failed
+                    ? CGSize(width: InstallerLayout.failureWidth, height: InstallerLayout.failureContentHeight)
+                    : CGSize(width: InstallerLayout.width, height: InstallerLayout.contentHeight),
                 isVisible: model.showsInstaller
             )
                 .frame(width: 0, height: 0)
         }
     }
+}
+
+private enum InstallerLayout {
+    static let width: CGFloat = 520
+    static let contentHeight: CGFloat = 306
+    static let failureWidth: CGFloat = 620
+    static let failureContentHeight: CGFloat = 386
 }
 
 struct InstallerHeader: View {
@@ -489,8 +499,9 @@ struct WindowConfigurator: NSViewRepresentable {
             window.standardWindowButton(.miniaturizeButton)?.isHidden = true
             window.standardWindowButton(.zoomButton)?.isHidden = true
             window.setContentSize(contentSize)
-            window.minSize = contentSize
-            window.maxSize = contentSize
+            let frameSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: contentSize)).size
+            window.minSize = frameSize
+            window.maxSize = frameSize
             if isVisible { window.makeKeyAndOrderFront(nil) } else { window.orderOut(nil) }
         }
     }
@@ -505,7 +516,7 @@ struct SetupProgressView: View {
             if model.progressIsIndeterminate { ProgressView().frame(width: 360) }
             else { ProgressView(value: model.progress).frame(width: 360) }
             Spacer()
-        }.padding(28).frame(width: 520, height: 251)
+        }.padding(28).frame(width: InstallerLayout.width, height: 251)
     }
 }
 
@@ -520,7 +531,7 @@ struct FailureView: View {
                 Button("Try Again") { model.repair() }.buttonStyle(.borderedProminent)
             }.disabled(model.isWorking)
             Spacer()
-        }.padding(28).frame(width: 620, height: 331)
+        }.padding(28).frame(width: InstallerLayout.failureWidth, height: 331)
     }
 }
 
