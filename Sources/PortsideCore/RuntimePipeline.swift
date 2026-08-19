@@ -857,7 +857,7 @@ public final class SteamLaunchLock: @unchecked Sendable {
     }
 }
 
-private struct SteamWindowSnapshot {
+private struct SteamProcessSnapshot {
     let processIdentifier: pid_t
 }
 
@@ -1019,11 +1019,11 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
                 logger.write("steamwebhelper_exited", level: .warning)
             }
             webhelperWasRunning = webhelperRunning
-            if sawSteam, let window = visibleSteamWindow(processSnapshot: snapshot) {
-                NSRunningApplication(processIdentifier: window.processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            if sawSteam, let steamProcess = steamProcessSnapshot(processSnapshot: snapshot) {
+                NSRunningApplication(processIdentifier: steamProcess.processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
                 windowDetected = true
-                // Window metadata is safe to inspect without Screen Recording
-                // permission. Pixel inspection is intentionally unavailable.
+                // Process ownership is used as a permission-free handoff signal.
+                // Portside never enumerates windows or captures another app's pixels.
                 windowVisualState = .unavailable
                 let stableSeconds = stableDuration(since: webhelperStableSince)
                 let analysis = SteamCEFLogAnalyzer.analyze(prefix: prefix, minimumModificationDate: attemptStartedAt, baseline: logBaseline)
@@ -1163,35 +1163,21 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
     public func activateVisibleSteamWindow(prefix: URL = PortsidePaths.steamPrefix) async -> Bool {
         let snapshot = await processSnapshot()
         guard managedProcessSnapshot(snapshot, prefix: prefix, processNames: ["steam.exe", "steamwebhelper"]) else { return false }
-        guard let window = visibleSteamWindow(processSnapshot: snapshot) else { return false }
-        logger.write("Existing Steam window activation requested; readiness remains unverified")
-        NSRunningApplication(processIdentifier: window.processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        guard let steamProcess = steamProcessSnapshot(processSnapshot: snapshot) else { return false }
+        logger.write("Existing Steam process activation requested; readiness remains unverified")
+        NSRunningApplication(processIdentifier: steamProcess.processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         return true
     }
 
-    private func visibleSteamWindow(processSnapshot: String) -> SteamWindowSnapshot? {
-        guard let windows = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else { return nil }
-        return windows.compactMap { window -> SteamWindowSnapshot? in
-            let owner = (window[kCGWindowOwnerName as String] as? String)?.lowercased() ?? ""
-            let name = (window[kCGWindowName as String] as? String)?.lowercased() ?? ""
-            let steamTitle = ["steam", "login", "sign in", "update", "store", "library"].contains { name.contains($0) }
-            guard let ownerPID = (window[kCGWindowOwnerPID as String] as? NSNumber).map({ pid_t($0.intValue) }) else { return nil }
-            let isOnscreen = (window[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? false
-            let bounds = window[kCGWindowBounds as String] as? [String: Any]
-            let width = (bounds?["Width"] as? NSNumber)?.doubleValue ?? 0
-            let height = (bounds?["Height"] as? NSNumber)?.doubleValue ?? 0
-            guard isOnscreen || (width >= 200 && height >= 120) else { return nil }
-            let isSteamProcess = processSnapshot.split(whereSeparator: \.isNewline).contains { line in
-                let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
-                guard fields.count == 3, Int32(String(fields[0])) == Int32(ownerPID) else { return false }
-                let processArguments = String(fields[1...].joined(separator: " "))
-                return processArguments.contains("steam.exe") || processArguments.contains("steamwebhelper")
-            }
-            guard owner.contains("steam") || steamTitle || (owner.contains("wine") && isSteamProcess) else { return nil }
-            return SteamWindowSnapshot(
-                processIdentifier: ownerPID
-            )
-        }.first
+    private func steamProcessSnapshot(processSnapshot: String) -> SteamProcessSnapshot? {
+        for line in processSnapshot.split(whereSeparator: \.isNewline) {
+            let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
+            guard fields.count == 3, let processIdentifier = pid_t(fields[0]) else { continue }
+            let processArguments = String(fields[1...].joined(separator: " "))
+            guard processArguments.contains("steam.exe") || processArguments.contains("steamwebhelper") else { continue }
+            return SteamProcessSnapshot(processIdentifier: processIdentifier)
+        }
+        return nil
     }
 
     private func forceTerminateManagedSteamIfNeeded() async {
