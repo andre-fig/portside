@@ -64,7 +64,6 @@ final class PortsideModel: ObservableObject {
         didStartAutomatically = true
         if state.setupCompleted && state.steamInstalled && hasValidInstalledEnvironment {
             showsInstaller = false
-            NSApp.hide(nil)
             launchSteam()
         } else {
             showsInstaller = true
@@ -203,7 +202,7 @@ final class PortsideModel: ObservableObject {
                 state.phase = .steamLaunching; persistState(); message = "Opening Steam…"
                 try await openSteamAndWait(executable: steamExecutable)
                 showsInstaller = false
-                message = "Ready"; NSApp.hide(nil)
+                message = "Ready"
             } catch {
                 if supervisor.isRunning { supervisor.requestStop() }
                 errorMessage = "Could not complete setup."
@@ -330,7 +329,7 @@ final class PortsideModel: ObservableObject {
         if await steamMonitor.activateVisibleSteamWindow() {
             state.lastSteamStatus = .windowVisible
             state.phase = .steamReady; state.setupCompleted = true; state.lastError = nil; persistState()
-            NSApp.hide(nil)
+            showsInstaller = false
             return
         }
         if await steamMonitor.isSteamProcessRunning() {
@@ -369,7 +368,7 @@ final class PortsideModel: ObservableObject {
             if report.windowDetected { diagnostics.event("steam_window_detected", context: reportContext) }
             if report.status == .windowVisible || report.status == .ready {
                 state.phase = .steamReady; state.setupCompleted = true; state.lastError = nil; persistState()
-                NSApp.hide(nil)
+                showsInstaller = false
                 return
             }
             if report.windowDetected { diagnostics.event("steam_login_ui_unverified", context: reportContext) }
@@ -456,7 +455,7 @@ struct RootView: View {
                     else { SetupProgressView(model: model) }
                 }
             } else {
-                Color.clear
+                ReadyView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -465,10 +464,24 @@ struct RootView: View {
                 contentSize: model.setupStep == .failed
                     ? CGSize(width: InstallerLayout.failureWidth, height: InstallerLayout.failureContentHeight)
                     : CGSize(width: InstallerLayout.width, height: InstallerLayout.contentHeight),
-                isVisible: model.showsInstaller
+                isVisible: true
             )
                 .frame(width: 0, height: 0)
         }
+    }
+}
+
+struct ReadyView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            PortsideLogoView(size: 54)
+            Text("Portside")
+                .font(.title2.weight(.semibold))
+            Text("Steam is ready")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(width: InstallerLayout.width, height: InstallerLayout.contentHeight)
     }
 }
 
@@ -525,9 +538,10 @@ struct WindowConfigurator: NSViewRepresentable {
             desiredVisibility = isVisible
             guard let window else { return }
             guard lastSize != contentSize || lastVisibility != isVisible else { return }
+            let wasVisible = window.isVisible
             lastSize = contentSize
             lastVisibility = isVisible
-            window.title = "Portside Installer"
+            window.title = "Portside"
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.isMovableByWindowBackground = true
@@ -541,7 +555,12 @@ struct WindowConfigurator: NSViewRepresentable {
             let frameSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: contentSize)).size
             window.minSize = frameSize
             window.maxSize = frameSize
-            if isVisible { window.makeKeyAndOrderFront(nil) } else { window.orderOut(nil) }
+            if isVisible {
+                if wasVisible { window.orderFront(nil) }
+                else { window.makeKeyAndOrderFront(nil) }
+            } else {
+                window.orderOut(nil)
+            }
         }
     }
 }
