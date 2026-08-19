@@ -1,80 +1,73 @@
-# Validation plan and current status
+# Portside validation
 
-The current environment is an Apple silicon Mac (`arm64`, Apple M4 Pro reported by MoltenVK) with Xcode 26.2. Rosetta is installed and passed `arch -x86_64 /usr/bin/true`.
+## Current product contract
 
-## Automated status
-
-`swift test` covers architecture/storage checks, secret and personal-data redaction, approved HTTPS origins, pinned manifest metadata, checksum rejection, safe archive paths, atomic installation, singular prefix layout, Codable setup phases, byte-based progress, silent argument construction, simulated non-zero installer exits, missing `steam.exe` validation, technical diagnostics context, and the absence of a game allowlist. The opt-in real test uses the actual runtime only when `PORTSIDE_REAL_INTEGRATION=1` is set.
-
-## Automatic launch and diagnostics
-
-The app starts setup from `PortsideApp.init` without an onboarding action. A valid persisted environment goes directly to the normal Steam launch path; an incomplete environment enters the single progress window and resumes idempotently. Failure is the only state with recovery actions. The visible session is started directly by the Wine runtime; Portside does not create a second macOS `Steam.app` wrapper.
-
-`DiagnosticsService` keeps Sentry out of the core pipeline. Debug and Release configurations use the supplied DSN, `sendDefaultPii=false`, zero tracing sample rate, no network breadcrumbs, no replay, no user object, a `beforeSend` allowlist, and a 30-event cache limit. Setup failures are captured automatically with structured technical fields and flushed briefly; full logs are not attached. Manual diagnostic export remains local and sanitized. `scripts/package_app.sh` creates `build/Portside.app.dSYM`; debug-file upload is optional and requires an external `sentry-cli` plus `SENTRY_AUTH_TOKEN`.
-
-## Steam launcher identity and window readiness
-
-The direct Wine launch does not adopt an already-running or visually unverified Steam process. A POSIX lock prevents two Portside launches from starting Steam concurrently. The process receives the same inherited Wine environment as every other Portside Wine launch. Shutdown requests `wineserver -k`, then terminates remaining `steam.exe`/`steamwebhelper` processes associated with the managed Steam launch and verifies that the Steam tree has stopped.
-
-The Steam launch profile is passed to `steam.exe` as separate `Process.arguments` during bootstrap and every post-install launch in this order: `-udpforce`, `-noreactlogin`, `-allosarches`, `-cef-force-32bit`. The installer still receives only `/S`. Diagnostics record the requested `32bit` architecture, observed `cef.win32`/`cef.win64` architecture when present, the helper process count, and whether the legacy flag was effectively ignored.
-
-Readiness combines process state, fresh CEF evidence, and visible-window metadata without capturing pixels. `window_visual_state` remains `unavailable` because reading another application's pixels would require Screen Recording permission; CEF evidence and the window's presence still determine readiness. If CEF evidence is incomplete, the existing controlled strategies and one-time HTML-cache recovery remain the final retries.
-
-## Runtime pipeline
-
-The provider downloads Wine Staging 11.15 and GStreamer 1.28.5 from fixed HTTPS URLs, verifies SHA-256, resumes `.part` downloads, rejects unsafe tar paths, installs the runtime atomically under `Runtime/<version>`, uses WineD3D for Direct3D 9/10/11, and initializes `Prefix/Steam` idempotently. The GStreamer package is extracted locally with `pkgutil --expand-full`; no Homebrew or system framework installation is required.
-
-## Silent Steam installation
-
-The app invokes Wine through `Process` with an argument array equivalent to:
+Release has one runtime and one launch path:
 
 ```text
-<Portside Runtime>/Contents/Resources/wine/bin/wine <Portside Downloads>/SteamSetup.exe /S
+Gcenx Wine Staging 11.6_1
+  -> private Prefix/Steam
+  -> SteamSetup.exe /S (first installation only)
+  -> steam.exe with no launch flags
 ```
 
-`/S` is a separate, case-sensitive argument. The process receives `WINEPREFIX`, `WINEARCH=win64`, `WINEDEBUG=-all`, and the private GStreamer paths. No shell, Terminal, AppleScript, or user-visible installer process is used. Afterward, the app validates an executable `steam.exe`, runs the bootstrap equivalent of `steam.exe -silent`, waits for the client marker, and launches `steam.exe` normally.
+The runtime archive is downloaded from the pinned HTTPS URL in `docs/runtime-manifest.json`, checked for the pinned size and SHA-256, and installed atomically. Existing prefix data is not removed. A `Backups/Steam-prefix-*` snapshot is retained before prefix initialization or a runtime transition; failed transitions restore the snapshot and retain the failed prefix for recovery.
 
-## Wine crash-window handling
+Portside does not install, open, wait for, copy data from, or uninstall native macOS Steam. It does not copy `config`, `registry.vdf` or `userdata`. It does not use the old CEF flags, `-no-browser`, GPU fallbacks, ESYNC cascade, shell commands, Screen Recording APIs, D3DMetal, GPTK or a SteamHost wrapper.
 
-The Wine prefix is configured with `HKCU\\Software\\Wine\\WineDbg\\ShowCrashDialog=0`, and Portside-owned Wine processes receive `WINEDLLOVERRIDES=winedbg.exe=d` plus `WINEDEBUG=-all`. If a debugger process is nevertheless detected, readiness fails quickly, the failure is logged, and the supervisor requests shutdown of only the Portside prefix. This prevents an unresponsive Wine Debugger or generic Wine crash dialog from being left open by setup. The current prefix was updated with this registry value successfully.
+## Automated checks
 
-## CEF readiness and recovery
+Run:
 
-Portside does not accept an existing Steam window, a Steam process, `steamwebhelper`, or a lone `BrowserReady` line as setup success. Each launch records a fresh log baseline, verifies that the managed `steamwebhelper` is running and that requested CEF flags reached it, then requires `BrowserReady` plus multiple current Steam UI window events while the process remains stable. Timeout states distinguish Steam not started, webhelper not started, webhelper crash loops, invisible windows, renderer failures, CEF/GPU failures, missing resources, and unverified UI.
+```sh
+swift test
+swift build
+./scripts/package_app.sh
+```
 
-The CEF analyzer reads only bounded tails from `webhelper_gpu.txt`, `cef_log.txt`, `steamui_html.txt`, `webhelper.txt`, `bootstrap_log.txt`, `console_log.txt`, and `connection_log.txt`. It classifies GPU, renderer, webhelper crash-loop, cache, network, certificate, dependency, resource, sandbox, and unverified-UI failures after sanitizing local findings. If all three controlled strategies fail but a window and webhelper were active, Portside performs one reversible HTML-cache rename, retains a short-lived backup, retries the best strategy once, then stops the managed Wine tree if the UI remains unverified. Steam data such as `steamapps`, `userdata`, `config`, and saves is never part of that recovery operation.
+The test suite covers:
 
-Release Sentry reports receive structured fields such as `cef_strategy`, `cef_failure_category`, `webhelper_started`, `webhelper_restart_count`, `webhelper_exit_code`, `renderer_mode`, `gpu_process_status`, `window_detected`, `window_visual_state`, `browser_ready`, `browser_ready_detected`, `cache_recovery_attempted`, `steam_version`, and `runtime_version`. Full CEF or Portside log files are not attached to Sentry; sanitized logs remain local for troubleshooting.
+- the single pinned Wine 11.6_1 runtime, URL, size and checksum;
+- absence of native-login state and experimental Steam arguments;
+- installer-only `/S` arguments, separate `Process` elements and no shell;
+- official Wine environment without legacy ESYNC variables;
+- the development-only Sikarugir reference environment (`WINEMSYNC=1`, `WINEESYNC=0`);
+- requiring real `msync: bootstrapped` and `msync: up and running` log lines;
+- prefix snapshot/restore while preserving `steamapps` and user data;
+- safe archive extraction, checksum rejection, atomic install and duplicate-launch locking;
+- sanitized technical diagnostics.
 
-## Real setup evidence
+## Runtime comparison
 
-- Wine 11.15 downloaded and verified at `~/Library/Application Support/Portside/Downloads/wine-staging-gcenx-osx64-11.15.tar.xz`; SHA-256 matched the manifest.
-- Wine installed at `~/Library/Application Support/Portside/Runtime/11.15/Contents/Resources/wine/bin/wine`.
-- GStreamer 1.28.5 downloaded and verified, then assembled privately at `~/Library/Application Support/Portside/Runtime/Dependencies/GStreamer.framework`.
-- `wineboot -u` completed with exit code 0 in 21.35 seconds; the Steam prefix was created.
-- Steam installer downloaded from `https://cdn.fastly.steamstatic.com/client/installer/SteamSetup.exe`; observed size 2,380,800 bytes and SHA-256 `7d3654531c32d941b8cae81c4137fc542172bfa9635f169cb392f245a0a12bcb`.
-- After adding the upstream `/S` installer flag, Steam updated itself and real `steam.exe` plus multiple `steamwebhelper.exe` processes were observed. Steam logs reported “Atualização concluída, iniciando o Steam”.
-- The updated `Prefix/Steam` path was exercised in a second real setup attempt. Steam’s updater again launched and downloaded its client manifest; the strict 30-second readiness check returned `steamProcessRunning`, while the current session still could not expose a verifiable on-screen window.
-- The current silent-bootstrap attempt used the real `/S` installer runner and then `steam.exe -silent`. The 30-second bootstrap observation did not find `steam_client_win32.installed`; a real `Steam.exe` process was observed, but the final 20-second readiness check again returned `steamProcessRunning`. No installer UI or Terminal could be observed in this headless agent session, so the absence of a pre-login Windows window is not claimed as fully validated here.
-- On 2026-08-19, the rebuilt signed app was run against the existing prefix with a 10-second per-strategy validation timeout. It launched directly through Wine, observed the Steam window through metadata, ran the controlled CEF strategies, performed exactly one HTML-cache recovery, retried the best strategy, reported `uiUnverified`, and stopped all Steam processes without leaving `steam.exe`, `steamwebhelper`, or `wineserver` running. A second simultaneous Portside launch exited without creating a duplicate Steam process. The run did not access credentials and did not claim functional login UI because CEF readiness evidence remained incomplete.
-- On 2026-08-19, the `cef_32bit_legacy_login` profile was exercised through the packaged Portside host and the real `steam.exe`. The process command line contained `-udpforce -noreactlogin -allosarches -cef-force-32bit` as separate arguments in the requested order, but fresh `webhelper.txt` entries still pointed to `cef.win64`; Portside recorded `requested_cef_architecture=32bit`, `effective_cef_architecture=64bit`, and `legacy_login_flag_ignored=true`. This experiment therefore validates argument delivery, not 32-bit CEF activation or a fix for the black login screen.
-- Login was not performed; no credentials were accessed or stored.
+The official Gcenx Wine Staging 11.6_1 asset is the only Release runtime. The Sikarugir candidate is not bundled or selected: the project did not expose a verifiable official binary release for `WS12WineSikarugir10.0_6`, and the Sikarugir repository distinguishes its closed/restricted runtime components from the LGPL source distribution. No claim is made that Sikarugir was executed locally.
 
-Pixel-level window observation is intentionally disabled because macOS would request Screen Recording permission. Therefore this run does not claim a pixel-level black-screen result; it validates only process/window metadata and CEF evidence. A normal interactive GUI session can confirm the final login rendering manually without granting Portside screen-capture access.
+If a separately authorized Sikarugir build is supplied for development, validate it in an isolated prefix with the exact environment:
 
-## Real Steam validation
+```text
+WINEMSYNC=1
+WINEESYNC=0
+```
 
-Pending on a configured test Mac with a licensed runtime:
+Record `msync: bootstrapped` and `msync: up and running` from the actual Wine output. Environment variables alone are not evidence that MSYNC is active. Do not add a second runtime or fallback path to Release.
 
-- first-run setup and cancel/retry;
-- Steam installation, login persistence, update, window focus, and safe termination;
-- full-library access and install/update/validate/uninstall of a Windows game selected by the user in Steam;
-- diagnostic export and repair without deleting game files.
+## Interactive validation status
 
-## GunZ: The Duel — App ID 3139440
+The automated checks can prove download integrity, process ownership and a stable `steam.exe`/`steamwebhelper` handoff. They cannot prove that the login page is rendered or that it is not black. Portside deliberately does not capture another app’s pixels and therefore does not request Screen Recording permission.
 
-No result is declared yet. Record each of the 30 requested checkpoints separately with status (`success`, `failure`, `not applicable`, or `not tested`), evidence, duration, exit code, and sanitized observation. If anti-cheat prevents a valid session, do not bypass it; classify the result as `Blocked by anti-cheat` only after observing that real failure.
+The packaged app was exercised on 2026-08-19 against the existing Portside prefix. Wine Staging 11.6_1 passed the pinned checksum and extracted successfully; `steam.exe` launched with no experimental arguments, five managed `steamwebhelper` processes were observed, and Portside closed after the stable handoff. The helper command line reported `cef.win64` and `en-US`. This confirms runtime selection and process handoff only; it is not visual confirmation that the login page is rendered or that the black-screen issue is fixed.
 
-## Control game
+On a real display, verify manually:
 
-Select and document a small, legal, free or demo Windows-only Steam title without kernel-level anti-cheat only if GunZ blocks before graphics/input/audio can be evaluated. The control title must be chosen during the real test run based on current Steam availability; it is not embedded in Portside.
+1. setup completes and opens only the managed Windows Steam process;
+2. the login page shows text, fields, QR code and buttons rather than a uniformly black surface;
+3. mouse and keyboard input work;
+4. the Steam library renders after login;
+5. Steam remains open after Portside exits and still renders after a Steam restart;
+6. opening Portside twice does not create another managed Steam tree;
+7. closing Steam through the normal UI or Portside’s stop action terminates only the Portside prefix.
+
+Until those checks are performed on a display, the black-screen issue remains unconfirmed. Process existence, `steamwebhelper` presence or a browser-ready log line alone must not be reported as visual success.
+
+## Diagnostics
+
+Setup and launch failures are captured automatically by Sentry with sanitized fields for runtime, process type, exit code, helper lifecycle, managed window handoff and verified MSYNC log markers. Credentials, account names, Steam IDs, cookies, tokens and file contents are not sent. Full logs remain local in `~/Library/Application Support/Portside/Logs`.

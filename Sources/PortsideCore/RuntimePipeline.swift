@@ -13,7 +13,6 @@ public enum EnvironmentPhase: String, Codable, CaseIterable, Sendable {
     case graphicsInstalling
     case steamDownloading
     case steamInstalling
-    case steamNativeLogin
     case steamUpdating
     case steamLaunching
     case validatingInstallation
@@ -67,17 +66,17 @@ public struct RuntimeComponentManifest: Codable, Equatable, Sendable {
 public enum FreeRuntimeCatalog {
     public static let wine = RuntimeManifest(
         identifier: "wine-staging-gcenx-osx64",
-        version: "11.15",
-        upstreamURL: URL(string: "https://github.com/Gcenx/macOS_Wine_builds/releases/download/11.15/wine-staging-11.15-osx64.tar.xz")!,
-        sha256: "a8c50d0e14fb7982a21506287e1e41e1990fe77c74fa2a32da7dbcf7b21de1e2",
-        expectedSize: 193_561_920,
+        version: "11.6_1",
+        upstreamURL: URL(string: "https://github.com/Gcenx/macOS_Wine_builds/releases/download/11.6_1/wine-staging-11.6_1-osx64.tar.xz")!,
+        sha256: "9e73898fc83b0137638fe90d4868387f30b5993e86aeaef7422d8b1655238014",
+        expectedSize: 322_511_424,
         architecture: "x86_64 via Rosetta 2",
         minimumMacOS: "13.0",
         relativeExecutablePath: "Contents/Resources/wine/bin/wine",
         license: "Wine LGPL-2.1-or-later; upstream packaging license must be reviewed before commercial bundling",
         sourceURL: URL(string: "https://gitlab.winehq.org/wine/wine")!,
         includedComponents: ["Wine Staging", "Wine Mono 11.2.0", "Wine Gecko 2.47.4", "WineD3D"],
-        validatedAt: ISO8601DateFormatter().date(from: "2026-08-08T20:31:36Z") ?? Date(),
+        validatedAt: ISO8601DateFormatter().date(from: "2026-08-19T00:00:00Z") ?? Date(),
         bundleDirectoryName: "Wine Staging.app"
     )
 
@@ -113,15 +112,13 @@ public enum WineProcessEnvironment {
         runtimeExecutable: URL,
         prefix: URL,
         baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
-        wineDebug: String = WineProcessEnvironment.defaultWineDebug,
-        esyncEnabled: Bool = true
+        wineDebug: String = WineProcessEnvironment.defaultWineDebug
     ) -> [String: String] {
         var environment = baseEnvironment
         environment["WINEPREFIX"] = prefix.path
         environment["WINEARCH"] = "win64"
         environment["WINEDLLOVERRIDES"] = WineRuntimePolicy.dllOverrides
         environment["WINEDEBUG"] = wineDebug
-        environment["WINEESYNC"] = esyncEnabled ? "1" : "0"
         environment["PATH"] = prepend(runtimeExecutable.deletingLastPathComponent().path, to: baseEnvironment["PATH"])
         environment["DYLD_FRAMEWORK_PATH"] = prepend(
             GStreamerManager.frameworkURL.deletingLastPathComponent().path,
@@ -139,6 +136,54 @@ public enum WineProcessEnvironment {
         let entries = existing.split(separator: ":").map(String.init)
         guard !entries.contains(value) else { return existing }
         return ([value] + entries).joined(separator: ":")
+    }
+}
+
+/// Development-only environment profiles used when comparing candidate runtimes.
+/// The Sikarugir profile is intentionally not selected by the product runtime and
+/// does not ship any Sikarugir binary or wrapper.
+public enum RuntimeValidationProfile {
+    case officialWine
+    case sikarugirMSyncReference
+
+    public func environment(from base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+        var environment = base
+        switch self {
+        case .officialWine:
+            environment.removeValue(forKey: "WINEMSYNC")
+            environment.removeValue(forKey: "WINEESYNC")
+        case .sikarugirMSyncReference:
+            environment["WINEMSYNC"] = "1"
+            environment["WINEESYNC"] = "0"
+        }
+        return environment
+    }
+}
+
+/// A recoverable snapshot used before changing Wine runtime state in an existing
+/// prefix. The snapshot is intentionally retained after a successful migration.
+public enum PrefixSnapshot {
+    public static func create(prefix: URL, backupsRoot: URL = PortsidePaths.backups, fileManager: FileManager = .default) throws -> URL {
+        try fileManager.createDirectory(at: backupsRoot, withIntermediateDirectories: true)
+        let snapshot = backupsRoot.appendingPathComponent("Steam-prefix-\(UUID().uuidString)", isDirectory: true)
+        if fileManager.fileExists(atPath: prefix.path) {
+            try fileManager.copyItem(at: prefix, to: snapshot)
+        } else {
+            try fileManager.createDirectory(at: snapshot, withIntermediateDirectories: true)
+        }
+        return snapshot
+    }
+
+    public static func restore(snapshot: URL, prefix: URL, fileManager: FileManager = .default) throws {
+        let parent = prefix.deletingLastPathComponent()
+        try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
+        let replacement = parent.appendingPathComponent(".restore-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.copyItem(at: snapshot, to: replacement)
+        if fileManager.fileExists(atPath: prefix.path) {
+            let failedPrefix = parent.appendingPathComponent("Steam-prefix-failed-\(UUID().uuidString)", isDirectory: true)
+            try fileManager.moveItem(at: prefix, to: failedPrefix)
+        }
+        try fileManager.moveItem(at: replacement, to: prefix)
     }
 }
 
@@ -314,9 +359,17 @@ public enum SafeArchiveExtractor {
         let list = try await DirectProcess.run(executable: URL(fileURLWithPath: "/usr/bin/tar"), arguments: ["-tvf", archive.path], logger: logger)
         guard list.status == 0 else { throw RuntimePipelineError.archiveExtractionFailed(list.output) }
         for entry in list.output.split(separator: "\n", omittingEmptySubsequences: true).map(String.init) {
-            guard !entry.hasPrefix("l") && !entry.hasPrefix("h") else { throw RuntimePipelineError.unexpectedArchiveEntry(entry) }
-            let path = entry.split(separator: " ", maxSplits: 8, omittingEmptySubsequences: true).last.map(String.init) ?? entry
-            guard isSafeRelativePath(path) else { throw RuntimePipelineError.unexpectedArchiveEntry(path) }
+            let metadataPath = entry.split(separator: " ", maxSplits: 8, omittingEmptySubsequences: true).last.map(String.init) ?? entry
+            if entry.hasPrefix("l") || entry.hasPrefix("h") {
+                let linkParts = metadataPath.components(separatedBy: " -> ")
+                guard linkParts.count == 2,
+                      isSafeRelativePath(linkParts[0]),
+                      isSafeLinkTarget(linkParts[0], target: linkParts[1]) else {
+                    throw RuntimePipelineError.unexpectedArchiveEntry(metadataPath)
+                }
+            } else {
+                guard isSafeRelativePath(metadataPath) else { throw RuntimePipelineError.unexpectedArchiveEntry(metadataPath) }
+            }
         }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let result = try await DirectProcess.run(executable: URL(fileURLWithPath: "/usr/bin/tar"), arguments: ["-xJf", archive.path, "-C", directory.path], logger: logger)
@@ -326,6 +379,21 @@ public enum SafeArchiveExtractor {
     public static func isSafeRelativePath(_ path: String) -> Bool {
         guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("\0") else { return false }
         return path.split(separator: "/").allSatisfy { $0 != ".." && !$0.isEmpty }
+    }
+
+    private static func isSafeLinkTarget(_ path: String, target: String) -> Bool {
+        guard !target.isEmpty, !target.hasPrefix("/"), !target.contains("\0") else { return false }
+        var components = path.split(separator: "/").dropLast().map(String.init)
+        for component in target.split(separator: "/").map(String.init) {
+            if component.isEmpty || component == "." { continue }
+            if component == ".." {
+                guard !components.isEmpty else { return false }
+                components.removeLast()
+            } else {
+                components.append(component)
+            }
+        }
+        return true
     }
 }
 
@@ -504,14 +572,22 @@ public final class FreeWineRuntimeProvider: @unchecked Sendable {
         progress?(0.8, .prefixCreating)
         let prefix = PortsidePaths.steamPrefix
         try fileManager.createDirectory(at: prefix, withIntermediateDirectories: true)
-        let environment = WineProcessEnvironment.make(runtimeExecutable: finalExecutable, prefix: prefix)
-        let wineboot = installedRoot.appendingPathComponent("Contents/Resources/wine/bin/wineboot")
-        if !fileManager.fileExists(atPath: prefix.appendingPathComponent("system.reg").path) {
-            let result = try await DirectProcess.run(executable: wineboot, arguments: ["-u"], environment: environment, logger: logger)
-            guard result.status == 0 else { throw RuntimePipelineError.processFailed("prefix initialization", result.status) }
+        let snapshot = try PrefixSnapshot.create(prefix: prefix, fileManager: fileManager)
+        do {
+            let environment = WineProcessEnvironment.make(runtimeExecutable: finalExecutable, prefix: prefix)
+            let wineboot = installedRoot.appendingPathComponent("Contents/Resources/wine/bin/wineboot")
+            if !fileManager.fileExists(atPath: prefix.appendingPathComponent("system.reg").path) {
+                logger.write("Initializing the prefix with the selected runtime")
+                let result = try await DirectProcess.run(executable: wineboot, arguments: ["-u"], environment: environment, logger: logger)
+                guard result.status == 0 else { throw RuntimePipelineError.processFailed("prefix initialization", result.status) }
+            }
+            let registryResult = try await WinePrefixManager.configureSilentCrashHandling(runtimeExecutable: finalExecutable, prefix: prefix, logger: logger)
+            guard registryResult.status == 0 else { throw RuntimePipelineError.processFailed("Wine crash-dialog configuration", registryResult.status) }
+        } catch {
+            logger.write("Runtime prefix transition failed; restoring the retained snapshot", level: .error)
+            try? PrefixSnapshot.restore(snapshot: snapshot, prefix: prefix, fileManager: fileManager)
+            throw error
         }
-        let registryResult = try await WinePrefixManager.configureSilentCrashHandling(runtimeExecutable: finalExecutable, prefix: prefix, logger: logger)
-        guard registryResult.status == 0 else { throw RuntimePipelineError.processFailed("Wine crash-dialog configuration", registryResult.status) }
         progress?(1, .steamInstalling)
         let record = InstalledRuntimeRecord(manifest: manifest, installedPath: installedRoot, executablePath: finalExecutable, graphicsBackend: FreeRuntimeCatalog.graphics, installedAt: Date(), gstreamerInstalled: GStreamerManager.isInstalled)
         let recordURL = installedRoot.appendingPathComponent("portside-runtime.json")
@@ -520,312 +596,24 @@ public final class FreeWineRuntimeProvider: @unchecked Sendable {
     }
 }
 
-public struct SteamCEFLogFinding: Sendable, Equatable {
-    public let category: String
-    public let timestamp: String?
-    public let line: String
+public struct RuntimeSynchronizationState: Sendable, Equatable {
+    public let bootstrapped: Bool
+    public let running: Bool
 
-    public init(category: String, timestamp: String? = nil, line: String) {
-        self.category = category
-        self.timestamp = timestamp
-        self.line = line
+    public init(bootstrapped: Bool, running: Bool) {
+        self.bootstrapped = bootstrapped
+        self.running = running
     }
 }
 
-public struct SteamCEFLogBaseline: Sendable, Equatable {
-    public let offsets: [String: Int64]
-
-    public init(offsets: [String: Int64]) {
-        self.offsets = offsets
-    }
-}
-
-public struct SteamCEFLogAnalysis: Sendable, Equatable {
-    public let filesRead: [String]
-    public let findings: [SteamCEFLogFinding]
-    public let failureCategories: [String]
-    public let webhelperRestartCount: Int
-    public let webhelperExitCode: Int32?
-    public let cacheCorruptionLikely: Bool
-    public let browserReadyDetected: Bool
-    public let contentWindowEvidence: Bool
-    public let loginScreenDetected: Bool
-    public let rendererMode: String?
-    public let gpuProcessStatus: String?
-    public let steamVersion: String?
-    public let effectiveCEFArchitecture: String?
-
-    public init(
-        filesRead: [String],
-        findings: [SteamCEFLogFinding],
-        failureCategories: [String] = [],
-        webhelperRestartCount: Int,
-        webhelperExitCode: Int32? = nil,
-        cacheCorruptionLikely: Bool,
-        browserReadyDetected: Bool = false,
-        contentWindowEvidence: Bool = false,
-        loginScreenDetected: Bool = false,
-        rendererMode: String? = nil,
-        gpuProcessStatus: String? = nil,
-        steamVersion: String? = nil,
-        effectiveCEFArchitecture: String? = nil
-    ) {
-        self.filesRead = filesRead; self.findings = findings; self.failureCategories = failureCategories
-        self.webhelperRestartCount = webhelperRestartCount; self.webhelperExitCode = webhelperExitCode
-        self.cacheCorruptionLikely = cacheCorruptionLikely; self.browserReadyDetected = browserReadyDetected
-        self.contentWindowEvidence = contentWindowEvidence; self.loginScreenDetected = loginScreenDetected; self.rendererMode = rendererMode
-        self.gpuProcessStatus = gpuProcessStatus; self.steamVersion = steamVersion
-        self.effectiveCEFArchitecture = effectiveCEFArchitecture
-    }
-
-    public var hasStrongUIEvidence: Bool {
-        let blocking = Set([
-            "cef_gpu_initialization_failed", "cef_angle_failed", "cef_compositor_failed", "cef_renderer_failed",
-            "cef_webhelper_crash_loop", "cef_cache_failure", "cef_cache_failed", "cef_dependency_missing",
-            "cef_resources_not_loaded", "cef_sandbox_failure", "cef_network_failure", "cef_network_failed",
-            "cef_certificate_failure", "cef_certificate_failed"
-        ])
-        return browserReadyDetected && contentWindowEvidence && failureCategories.allSatisfy { !blocking.contains($0) }
-    }
-}
-
-public enum SteamCEFLogAnalyzer {
-    public static let logFilenames = [
-        "webhelper_gpu.txt", "cef_log.txt", "steamui_html.txt", "steamui_login.txt", "webhelper.txt",
-        "bootstrap_log.txt", "console_log.txt", "connection_log.txt"
-    ]
-
-    public static func captureBaseline(prefix: URL, fileManager: FileManager = .default) -> SteamCEFLogBaseline {
-        let roots = [
-            prefix.appendingPathComponent("drive_c/Program Files (x86)/Steam", isDirectory: true),
-            prefix.appendingPathComponent("drive_c/Program Files/Steam", isDirectory: true)
-        ]
-        var offsets: [String: Int64] = [:]
-        for root in roots {
-            for filename in logFilenames {
-                let url = root.appendingPathComponent("logs", isDirectory: true).appendingPathComponent(filename)
-                if let values = try? url.resourceValues(forKeys: [.fileSizeKey]), let size = values.fileSize {
-                    offsets[url.path] = Int64(size)
-                }
-            }
-        }
-        return SteamCEFLogBaseline(offsets: offsets)
-    }
-
-    public static func analyze(prefix: URL, fileManager: FileManager = .default, minimumModificationDate: Date? = nil, baseline: SteamCEFLogBaseline? = nil) -> SteamCEFLogAnalysis {
-        let steamRoots = [
-            prefix.appendingPathComponent("drive_c/Program Files (x86)/Steam", isDirectory: true),
-            prefix.appendingPathComponent("drive_c/Program Files/Steam", isDirectory: true)
-        ]
-        var filesRead: [String] = []
-        var findings: [SteamCEFLogFinding] = []
-        var failureCategories = Set<String>()
-        var restartCount = 0
-        var webhelperExitCode: Int32?
-        var cacheCorruptionLikely = false
-        var browserReadyDetected = false
-        var contentWindowSignals = Set<String>()
-        var contentWindowEvidence = false
-        var loginScreenDetected = false
-        var rendererMode: String?
-        var gpuProcessStatus: String?
-        var steamVersion: String?
-        var effectiveCEFArchitecture: String?
-
-        for root in steamRoots {
-            for filename in logFilenames {
-                let url = root.appendingPathComponent("logs", isDirectory: true).appendingPathComponent(filename)
-                guard fileManager.fileExists(atPath: url.path), let content = readTail(of: url, fileManager: fileManager, startingOffset: baseline?.offsets[url.path]) else { continue }
-                if baseline == nil, let minimumModificationDate,
-                   let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
-                   modified < minimumModificationDate {
-                    continue
-                }
-                filesRead.append(filename)
-                for rawLine in content.split(whereSeparator: \.isNewline).map(String.init) {
-                    let lowercased = rawLine.lowercased()
-                    if lowercased.contains("restart webhelper process") { restartCount += 1 }
-                    if lowercased.contains("webhelper"), lowercased.contains("exit") {
-                        let candidate = rawLine.split(whereSeparator: { !$0.isNumber && $0 != "-" }).last.flatMap { Int32($0) }
-                        webhelperExitCode = candidate ?? webhelperExitCode
-                    }
-                    if lowercased.contains("browserready") { browserReadyDetected = true }
-                    if lowercased.contains("waitingforcredentials")
-                        || lowercased.contains("waiting for credentials")
-                        || (lowercased.contains("setloginstate") && lowercased.contains("none")) {
-                        loginScreenDetected = true
-                    }
-                    if let signal = ["createresponse", "getdesiredsteamuiwindows", "popuphtmlwindow", "created browser window", "created window"].first(where: lowercased.contains) {
-                        contentWindowSignals.insert(signal)
-                    }
-                    if lowercased.contains("client version") {
-                        if let version = rawLine.split(separator: ":", maxSplits: 1).last {
-                            steamVersion = String(PortsideLogger.sanitize(String(version).trimmingCharacters(in: .whitespacesAndNewlines)).prefix(80))
-                        }
-                    }
-                    if lowercased.contains("cef.win32") || lowercased.contains("cef win32") || lowercased.contains("32-bit cef") {
-                        effectiveCEFArchitecture = "32bit"
-                    } else if lowercased.contains("cef.win64") || lowercased.contains("cef win64") || lowercased.contains("64-bit cef") {
-                        effectiveCEFArchitecture = "64bit"
-                    }
-                    if lowercased.contains("disabling gpu acceleration") || lowercased.contains("software rendering") {
-                        rendererMode = "software"; gpuProcessStatus = "disabled"
-                    } else if lowercased.contains("swiftshader") {
-                        rendererMode = "swiftshader"
-                    } else if lowercased.contains("use-gl=angle") || lowercased.contains("angle") {
-                        rendererMode = "angle"
-                    } else if lowercased.contains("d3d11") {
-                        rendererMode = "d3d11"
-                    } else if lowercased.contains("opengl") {
-                        rendererMode = "opengl"
-                    } else if lowercased.contains("vulkan") {
-                        rendererMode = "vulkan"
-                    } else if lowercased.contains("gpu acceleration") {
-                        rendererMode = "gpu"
-                    }
-                    if lowercased.contains("gpu process started") && gpuProcessStatus == nil { gpuProcessStatus = "started" }
-                    if lowercased.contains("gpu process crashed") || lowercased.contains("gpu process exited") || lowercased.contains("failed to initialize gpu") || lowercased.contains("gpu initialization failed") || lowercased.contains("gpu process launch failed") {
-                        failureCategories.insert("cef_gpu_initialization_failed"); gpuProcessStatus = "failed"
-                    }
-                    let angleFailure = (lowercased.contains("angle") || lowercased.contains("eglcreatecontext") || lowercased.contains("renderer11.cpp") || lowercased.contains("dxgi"))
-                        && ["error", "failed", "unable", "unsupported"].contains(where: lowercased.contains)
-                    if angleFailure { failureCategories.insert("cef_angle_failed") }
-                    let compositorFailure = (lowercased.contains("compositor") || lowercased.contains("context lost")) && ["error", "failed", "crashed", "lost", "unable", "disabled"].contains(where: lowercased.contains)
-                    if compositorFailure { failureCategories.insert("cef_compositor_failed") }
-                    if lowercased.contains("renderer") && (lowercased.contains("crash") || lowercased.contains("failed") || lowercased.contains("exited")) {
-                        failureCategories.insert("cef_renderer_failed")
-                    }
-                    if lowercased.contains("cache") && (lowercased.contains("corrupt") || lowercased.contains("failed") || lowercased.contains("invalid") || lowercased.contains("access denied") || lowercased.contains("loading cache")) {
-                        failureCategories.insert("cef_cache_failure"); failureCategories.insert("cef_cache_failed"); cacheCorruptionLikely = true
-                    }
-                    if ["err_connection", "err_name_not_resolved", "err_network_changed", "wsalookupservicebegin failed", "network error", "http error"].contains(where: lowercased.contains) {
-                        failureCategories.insert("cef_network_failure"); failureCategories.insert("cef_network_failed")
-                    }
-                    if ["err_cert", "certificate verification failed", "crl - verification failed", "certificate error"].contains(where: lowercased.contains) {
-                        failureCategories.insert("cef_certificate_failure"); failureCategories.insert("cef_certificate_failed")
-                    }
-                    if ["missing dll", "could not load", "module not found", "dependency missing"].contains(where: lowercased.contains) {
-                        failureCategories.insert("cef_dependency_missing")
-                    }
-                    if ["failed to load resource", "resource load failed"].contains(where: lowercased.contains) {
-                        failureCategories.insert("cef_resources_not_loaded")
-                    }
-                    if lowercased.contains("sandbox") && ["failed", "error", "denied", "unable"].contains(where: lowercased.contains) {
-                        failureCategories.insert("cef_sandbox_failure")
-                    }
-                    let matches = failureCategories.filter { category in
-                        switch category {
-                        case "cef_gpu_initialization_failed": return lowercased.contains("gpu") || lowercased.contains("context lost")
-                        case "cef_angle_failed": return lowercased.contains("angle") || lowercased.contains("eglcreatecontext") || lowercased.contains("dxgi")
-                        case "cef_compositor_failed": return lowercased.contains("compositor") || lowercased.contains("context lost")
-                        case "cef_renderer_failed": return lowercased.contains("renderer")
-                        case "cef_cache_failure", "cef_cache_failed": return lowercased.contains("cache")
-                        case "cef_network_failure", "cef_network_failed": return ["err_connection", "err_name_not_resolved", "err_network_changed", "wsalookupservicebegin failed", "network error", "http error"].contains(where: lowercased.contains)
-                        case "cef_certificate_failure", "cef_certificate_failed": return ["err_cert", "certificate", "crl - verification failed"].contains(where: lowercased.contains)
-                        case "cef_dependency_missing": return ["missing dll", "could not load", "module not found", "dependency missing"].contains(where: lowercased.contains)
-                        case "cef_resources_not_loaded": return ["failed to load resource", "resource load failed"].contains(where: lowercased.contains)
-                        case "cef_sandbox_failure": return lowercased.contains("sandbox")
-                        default: return false
-                        }
-                    }.sorted()
-                    guard !matches.isEmpty else { continue }
-                    let safeLine = String(PortsideLogger.sanitize(rawLine).prefix(500))
-                    let timestamp = rawLine.first == "[" ? rawLine.split(separator: "]", maxSplits: 1).first.map { String($0.dropFirst()) } : nil
-                    for category in matches {
-                        findings.append(SteamCEFLogFinding(category: category, timestamp: timestamp, line: safeLine))
-                        if findings.count >= 24 { break }
-                    }
-                    if findings.count >= 24 { break }
-                }
-                if findings.count >= 24 { break }
-            }
-            if findings.count >= 24 { break }
-        }
-        if restartCount >= 3 { failureCategories.insert("cef_webhelper_crash_loop") }
-        contentWindowEvidence = contentWindowSignals.count >= 2
-        if !browserReadyDetected || !contentWindowEvidence { failureCategories.insert("cef_ui_unverified") }
-        return SteamCEFLogAnalysis(
-            filesRead: Array(Set(filesRead)).sorted(), findings: findings,
-            failureCategories: failureCategories.sorted(), webhelperRestartCount: restartCount,
-            webhelperExitCode: webhelperExitCode, cacheCorruptionLikely: cacheCorruptionLikely,
-            browserReadyDetected: browserReadyDetected, contentWindowEvidence: contentWindowEvidence, loginScreenDetected: loginScreenDetected,
-            rendererMode: rendererMode, gpuProcessStatus: gpuProcessStatus, steamVersion: steamVersion,
-            effectiveCEFArchitecture: effectiveCEFArchitecture
+public enum RuntimeSynchronizationLog {
+    public static func state(from output: String) -> RuntimeSynchronizationState {
+        let lines = output.lowercased().split(whereSeparator: \.isNewline).map(String.init)
+        return RuntimeSynchronizationState(
+            bootstrapped: lines.contains { $0.contains("msync: bootstrapped") },
+            running: lines.contains { $0.contains("msync: up and running") }
         )
     }
-
-    private static func readTail(of url: URL, fileManager: FileManager, startingOffset: Int64? = nil) -> String? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? handle.close() }
-        let fileSize = Int64((try? handle.seekToEnd()) ?? 0)
-        if let startingOffset, fileSize <= startingOffset { return nil }
-        let minimumOffset = max(Int64(0), min(fileSize, startingOffset ?? 0))
-        let offset = fileSize > minimumOffset + 64 * 1024 ? fileSize - 64 * 1024 : minimumOffset
-        try? handle.seek(toOffset: UInt64(offset))
-        guard let data = try? handle.readToEnd() else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-}
-
-public enum SteamWindowVisualState: String, Codable, Sendable {
-    case unavailable
-    case black
-    case rendered
-}
-
-public enum SteamWindowPixelAnalyzer {
-    /// Classifies sampled window pixels without treating a dark Steam theme as a blank window.
-    /// A window is considered black only when its content is almost uniformly near zero.
-    public static func classify(
-        width: Int,
-        height: Int,
-        bytesPerRow: Int,
-        bytesPerPixel: Int,
-        alphaFirst: Bool = false,
-        data: [UInt8]
-    ) -> SteamWindowVisualState {
-        guard width > 0, height > 0, bytesPerPixel >= 3, bytesPerRow > 0 else { return .unavailable }
-        let colorOffset = alphaFirst && bytesPerPixel >= 4 ? 1 : 0
-        guard colorOffset + 2 < bytesPerPixel else { return .unavailable }
-
-        let sampleStepX = max(1, width / 16)
-        let sampleStepY = max(1, height / 12)
-        let contentStartY = height > 160 ? min(height - 1, height / 10) : 0
-        var samples = 0
-        var darkSamples = 0
-        var brightSamples = 0
-        var totalLuminance = 0.0
-
-        for y in stride(from: contentStartY, to: height, by: sampleStepY) {
-            for x in stride(from: 0, to: width, by: sampleStepX) {
-                let offset = (y * bytesPerRow) + (x * bytesPerPixel) + colorOffset
-                guard offset + 2 < data.count else { continue }
-                let red = Double(data[offset])
-                let green = Double(data[offset + 1])
-                let blue = Double(data[offset + 2])
-                let luminance = (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
-                samples += 1
-                totalLuminance += luminance
-                if max(red, green, blue) <= 12 { darkSamples += 1 }
-                if max(red, green, blue) >= 32 { brightSamples += 1 }
-            }
-        }
-
-        guard samples > 0 else { return .unavailable }
-        let meanLuminance = totalLuminance / Double(samples)
-        let brightFraction = Double(brightSamples) / Double(samples)
-        if meanLuminance < 18 && brightFraction < 0.025 {
-            return .black
-        }
-        if darkSamples < samples || meanLuminance >= 18 || brightFraction >= 0.025 {
-            return .rendered
-        }
-        return .unavailable
-    }
-
-    /// Pixel classification is available only for bytes supplied by a caller.
-    /// Portside deliberately does not capture another application's window or the
-    /// display, because those CoreGraphics APIs require Screen Recording access.
 }
 
 public final class SteamLaunchLock: @unchecked Sendable {
@@ -859,254 +647,171 @@ public final class SteamLaunchLock: @unchecked Sendable {
     }
 }
 
+public enum SteamProcessStatus: String, Codable, Sendable {
+    case notRunning
+    case starting
+    case ready
+    case exitedUnexpectedly
+    case webhelperCrashLoop
+}
+
 private struct SteamProcessSnapshot {
     let processIdentifier: pid_t
+    let commandLine: String
 }
 
 public struct SteamReadinessReport: Sendable, Equatable {
     public let status: SteamProcessStatus
-    public let cefStrategy: String
     public let webhelperStarted: Bool
     public let webhelperExitCode: Int32?
     public let webhelperRestartCount: Int
     public let webhelperProcessCount: Int
     public let webhelperStableDuration: TimeInterval
     public let windowDetected: Bool
-    public let cefArgumentsObserved: Bool
-    public let browserReadyDetected: Bool
-    public let rendererMode: String?
-    public let gpuProcessStatus: String?
-    public let windowVisualState: SteamWindowVisualState
-    public let logAnalysis: SteamCEFLogAnalysis
+    public let runtimeSynchronization: RuntimeSynchronizationState
 
     public init(
         status: SteamProcessStatus,
-        cefStrategy: String,
         webhelperStarted: Bool,
-        webhelperExitCode: Int32?,
-        webhelperRestartCount: Int,
+        webhelperExitCode: Int32? = nil,
+        webhelperRestartCount: Int = 0,
         webhelperProcessCount: Int = 0,
-        webhelperStableDuration: TimeInterval,
-        windowDetected: Bool,
-        cefArgumentsObserved: Bool,
-        browserReadyDetected: Bool,
-        rendererMode: String?,
-        gpuProcessStatus: String?,
-        windowVisualState: SteamWindowVisualState = .unavailable,
-        logAnalysis: SteamCEFLogAnalysis
+        webhelperStableDuration: TimeInterval = 0,
+        windowDetected: Bool = false,
+        runtimeSynchronization: RuntimeSynchronizationState = RuntimeSynchronizationState(bootstrapped: false, running: false)
     ) {
         self.status = status
-        self.cefStrategy = cefStrategy
         self.webhelperStarted = webhelperStarted
         self.webhelperExitCode = webhelperExitCode
         self.webhelperRestartCount = webhelperRestartCount
         self.webhelperProcessCount = webhelperProcessCount
         self.webhelperStableDuration = webhelperStableDuration
         self.windowDetected = windowDetected
-        self.cefArgumentsObserved = cefArgumentsObserved
-        self.browserReadyDetected = browserReadyDetected
-        self.rendererMode = rendererMode
-        self.gpuProcessStatus = gpuProcessStatus
-        self.windowVisualState = windowVisualState
-        self.logAnalysis = logAnalysis
+        self.runtimeSynchronization = runtimeSynchronization
     }
-}
-
-public enum SteamHTMLCacheRecovery {
-    public static func renameHTMLCache(prefix: URL, fileManager: FileManager = .default, logger: PortsideLogger = PortsideLogger()) throws -> [URL] {
-        let usersRoot = prefix.appendingPathComponent("drive_c/users", isDirectory: true)
-        guard let users = try? fileManager.contentsOfDirectory(at: usersRoot, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
-        var backups: [URL] = []
-        for user in users where (try? user.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
-            let cache = user.appendingPathComponent("AppData/Local/Steam/htmlcache", isDirectory: true)
-            guard fileManager.fileExists(atPath: cache.path) else { continue }
-            let backup = cache.deletingLastPathComponent().appendingPathComponent("htmlcache.portside-backup-\(UUID().uuidString)", isDirectory: true)
-            try fileManager.moveItem(at: cache, to: backup)
-            backups.append(backup)
-            logger.write("Renamed Steam HTML cache for recovery: \(backup.path)")
-            cleanupOldBackups(in: cache.deletingLastPathComponent(), fileManager: fileManager, logger: logger)
-        }
-        return backups
-    }
-
-    private static func cleanupOldBackups(in directory: URL, fileManager: FileManager, logger: PortsideLogger) {
-        guard let entries = try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
-        let backups = entries.filter { $0.lastPathComponent.hasPrefix("htmlcache.portside-backup-") }
-            .sorted { lhs, rhs in
-                let left = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? nil
-                let right = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? nil
-                return (left ?? .distantPast) > (right ?? .distantPast)
-            }
-        let retentionCutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
-        for (index, backup) in backups.enumerated() {
-            let modified = (try? backup.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? nil
-            guard index >= 2 || (modified.map { $0 < retentionCutoff } ?? false) else { continue }
-            let oldBackup = backup
-            try? fileManager.removeItem(at: oldBackup)
-            logger.write("Removed expired Steam HTML cache backup", level: .info)
-        }
-    }
-}
-
-public enum SteamProcessStatus: String, Codable, Sendable {
-    case notRunning, steamStarting, wineProcessRunning, steamProcessRunning, webhelperStarting, webhelperNotStarted, webhelperCrashLoop
-    case windowDetected, blackWindow, windowNotVisible, uiUnverified, cefReady, ready
-    case cefGPUFailed, cefRendererFailed, cefNetworkFailed, rendererFailed, resourcesNotLoaded, cefFailed, windowVisible, exitedUnexpectedly
 }
 
 public final class SteamReadinessMonitor: @unchecked Sendable {
     private let logger: PortsideLogger
-    public init(logger: PortsideLogger = PortsideLogger()) { self.logger = logger }
 
-    public func bootstrapComplete(prefix: URL) -> Bool {
-        let markers = [
-            prefix.appendingPathComponent("drive_c/Program Files (x86)/Steam/package/steam_client_win32.installed"),
-            prefix.appendingPathComponent("drive_c/Program Files/Steam/package/steam_client_win32.installed")
-        ]
-        return markers.contains { FileManager.default.fileExists(atPath: $0.path) }
+    public init(logger: PortsideLogger = PortsideLogger()) {
+        self.logger = logger
     }
 
-    public func waitForBootstrap(prefix: URL, timeout: TimeInterval = 180) async -> Bool {
-        let marker = prefix.appendingPathComponent("drive_c/Program Files (x86)/Steam/package/steam_client_win32.installed")
-        let alternateMarker = prefix.appendingPathComponent("drive_c/Program Files/Steam/package/steam_client_win32.installed")
+    public func waitForSteam(executable: URL, prefix: URL = PortsidePaths.steamPrefix, timeout: TimeInterval = 180) async -> SteamProcessStatus {
+        await waitForSteamHandoff(prefix: prefix, timeout: timeout).status
+    }
+
+    /// A permission-free handoff check. It verifies the managed process tree and
+    /// activates the owning process, but it never captures windows or display pixels.
+    public func waitForSteamHandoff(prefix: URL = PortsidePaths.steamPrefix, baselineWebhelperLines: Set<String> = [], timeout: TimeInterval = 180, requiredStableDuration: TimeInterval = 4) async -> SteamReadinessReport {
         let deadline = Date().addingTimeInterval(timeout)
+        var steamWasRunning = false
+        var helperWasRunning = false
+        var helperStarted = false
+        var helperRestarts = 0
+        var helperStableSince: Date?
+        var helperProcessCount = 0
+        var lastReport = RuntimeSynchronizationState(bootstrapped: false, running: false)
+
         while Date() < deadline {
             let snapshot = await processSnapshot()
-            terminateWineDebuggersIfNeeded(in: snapshot, stage: "Steam bootstrap")
-            let markerExists = FileManager.default.fileExists(atPath: marker.path) || FileManager.default.fileExists(atPath: alternateMarker.path)
-            if markerExists && managedProcessSnapshot(snapshot, prefix: prefix, processNames: ["steam.exe", "steamwebhelper"]) {
-                logger.write("Steam bootstrap marker detected")
-                return true
-            }
-            try? await Task.sleep(for: .seconds(1))
-        }
-        return false
-    }
+            let steam = managedProcessSnapshot(snapshot, prefix: prefix, processNames: ["steam.exe"])
+            let helpers = managedProcessLines(snapshot, prefix: prefix, processName: "steamwebhelper", baseline: baselineWebhelperLines)
+            let helperRunning = !helpers.isEmpty
+            helperProcessCount = max(helperProcessCount, helpers.count)
+            steamWasRunning = steamWasRunning || steam
 
-    public func waitForSteam(executable: URL, prefix: URL = PortsidePaths.steamPrefix, timeout: TimeInterval = 60) async -> SteamProcessStatus {
-        await waitForSteamReport(executable: executable, prefix: prefix, timeout: timeout).status
-    }
-
-    public func waitForSteamReport(executable: URL, prefix: URL = PortsidePaths.steamPrefix, strategy: SteamLaunchConfiguration = .primary, timeout: TimeInterval = 60, attemptStartedAt: Date? = nil, logBaseline: SteamCEFLogBaseline? = nil) async -> SteamReadinessReport {
-        let deadline = Date().addingTimeInterval(timeout)
-        let attemptStartedAt = attemptStartedAt ?? Date()
-        var sawSteam = false
-        var webhelperWasRunning = false
-        var webhelperStarted = false
-        var webhelperRestartCount = 0
-        var webhelperProcessCount = 0
-        var webhelperStableSince: Date?
-        var windowDetected = false
-        var windowVisualState = SteamWindowVisualState.unavailable
-        var cefArgumentsObserved = strategy.arguments.isEmpty
-        var loggedUnverifiedWindow = false
-        while Date() < deadline {
-            let snapshot = await processSnapshot()
-            terminateWineDebuggersIfNeeded(in: snapshot, stage: "Steam startup")
-            let steamRunning = managedProcessSnapshot(snapshot, prefix: prefix, processNames: ["steam.exe", "steamwebhelper"])
-            let webhelperRunning = managedProcessSnapshot(snapshot, prefix: prefix, processNames: ["steamwebhelper"])
-            webhelperProcessCount = max(webhelperProcessCount, snapshot.split(whereSeparator: \.isNewline).filter { $0.contains("steamwebhelper") }.count)
-            if steamRunning { sawSteam = true }
-            if webhelperRunning && cefArgumentsReachedWebhelper(snapshot: snapshot, strategy: strategy) { cefArgumentsObserved = true }
-            if webhelperRunning {
-                if !webhelperWasRunning {
-                    if webhelperStarted { webhelperRestartCount += 1 }
-                    webhelperStarted = true
-                    webhelperStableSince = Date()
+            if helperRunning {
+                if !helperWasRunning {
+                    helperStarted = true
+                    helperStableSince = Date()
                     logger.write("steamwebhelper_started")
                 }
-            } else if webhelperWasRunning {
-                webhelperRestartCount += 1
-                webhelperStableSince = nil
+            } else if helperWasRunning {
+                helperRestarts += 1
+                helperStableSince = nil
                 logger.write("steamwebhelper_exited", level: .warning)
             }
-            webhelperWasRunning = webhelperRunning
-            if sawSteam, let steamProcess = steamProcessSnapshot(processSnapshot: snapshot) {
-                NSRunningApplication(processIdentifier: steamProcess.processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-                windowDetected = true
-                // Process ownership is used as a permission-free handoff signal.
-                // Portside never enumerates windows or captures another app's pixels.
-                windowVisualState = .unavailable
-                let stableSeconds = stableDuration(since: webhelperStableSince)
-                let analysis = SteamCEFLogAnalyzer.analyze(prefix: prefix, minimumModificationDate: attemptStartedAt, baseline: logBaseline)
-                let visualStateAllowsReadiness = windowVisualState != .black
-                if webhelperWasRunning && webhelperStarted && stableSeconds >= 2 && cefArgumentsObserved && analysis.hasStrongUIEvidence && visualStateAllowsReadiness {
-                    logger.write("Steam window detected and activated")
-                    return SteamReadinessReport(status: .ready, cefStrategy: strategy.identifier, webhelperStarted: webhelperStarted, webhelperExitCode: analysis.webhelperExitCode, webhelperRestartCount: max(webhelperRestartCount, analysis.webhelperRestartCount), webhelperProcessCount: webhelperProcessCount, webhelperStableDuration: stableSeconds, windowDetected: windowDetected, cefArgumentsObserved: cefArgumentsObserved, browserReadyDetected: analysis.browserReadyDetected, rendererMode: analysis.rendererMode, gpuProcessStatus: analysis.gpuProcessStatus, windowVisualState: windowVisualState, logAnalysis: analysis)
+            helperWasRunning = helperRunning
+
+            if steam, helperRunning {
+                if let process = steamProcessSnapshot(processSnapshot: snapshot, prefix: prefix) {
+                    NSRunningApplication(processIdentifier: process.processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
                 }
-                if !loggedUnverifiedWindow {
-                    logger.write("Steam window detected before webhelper UI verification", level: .warning)
-                    loggedUnverifiedWindow = true
+                let stableDuration = stableDuration(since: helperStableSince)
+                if helperStarted && stableDuration >= requiredStableDuration {
+                    logger.write("steam_window_handoff_detected")
+                    return SteamReadinessReport(
+                        status: .ready,
+                        webhelperStarted: true,
+                        webhelperRestartCount: helperRestarts,
+                        webhelperProcessCount: helperProcessCount,
+                        webhelperStableDuration: stableDuration,
+                        windowDetected: true,
+                        runtimeSynchronization: lastReport
+                    )
                 }
             }
-            if webhelperRestartCount >= 3 {
+
+            if helperRestarts >= 3 {
                 logger.write("steamwebhelper_crash_loop", level: .error)
-                break
+                return SteamReadinessReport(
+                    status: .webhelperCrashLoop,
+                    webhelperStarted: helperStarted,
+                    webhelperRestartCount: helperRestarts,
+                    webhelperProcessCount: helperProcessCount,
+                    webhelperStableDuration: stableDuration(since: helperStableSince),
+                    runtimeSynchronization: lastReport
+                )
             }
-            if sawSteam { try? await Task.sleep(for: .milliseconds(750)); continue }
-            if snapshot.contains(executable.lastPathComponent.lowercased()) { try? await Task.sleep(for: .milliseconds(750)); continue }
-            try? await Task.sleep(for: .seconds(1))
+
+            if let line = snapshot.split(whereSeparator: \.isNewline).first(where: { $0.contains("steam_process_output") }) {
+                lastReport = RuntimeSynchronizationLog.state(from: String(line))
+            }
+            try? await Task.sleep(for: .milliseconds(750))
         }
-        let analysis = SteamCEFLogAnalyzer.analyze(prefix: prefix, minimumModificationDate: attemptStartedAt, baseline: logBaseline)
-        let restartCount = max(webhelperRestartCount, analysis.webhelperRestartCount)
-        let status: SteamProcessStatus
-        if analysis.failureCategories.contains("cef_webhelper_crash_loop") || restartCount >= 3 {
-            status = .webhelperCrashLoop
-        } else if !sawSteam && !webhelperStarted {
-            status = .notRunning
-        } else if !webhelperStarted {
-            status = .webhelperStarting
-        } else if windowVisualState == .black {
-            status = .blackWindow
-        } else if analysis.failureCategories.contains("cef_renderer_failed") {
-            status = .cefRendererFailed
-        } else if analysis.failureCategories.contains(where: { $0 == "cef_network_failure" || $0 == "cef_network_failed" || $0 == "cef_certificate_failure" || $0 == "cef_certificate_failed" }) {
-            status = .cefNetworkFailed
-        } else if analysis.failureCategories.contains("cef_resources_not_loaded") {
-            status = .resourcesNotLoaded
-        } else if analysis.failureCategories.contains(where: { $0 == "cef_gpu_initialization_failed" || $0 == "cef_angle_failed" || $0 == "cef_compositor_failed" || $0 == "cef_sandbox_failure" || $0 == "cef_dependency_missing" || $0 == "cef_cache_failure" || $0 == "cef_cache_failed" }) {
-            status = .cefGPUFailed
-        } else if sawSteam && !windowDetected {
-            status = .windowNotVisible
-        } else if sawSteam || windowDetected || webhelperStarted {
-            status = .uiUnverified
-        } else {
-            status = .exitedUnexpectedly
-        }
-        return SteamReadinessReport(status: status, cefStrategy: strategy.identifier, webhelperStarted: webhelperStarted, webhelperExitCode: analysis.webhelperExitCode, webhelperRestartCount: restartCount, webhelperProcessCount: webhelperProcessCount, webhelperStableDuration: stableDuration(since: webhelperStableSince), windowDetected: windowDetected, cefArgumentsObserved: cefArgumentsObserved, browserReadyDetected: analysis.browserReadyDetected, rendererMode: analysis.rendererMode, gpuProcessStatus: analysis.gpuProcessStatus, windowVisualState: windowVisualState, logAnalysis: analysis)
+
+        logger.write("steam_handoff_timeout", level: .error)
+        return SteamReadinessReport(
+            status: steamWasRunning ? (helperStarted ? .exitedUnexpectedly : .starting) : .notRunning,
+            webhelperStarted: helperStarted,
+            webhelperRestartCount: helperRestarts,
+            webhelperProcessCount: helperProcessCount,
+            webhelperStableDuration: stableDuration(since: helperStableSince),
+            runtimeSynchronization: lastReport
+        )
     }
 
     public func isSteamProcessRunning(prefix: URL = PortsidePaths.steamPrefix) async -> Bool {
-        let snapshot = await processSnapshot()
-        return managedProcessSnapshot(snapshot, prefix: prefix, processNames: ["steam.exe", "steamwebhelper"])
+        managedProcessSnapshot(await processSnapshot(), prefix: prefix, processNames: ["steam.exe", "steamwebhelper"])
+    }
+
+    public func captureWebhelperLines() async -> Set<String> {
+        Set((await processSnapshot()).split(whereSeparator: \.isNewline).map(String.init).filter { $0.contains("steamwebhelper") })
     }
 
     public func stopSteam(runtimeExecutable: URL, prefix: URL) async {
         let wineserver = runtimeExecutable.deletingLastPathComponent().appendingPathComponent("wineserver")
-        guard FileManager.default.isExecutableFile(atPath: wineserver.path) else {
-            logger.write("Could not locate wineserver while stopping Steam", level: .error)
-            return
+        if FileManager.default.isExecutableFile(atPath: wineserver.path) {
+            let killServer = Process()
+            killServer.executableURL = wineserver
+            killServer.arguments = ["-k"]
+            killServer.environment = WineProcessEnvironment.make(runtimeExecutable: runtimeExecutable, prefix: prefix)
+            killServer.standardOutput = FileHandle.nullDevice
+            killServer.standardError = FileHandle.nullDevice
+            try? killServer.run()
+            try? await Task.sleep(for: .milliseconds(750))
+            if killServer.isRunning { killServer.terminate() }
         }
-        let killServer = Process()
-        killServer.executableURL = wineserver
-        killServer.arguments = ["-k"]
-        killServer.environment = WineProcessEnvironment.make(runtimeExecutable: runtimeExecutable, prefix: prefix)
-        killServer.standardOutput = FileHandle.nullDevice
-        killServer.standardError = FileHandle.nullDevice
-        try? killServer.run()
-        try? await Task.sleep(for: .milliseconds(750))
-        if killServer.isRunning {
-            killServer.terminate()
-            logger.write("wineserver -k exceeded the graceful stop window; continuing with managed process cleanup", level: .warning)
-        }
-        logger.write("Steam process tree termination requested for the managed prefix")
-        await forceTerminateManagedSteamIfNeeded()
+        await forceTerminateManagedSteamIfNeeded(prefix: prefix)
+        logger.write("Managed Steam process tree termination requested")
     }
 
-    public func waitForSteamToStop(timeout: TimeInterval = 20) async -> Bool {
+    public func waitForSteamToStop(prefix: URL = PortsidePaths.steamPrefix, timeout: TimeInterval = 20) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if !(await isSteamProcessRunning(prefix: PortsidePaths.steamPrefix)) {
+            if !(await isSteamProcessRunning(prefix: prefix)) {
                 logger.write("Steam process tree stopped")
                 return true
             }
@@ -1116,161 +821,85 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         return false
     }
 
-    /// Waits for the legacy no-browser Steam handoff without inspecting a window
-    /// or requiring Screen Recording permission.
-    public func waitForStableSteamProcess(prefix: URL = PortsidePaths.steamPrefix, timeout: TimeInterval = 20, requiredStableDuration: TimeInterval = 3) async -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        var stableSince: Date?
-        while Date() < deadline {
-            let snapshot = await processSnapshot()
-            let isRunning = managedProcessSnapshot(snapshot, prefix: prefix, processNames: ["steam.exe"])
-            if isRunning {
-                stableSince = stableSince ?? Date()
-                if let stableSince, Date().timeIntervalSince(stableSince) >= requiredStableDuration {
-                    logger.write("Steam no-browser handoff process remained stable")
-                    return true
-                }
-            } else {
-                stableSince = nil
-            }
-            try? await Task.sleep(for: .milliseconds(500))
-        }
-        logger.write("Steam no-browser handoff process did not remain stable before the timeout", level: .warning)
-        return false
+    public func activateVisibleSteamWindow(prefix: URL = PortsidePaths.steamPrefix) async -> Bool {
+        let snapshot = await processSnapshot()
+        guard managedProcessSnapshot(snapshot, prefix: prefix, processNames: ["steam.exe", "steamwebhelper"]),
+              let steamProcess = steamProcessSnapshot(processSnapshot: snapshot, prefix: prefix) else { return false }
+        NSRunningApplication(processIdentifier: steamProcess.processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        return true
     }
 
-    /// Waits for the user to finish the first Steam login. This phase intentionally
-    /// has no timeout: the user may need as long as necessary to complete MFA or a
-    /// CAPTCHA. It only ends when Steam exits or its login becomes observable.
-    public func waitForSteamLogin(prefix: URL = PortsidePaths.steamPrefix, initialLoginState: SteamNativeLoginState? = nil) async -> Bool {
-        // Wine can return from the launcher a moment before steam.exe and its
-        // helpers are visible in the process table. This is only a startup grace
-        // period; once Steam is observed, there is deliberately no login timeout.
-        let startupDeadline = Date().addingTimeInterval(30)
-        var didObserveSteam = false
-        while true {
-            let snapshot = await processSnapshot()
-            let steamRunning = managedProcessSnapshot(snapshot, prefix: prefix, processNames: ["steam.exe", "steamwebhelper"])
-            if steamRunning { didObserveSteam = true }
-            guard steamRunning || (!didObserveSteam && Date() < startupDeadline) else {
-                logger.write("Windows Steam exited before login completed", level: .warning)
-                return false
-            }
+    private func processSnapshot() async -> String {
+        let result = try? await DirectProcess.run(
+            executable: URL(fileURLWithPath: "/bin/ps"),
+            arguments: ["-axo", "pid=,comm=,args="],
+            logger: logger,
+            logOutput: false
+        )
+        return result?.output.lowercased() ?? ""
+    }
 
-            let currentLoginState = SteamNativeLoginMigration.loginState(at: prefix)
-            // Existing migrated data is only a baseline. It must not make the
-            // first phase skip the real Windows login handshake.
-            let loginStateChanged = initialLoginState.map { $0 != .loggedIn && currentLoginState == .loggedIn } ?? (currentLoginState == .loggedIn)
-            if steamLoginDetected(in: snapshot) || loginStateChanged {
-                logger.write("Windows Steam login detected")
-                return true
-            }
-            try? await Task.sleep(for: .seconds(1))
+    private func managedProcessLines(_ snapshot: String, prefix: URL, processName: String, baseline: Set<String>) -> [String] {
+        let managedPrefix = prefix.standardizedFileURL.path.lowercased()
+        return snapshot.split(whereSeparator: \.isNewline).map(String.init).filter { line in
+            guard line.contains(processName.lowercased()) else { return false }
+            return line.contains(managedPrefix) || !baseline.contains(line)
+        }
+    }
+
+    private func managedProcessSnapshot(_ snapshot: String, prefix: URL, processNames: [String]) -> Bool {
+        let lines = snapshot.split(whereSeparator: \.isNewline).map(String.init)
+        let managedPrefix = prefix.standardizedFileURL.path.lowercased()
+        return lines.contains { line in
+            line.contains(managedPrefix) && processNames.contains { line.contains($0.lowercased()) }
+        }
+    }
+
+    private func steamProcessSnapshot(processSnapshot: String, prefix: URL) -> SteamProcessSnapshot? {
+        let managedPrefix = prefix.standardizedFileURL.path.lowercased()
+        for line in processSnapshot.split(whereSeparator: \.isNewline) {
+            let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
+            guard fields.count == 3, let processIdentifier = pid_t(fields[0]) else { continue }
+            let commandLine = String(fields[1...].joined(separator: " "))
+            guard commandLine.contains(managedPrefix),
+                  commandLine.contains("steam.exe") else { continue }
+            return SteamProcessSnapshot(processIdentifier: processIdentifier, commandLine: commandLine)
+        }
+        return nil
+    }
+
+    private func forceTerminateManagedSteamIfNeeded(prefix: URL) async {
+        let snapshot = await processSnapshot()
+        let managedPrefix = prefix.standardizedFileURL.path.lowercased()
+        let pids = snapshot.split(whereSeparator: \.isNewline).compactMap { line -> pid_t? in
+            let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
+            guard let pid = fields.first.flatMap({ pid_t($0) }), fields.count >= 3 else { return nil }
+            let commandLine = String(fields[2...].joined(separator: " "))
+            guard commandLine.contains(managedPrefix),
+                  commandLine.contains("steam.exe") || commandLine.contains("steamwebhelper") else { return nil }
+            return pid
+        }
+        for pid in pids {
+            logger.write("Terminating managed Steam process pid=\(pid)", level: .warning)
+            _ = kill(pid, SIGTERM)
+        }
+        try? await Task.sleep(for: .milliseconds(750))
+        let remaining = await processSnapshot()
+        for pid in remaining.split(whereSeparator: \.isNewline).compactMap({ line -> pid_t? in
+            let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
+            guard let pid = fields.first.flatMap({ pid_t($0) }), fields.count >= 3 else { return nil }
+            let commandLine = String(fields[2...].joined(separator: " "))
+            guard commandLine.contains(managedPrefix),
+                  commandLine.contains("steam.exe") || commandLine.contains("steamwebhelper") else { return nil }
+            return pid
+        }) {
+            logger.write("Force terminating managed Steam process pid=\(pid)", level: .error)
+            _ = kill(pid, SIGKILL)
         }
     }
 
     private func stableDuration(since date: Date?) -> TimeInterval {
         guard let date else { return 0 }
         return max(0, Date().timeIntervalSince(date))
-    }
-
-    private func processSnapshot() async -> String {
-        let result = try? await DirectProcess.run(executable: URL(fileURLWithPath: "/bin/ps"), arguments: ["-axo", "pid=,comm=,args="] , logger: logger, logOutput: false)
-        return result?.output.lowercased() ?? ""
-    }
-
-    private func managedProcessSnapshot(_ snapshot: String, prefix: URL, processNames: [String]) -> Bool {
-        let managedPrefix = prefix.path.lowercased()
-        let lines = snapshot.split(whereSeparator: \.isNewline).map(String.init)
-        if processNames == ["steamwebhelper"] {
-            return lines.contains { $0.contains("steamwebhelper") }
-        }
-        if processNames == ["steam.exe", "steamwebhelper"] {
-            return lines.contains { $0.contains(managedPrefix) && $0.contains("steam.exe") }
-                || lines.contains { $0.contains("steamwebhelper") }
-        }
-        return lines.contains { text in
-            text.contains(managedPrefix) && processNames.contains { text.contains($0) }
-        }
-    }
-
-    private func steamLoginDetected(in snapshot: String) -> Bool {
-        let lines = snapshot.split(whereSeparator: \.isNewline).map(String.init)
-        for line in lines where line.contains("steamwebhelper") || line.contains("steam.exe") {
-            for marker in ["--steamid=", "-steamid="] {
-                guard let range = line.range(of: marker) else { continue }
-                let value = line[range.upperBound...].prefix { $0.isNumber }
-                if !value.isEmpty && value != "0" { return true }
-            }
-        }
-        return false
-    }
-
-    private func cefArgumentsReachedWebhelper(snapshot: String, strategy: SteamLaunchConfiguration) -> Bool {
-        guard !strategy.arguments.isEmpty else { return true }
-        let webhelperLines = snapshot.split(whereSeparator: \.isNewline).map(String.init).filter { $0.contains("steamwebhelper") }
-        guard !webhelperLines.isEmpty else { return false }
-        return strategy.arguments.allSatisfy { argument in
-            switch argument {
-            case "-cef-disable-gpu":
-                return webhelperLines.contains { $0.contains("-cef-disable-gpu") || $0.contains("--disable-gpu") }
-            case "-cef-disable-gpu-compositing":
-                return webhelperLines.contains { $0.contains("-cef-disable-gpu-compositing") || $0.contains("--disable-gpu-compositing") }
-            default:
-                return webhelperLines.contains { $0.contains(argument.lowercased()) }
-            }
-        }
-    }
-
-    private func terminateWineDebuggersIfNeeded(in snapshot: String, stage: String) {
-        guard snapshot.contains("winedbg") else { return }
-        logger.write("Wine debugger detected during \(stage); silent crash policy remains active", level: .warning)
-    }
-
-    public func activateVisibleSteamWindow(prefix: URL = PortsidePaths.steamPrefix) async -> Bool {
-        let snapshot = await processSnapshot()
-        guard managedProcessSnapshot(snapshot, prefix: prefix, processNames: ["steam.exe", "steamwebhelper"]) else { return false }
-        guard let steamProcess = steamProcessSnapshot(processSnapshot: snapshot) else { return false }
-        logger.write("Existing Steam process activation requested; readiness remains unverified")
-        NSRunningApplication(processIdentifier: steamProcess.processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-        return true
-    }
-
-    private func steamProcessSnapshot(processSnapshot: String) -> SteamProcessSnapshot? {
-        for line in processSnapshot.split(whereSeparator: \.isNewline) {
-            let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
-            guard fields.count == 3, let processIdentifier = pid_t(fields[0]) else { continue }
-            let processArguments = String(fields[1...].joined(separator: " "))
-            guard processArguments.contains("steam.exe") || processArguments.contains("steamwebhelper") else { continue }
-            return SteamProcessSnapshot(processIdentifier: processIdentifier)
-        }
-        return nil
-    }
-
-    private func forceTerminateManagedSteamIfNeeded() async {
-        let initialSnapshot = await processSnapshot()
-        let pids = managedSteamProcessIdentifiers(snapshot: initialSnapshot)
-        guard !pids.isEmpty else { return }
-        for pid in pids {
-            logger.write("Terminating managed Wine/Steam process pid=\(pid)", level: .warning)
-            _ = kill(pid, SIGTERM)
-        }
-        try? await Task.sleep(for: .milliseconds(750))
-        let remaining = managedSteamProcessIdentifiers(snapshot: await processSnapshot())
-        for pid in remaining {
-            logger.write("Force terminating managed Wine/Steam process pid=\(pid)", level: .error)
-            _ = kill(pid, SIGKILL)
-        }
-    }
-
-    private func managedSteamProcessIdentifiers(snapshot: String) -> [pid_t] {
-        let lines = snapshot.split(whereSeparator: \.isNewline).map(String.init)
-        return lines.compactMap { line in
-            let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
-            guard let pid = fields.first.flatMap({ pid_t($0) }), fields.count >= 3 else { return nil }
-            let commandLine = String(fields[2...].joined(separator: " "))
-            guard commandLine.contains("steam.exe") || commandLine.contains("steamwebhelper") else { return nil }
-            return pid
-        }
     }
 }

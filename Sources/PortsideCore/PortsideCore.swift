@@ -10,15 +10,14 @@ public enum PortsidePaths {
     public static var runtime: URL { root.appendingPathComponent("Runtime", isDirectory: true) }
     public static var prefix: URL { root.appendingPathComponent("Prefix", isDirectory: true) }
     public static var steamPrefix: URL { prefix.appendingPathComponent("Steam", isDirectory: true) }
-    public static var legacyPrefixes: URL { root.appendingPathComponent("Prefixes", isDirectory: true) }
+    public static var backups: URL { root.appendingPathComponent("Backups", isDirectory: true) }
     public static var logs: URL { root.appendingPathComponent("Logs", isDirectory: true) }
     public static var cache: URL { root.appendingPathComponent("Cache", isDirectory: true) }
     public static var downloads: URL { root.appendingPathComponent("Downloads", isDirectory: true) }
     public static var diagnostics: URL { root.appendingPathComponent("Diagnostics", isDirectory: true) }
-    public static var launchers: URL { root.appendingPathComponent("Launchers", isDirectory: true) }
 
     public static var allDirectories: [URL] {
-        [root, runtime, prefix, steamPrefix, logs, cache, downloads, diagnostics, launchers]
+        [root, runtime, prefix, steamPrefix, backups, logs, cache, downloads, diagnostics]
     }
 }
 
@@ -129,24 +128,14 @@ public struct DiagnosticContext: Sendable, Equatable {
     public var exitCode: Int32?
     public var duration: TimeInterval?
     public var retryCount: Int
-    public var cefStrategy: String?
-    public var cefFailureCategory: String?
     public var webhelperRestartCount: Int?
     public var webhelperStarted: Bool?
     public var webhelperExitCode: Int32?
-    public var rendererMode: String?
-    public var gpuProcessStatus: String?
     public var windowDetected: Bool?
-    public var browserReadyDetected: Bool?
-    public var windowVisualState: String?
-    public var cacheRecoveryAttempted: Bool?
     public var steamVersion: String?
-    public var steamLaunchProfile: String?
-    public var steamLaunchArgumentsApplied: Bool?
-    public var requestedCEFArchitecture: String?
-    public var effectiveCEFArchitecture: String?
-    public var legacyLoginFlagIgnored: Bool?
     public var webhelperProcessCount: Int?
+    public var msyncBootstrapped: Bool?
+    public var msyncRunning: Bool?
 
     public init(
         stage: String? = nil,
@@ -162,35 +151,21 @@ public struct DiagnosticContext: Sendable, Equatable {
         exitCode: Int32? = nil,
         duration: TimeInterval? = nil,
         retryCount: Int = 0,
-        cefStrategy: String? = nil,
-        cefFailureCategory: String? = nil,
         webhelperRestartCount: Int? = nil,
         webhelperStarted: Bool? = nil,
         webhelperExitCode: Int32? = nil,
-        rendererMode: String? = nil,
-        gpuProcessStatus: String? = nil,
         windowDetected: Bool? = nil,
-        browserReadyDetected: Bool? = nil,
-        windowVisualState: String? = nil,
-        cacheRecoveryAttempted: Bool? = nil,
         steamVersion: String? = nil,
-        steamLaunchProfile: String? = nil,
-        steamLaunchArgumentsApplied: Bool? = nil,
-        requestedCEFArchitecture: String? = nil,
-        effectiveCEFArchitecture: String? = nil,
-        legacyLoginFlagIgnored: Bool? = nil,
-        webhelperProcessCount: Int? = nil
+        webhelperProcessCount: Int? = nil,
+        msyncBootstrapped: Bool? = nil,
+        msyncRunning: Bool? = nil
     ) {
         self.stage = stage; self.errorCode = errorCode; self.portsideVersion = portsideVersion; self.portsideBuild = portsideBuild
         self.macOSVersion = macOSVersion; self.architecture = architecture; self.runtimeName = runtimeName; self.runtimeVersion = runtimeVersion
         self.graphicsBackend = graphicsBackend; self.processType = processType; self.exitCode = exitCode; self.duration = duration; self.retryCount = retryCount
-        self.cefStrategy = cefStrategy; self.cefFailureCategory = cefFailureCategory; self.webhelperRestartCount = webhelperRestartCount
-        self.webhelperStarted = webhelperStarted; self.webhelperExitCode = webhelperExitCode; self.rendererMode = rendererMode
-        self.gpuProcessStatus = gpuProcessStatus; self.windowDetected = windowDetected; self.browserReadyDetected = browserReadyDetected
-        self.windowVisualState = windowVisualState; self.cacheRecoveryAttempted = cacheRecoveryAttempted; self.steamVersion = steamVersion
-        self.steamLaunchProfile = steamLaunchProfile; self.steamLaunchArgumentsApplied = steamLaunchArgumentsApplied
-        self.requestedCEFArchitecture = requestedCEFArchitecture; self.effectiveCEFArchitecture = effectiveCEFArchitecture
-        self.legacyLoginFlagIgnored = legacyLoginFlagIgnored; self.webhelperProcessCount = webhelperProcessCount
+        self.webhelperRestartCount = webhelperRestartCount; self.webhelperStarted = webhelperStarted; self.webhelperExitCode = webhelperExitCode
+        self.windowDetected = windowDetected; self.steamVersion = steamVersion; self.webhelperProcessCount = webhelperProcessCount
+        self.msyncBootstrapped = msyncBootstrapped; self.msyncRunning = msyncRunning
     }
 
     public var fields: [String: String] {
@@ -203,17 +178,11 @@ public struct DiagnosticContext: Sendable, Equatable {
             ("stage", stage), ("error_code", errorCode), ("macos_version", macOSVersion), ("architecture", architecture),
             ("runtime_name", runtimeName), ("runtime_version", runtimeVersion), ("graphics_backend", graphicsBackend),
             ("process_type", processType), ("exit_code", exitCode.map(String.init)), ("duration", duration.map { String(format: "%.2f", $0) }),
-            ("cef_strategy", cefStrategy), ("cef_failure_category", cefFailureCategory),
             ("webhelper_restart_count", webhelperRestartCount.map(String.init)),
             ("webhelper_started", webhelperStarted.map(String.init)), ("webhelper_exit_code", webhelperExitCode.map(String.init)),
-            ("renderer_mode", rendererMode), ("gpu_process_status", gpuProcessStatus),
-            ("window_detected", windowDetected.map(String.init)), ("browser_ready", browserReadyDetected.map(String.init)),
-            ("browser_ready_detected", browserReadyDetected.map(String.init)),
-            ("window_visual_state", windowVisualState),
-            ("cache_recovery_attempted", cacheRecoveryAttempted.map(String.init)), ("steam_version", steamVersion),
-            ("steam_launch_profile", steamLaunchProfile), ("steam_launch_arguments_applied", steamLaunchArgumentsApplied.map(String.init)),
-            ("requested_cef_architecture", requestedCEFArchitecture), ("effective_cef_architecture", effectiveCEFArchitecture),
-            ("legacy_login_flag_ignored", legacyLoginFlagIgnored.map(String.init)), ("webhelper_process_count", webhelperProcessCount.map(String.init)),
+            ("window_detected", windowDetected.map(String.init)), ("steam_version", steamVersion),
+            ("webhelper_process_count", webhelperProcessCount.map(String.init)),
+            ("msync_bootstrapped", msyncBootstrapped.map(String.init)), ("msync_running", msyncRunning.map(String.init)),
         ]
         for (key, value) in optionalValues where value != nil { values[key] = value! }
         return values
@@ -243,12 +212,8 @@ public final class EnvironmentStore: @unchecked Sendable {
     }
 
     public func prepareDirectories() throws {
-        for directory in [PortsidePaths.root, PortsidePaths.runtime, PortsidePaths.logs, PortsidePaths.cache, PortsidePaths.downloads, PortsidePaths.diagnostics] {
+        for directory in [PortsidePaths.root, PortsidePaths.runtime, PortsidePaths.backups, PortsidePaths.logs, PortsidePaths.cache, PortsidePaths.downloads, PortsidePaths.diagnostics] {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        }
-        if !fileManager.fileExists(atPath: PortsidePaths.prefix.path),
-           fileManager.fileExists(atPath: PortsidePaths.legacyPrefixes.path) {
-            try fileManager.moveItem(at: PortsidePaths.legacyPrefixes, to: PortsidePaths.prefix)
         }
         try fileManager.createDirectory(at: PortsidePaths.prefix, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: PortsidePaths.steamPrefix, withIntermediateDirectories: true)
@@ -399,18 +364,10 @@ public final class SecureDownloader: NSObject, @unchecked Sendable {
 
 public enum SteamInstaller {
     public static let officialURL = URL(string: "https://cdn.fastly.steamstatic.com/client/installer/SteamSetup.exe")!
-    public static let loginLaunchProfile = SteamLaunchProfile.cef32LegacyLogin
-    public static let bootstrapArguments = loginLaunchProfile.arguments
-    public static let defaultLanguageArguments = ["-language", "english"]
-    public static let noBrowserMiniGamesListArguments = ["-no-browser", "+open", "steam://open/minigameslist"]
-    public static let uiArguments = SteamLaunchConfiguration.normal.arguments
-    public static let fallbackUIArguments = SteamLaunchConfiguration.fallback.arguments
-    public static let uiLaunchConfigurations = [SteamLaunchConfiguration.normal, SteamLaunchConfiguration.noESync, SteamLaunchConfiguration.disableGPU, SteamLaunchConfiguration.fallback]
+    /// SteamSetup.exe is the only phase that receives installer arguments.
+    /// steam.exe itself is launched later with an empty argument list.
+    public static let launchArguments: [String] = []
     public static var localURL: URL { PortsidePaths.downloads.appendingPathComponent("SteamSetup.exe") }
-
-    public static func loginLaunchArguments(for configuration: SteamLaunchConfiguration) -> [String] {
-        loginLaunchProfile.arguments + defaultLanguageArguments + configuration.arguments
-    }
 
     public static var steamExecutableCandidates: [URL] {
         [
@@ -462,190 +419,6 @@ public enum SteamInstaller {
             throw PortsideError.processLaunchFailed("Steam installer finished without creating steam.exe.")
         }
     }
-}
-
-public enum SteamNativeLoginState: String, Equatable, Sendable {
-    case loggedIn
-    case notLoggedIn
-    case unavailable
-}
-
-public enum SteamNativeLoginMigrationError: LocalizedError, Equatable, Sendable {
-    case missingSourceItem(String)
-    case loginNotDetected
-    case copyFailed
-    case nativeSteamInstallationFailed
-    case nativeSteamApplicationUnavailable
-
-    public var errorDescription: String? {
-        switch self {
-        case .missingSourceItem(let item): return "Native Steam login data is missing: \(item)."
-        case .loginNotDetected: return "Native Steam login was not detected."
-        case .copyFailed: return "Native Steam login data could not be copied."
-        case .nativeSteamInstallationFailed: return "The native Steam app could not be installed."
-        case .nativeSteamApplicationUnavailable: return "The native Steam app could not be opened."
-        }
-    }
-}
-
-public enum SteamNativeLoginMigration {
-    public static let requiredItems = ["config", "registry.vdf", "userdata"]
-    private static let completionMarkerContents = Data("Portside native Steam login migration v1\n".utf8)
-    public static var completionMarkerURL: URL {
-        PortsidePaths.root.appendingPathComponent("native-steam-login-migration.marker")
-    }
-
-    public static var nativeSteamSupportDirectory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Steam", isDirectory: true)
-    }
-
-    public static var managedSteamDirectory: URL {
-        PortsidePaths.steamPrefix.appendingPathComponent("drive_c/Program Files (x86)/Steam", isDirectory: true)
-    }
-
-    public static func isComplete(at destinationRoot: URL = managedSteamDirectory, markerURL: URL = completionMarkerURL, fileManager: FileManager = .default) -> Bool {
-        guard let marker = try? Data(contentsOf: markerURL), marker == completionMarkerContents else { return false }
-        return requiredItems.allSatisfy { fileManager.fileExists(atPath: destinationRoot.appendingPathComponent($0).path) }
-    }
-
-    public static func invalidate(markerURL: URL = completionMarkerURL, fileManager: FileManager = .default) {
-        try? fileManager.removeItem(at: markerURL)
-    }
-
-    public static func validateCopiedData(from sourceRoot: URL, to destinationRoot: URL, fileManager: FileManager = .default) -> Bool {
-        requiredItems.allSatisfy { item in
-            itemsMatch(
-                source: sourceRoot.appendingPathComponent(item),
-                destination: destinationRoot.appendingPathComponent(item),
-                fileManager: fileManager
-            )
-        }
-    }
-
-    public static func loginState(at sourceRoot: URL = nativeSteamSupportDirectory, fileManager: FileManager = .default) -> SteamNativeLoginState {
-        guard requiredItems.allSatisfy({ fileManager.fileExists(atPath: sourceRoot.appendingPathComponent($0).path) }) else {
-            return .unavailable
-        }
-        let loginUsersURL = sourceRoot.appendingPathComponent("config/loginusers.vdf")
-        guard let contents = try? String(contentsOf: loginUsersURL, encoding: .utf8) else { return .notLoggedIn }
-        let hasAutoLogin = contents.range(of: #"(?m)\"AllowAutoLogin\"\s+\"1\""#, options: .regularExpression) != nil
-        let hasRememberedPassword = contents.range(of: #"(?m)\"RememberPassword\"\s+\"1\""#, options: .regularExpression) != nil
-        let userDataDirectory = sourceRoot.appendingPathComponent("userdata", isDirectory: true)
-        let userDataEntries = (try? fileManager.contentsOfDirectory(at: userDataDirectory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
-        let hasUserData = !userDataEntries.isEmpty
-        return hasUserData && (hasAutoLogin || hasRememberedPassword) ? .loggedIn : .notLoggedIn
-    }
-
-    @discardableResult
-    public static func copyLoginData(from sourceRoot: URL = nativeSteamSupportDirectory, to destinationRoot: URL = managedSteamDirectory, completionMarkerURL: URL? = nil, fileManager: FileManager = .default) throws -> [String] {
-        for item in requiredItems where !fileManager.fileExists(atPath: sourceRoot.appendingPathComponent(item).path) {
-            throw SteamNativeLoginMigrationError.missingSourceItem(item)
-        }
-
-        let stagingRoot = destinationRoot.deletingLastPathComponent()
-            .appendingPathComponent(".native-steam-login-\(UUID().uuidString)", isDirectory: true)
-        do {
-            try fileManager.createDirectory(at: stagingRoot, withIntermediateDirectories: true)
-            for item in requiredItems {
-                try fileManager.copyItem(
-                    at: sourceRoot.appendingPathComponent(item),
-                    to: stagingRoot.appendingPathComponent(item)
-                )
-            }
-            try fileManager.createDirectory(at: destinationRoot, withIntermediateDirectories: true)
-            for item in requiredItems {
-                let destination = destinationRoot.appendingPathComponent(item)
-                if fileManager.fileExists(atPath: destination.path) {
-                    try fileManager.removeItem(at: destination)
-                }
-                try fileManager.moveItem(at: stagingRoot.appendingPathComponent(item), to: destination)
-            }
-            guard validateCopiedData(from: sourceRoot, to: destinationRoot, fileManager: fileManager) else {
-                throw SteamNativeLoginMigrationError.copyFailed
-            }
-            if let completionMarkerURL {
-                try fileManager.createDirectory(at: completionMarkerURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try completionMarkerContents.write(to: completionMarkerURL, options: .atomic)
-            }
-            try? fileManager.removeItem(at: stagingRoot)
-            return requiredItems
-        } catch {
-            try? fileManager.removeItem(at: stagingRoot)
-            if let completionMarkerURL { invalidate(markerURL: completionMarkerURL, fileManager: fileManager) }
-            if error is SteamNativeLoginMigrationError { throw error }
-            throw SteamNativeLoginMigrationError.copyFailed
-        }
-    }
-
-    private static func itemsMatch(source: URL, destination: URL, fileManager: FileManager) -> Bool {
-        guard fileManager.fileExists(atPath: source.path), fileManager.fileExists(atPath: destination.path) else { return false }
-        let sourceIsDirectory = (try? source.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-        let destinationIsDirectory = (try? destination.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-        guard sourceIsDirectory == destinationIsDirectory else { return false }
-        if sourceIsDirectory {
-            guard let sourceChildren = try? fileManager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil),
-                  let destinationChildren = try? fileManager.contentsOfDirectory(at: destination, includingPropertiesForKeys: nil) else { return false }
-            let sourceNames = Set(sourceChildren.map(\.lastPathComponent))
-            let destinationNames = Set(destinationChildren.map(\.lastPathComponent))
-            guard sourceNames == destinationNames else { return false }
-            return sourceNames.allSatisfy { name in
-                itemsMatch(source: source.appendingPathComponent(name), destination: destination.appendingPathComponent(name), fileManager: fileManager)
-            }
-        }
-        return fileManager.contentsEqual(atPath: source.path, andPath: destination.path)
-    }
-}
-
-public struct SteamLaunchProfile: Equatable, Sendable {
-    public let identifier: String
-    public let arguments: [String]
-    public let requestedCEFArchitecture: String
-
-    public init(identifier: String, arguments: [String], requestedCEFArchitecture: String) {
-        self.identifier = identifier
-        self.arguments = arguments
-        self.requestedCEFArchitecture = requestedCEFArchitecture
-    }
-
-    public static let cef32LegacyLogin = SteamLaunchProfile(
-        identifier: "cef_32bit_legacy_login",
-        arguments: ["-udpforce", "-noreactlogin", "-allosarches", "-cef-force-32bit"],
-        requestedCEFArchitecture: "32bit"
-    )
-}
-
-public struct SteamLaunchConfiguration: Equatable, Sendable {
-    public let disableCEFGPU: Bool
-    public let disableCEFGPUCompositing: Bool
-    public let additionalArguments: [String]
-    public let esyncEnabled: Bool
-
-    public init(disableCEFGPU: Bool, disableCEFGPUCompositing: Bool = false, additionalArguments: [String] = [], esyncEnabled: Bool = true) {
-        self.disableCEFGPU = disableCEFGPU
-        self.disableCEFGPUCompositing = disableCEFGPUCompositing
-        self.additionalArguments = additionalArguments
-        self.esyncEnabled = esyncEnabled
-    }
-
-    public var arguments: [String] {
-        var result: [String] = []
-        if disableCEFGPU { result.append("-cef-disable-gpu") }
-        if disableCEFGPUCompositing { result.append("-cef-disable-gpu-compositing") }
-        return result + additionalArguments
-    }
-
-    public var identifier: String {
-        var components = arguments
-        if !esyncEnabled { components.append("WINEESYNC=0") }
-        return components.isEmpty ? "default" : components.joined(separator: " ")
-    }
-
-    public static let normal = SteamLaunchConfiguration(disableCEFGPU: false)
-    public static let noESync = SteamLaunchConfiguration(disableCEFGPU: false, esyncEnabled: false)
-    public static let primary = normal
-    public static let disableGPU = SteamLaunchConfiguration(disableCEFGPU: true)
-    public static let fallback = SteamLaunchConfiguration(disableCEFGPU: true, disableCEFGPUCompositing: true)
 }
 
 public protocol RuntimeLocating {

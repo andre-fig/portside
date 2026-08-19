@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "runtime": {
     "identifier": "wine-staging-gcenx-osx64",
-    "version": "11.15",
-    "url": "https://github.com/Gcenx/macOS_Wine_builds/releases/download/11.15/wine-staging-11.15-osx64.tar.xz",
-    "sha256": "a8c50d0e14fb7982a21506287e1e41e1990fe77c74fa2a32da7dbcf7b21de1e2",
-    "expectedSize": 193561920,
+    "version": "11.6_1",
+    "url": "https://github.com/Gcenx/macOS_Wine_builds/releases/download/11.6_1/wine-staging-11.6_1-osx64.tar.xz",
+    "sha256": "9e73898fc83b0137638fe90d4868387f30b5993e86aeaef7422d8b1655238014",
+    "expectedSize": 322511424,
     "architecture": "x86_64 via Rosetta 2",
     "minimumMacOS": "13.0",
     "executable": "Contents/Resources/wine/bin/wine",
@@ -13,7 +13,7 @@
     "license": "Wine LGPL-2.1-or-later; upstream packaging license requires review",
     "source": "https://gitlab.winehq.org/wine/wine",
     "components": ["Wine Staging", "Wine Mono 11.2.0", "Wine Gecko 2.47.4", "WineD3D"],
-    "validatedAt": "2026-08-08T20:31:36Z"
+    "validatedAt": "2026-08-19T00:00:00Z"
   },
   "components": [
     {

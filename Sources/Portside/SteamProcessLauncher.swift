@@ -12,17 +12,15 @@ final class SteamProcessLauncher {
     private var process: Process?
     private var outputPipe: Pipe?
 
-    func launch(runtimePath: URL, prefix: URL, steamExecutable: URL, arguments: [String], esyncEnabled: Bool = true) async throws -> Process {
+    func launch(runtimePath: URL, prefix: URL, steamExecutable: URL, arguments: [String] = []) async throws -> Process {
         guard process?.isRunning != true else {
             throw PortsideError.processLaunchFailed("A managed Wine Steam process is already running.")
         }
 
-        removeLegacySteamHostBundle()
-
         let process = Process()
         process.executableURL = runtimePath
         process.arguments = [steamExecutable.path] + arguments
-        process.environment = WineProcessEnvironment.make(runtimeExecutable: runtimePath, prefix: prefix, esyncEnabled: esyncEnabled)
+        process.environment = WineProcessEnvironment.make(runtimeExecutable: runtimePath, prefix: prefix)
         process.currentDirectoryURL = prefix
 
         let outputPipe = Pipe()
@@ -52,7 +50,7 @@ final class SteamProcessLauncher {
         }
         self.process = process
         self.outputPipe = outputPipe
-        logger.write("Wine Steam process started directly (WINEESYNC=\(esyncEnabled ? "1" : "0"))")
+        logger.write("Wine Steam process started directly with no Steam launch flags")
         return process
     }
 
@@ -69,14 +67,4 @@ final class SteamProcessLauncher {
         return process?.isRunning != true
     }
 
-    private func removeLegacySteamHostBundle() {
-        let legacyBundle = PortsidePaths.launchers.appendingPathComponent("Steam.app", isDirectory: true)
-        guard FileManager.default.fileExists(atPath: legacyBundle.path) else { return }
-        do {
-            try FileManager.default.removeItem(at: legacyBundle)
-            logger.write("Removed legacy macOS Steam host bundle")
-        } catch {
-            logger.write("Could not remove legacy macOS Steam host bundle", level: .warning)
-        }
-    }
 }

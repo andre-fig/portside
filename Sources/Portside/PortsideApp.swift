@@ -44,17 +44,13 @@ final class PortsideModel: ObservableObject {
     let store = EnvironmentStore()
     let logger = PortsideLogger()
     let runtimeProvider = FreeWineRuntimeProvider()
-    let supervisor = ProcessSupervisor()
     let steamMonitor = SteamReadinessMonitor()
     let steamProcessLauncher = SteamProcessLauncher()
-    let steamNativeLoginCoordinator = SteamNativeLoginCoordinator()
     let diagnostics: DiagnosticsService
     private var didStartAutomatically = false
     private var handoffExitScheduled = false
     private var steamLaunchLock: SteamLaunchLock?
     private var lastReadinessReport: SteamReadinessReport?
-    private var cacheRecoveryAttempted = false
-    private var steamLaunchArgumentsApplied = false
 
     enum SetupStep: String { case checking, rosettaRequired, preparing, downloading, installing, ready, failed }
 
@@ -79,8 +75,11 @@ final class PortsideModel: ObservableObject {
     }
 
     private var hasValidInstalledEnvironment: Bool {
-        let runtimePath = state.runtimeRecord?.executablePath.path ?? state.runtime?.executablePath ?? ""
-        return FileManager.default.isExecutableFile(atPath: runtimePath)
+        let runtimeRecord = state.runtimeRecord
+        let runtimePath = runtimeRecord?.executablePath.path ?? state.runtime?.executablePath ?? ""
+        return runtimeRecord?.manifest.identifier == FreeRuntimeCatalog.wine.identifier
+            && runtimeRecord?.manifest.version == FreeRuntimeCatalog.wine.version
+            && FileManager.default.isExecutableFile(atPath: runtimePath)
             && FileManager.default.fileExists(atPath: PortsidePaths.steamPrefix.appendingPathComponent("system.reg").path)
             && SteamInstaller.locateInstalledExecutable() != nil
     }
@@ -88,13 +87,20 @@ final class PortsideModel: ObservableObject {
     func setUp() {
         guard !isWorking else { return }
         showsInstaller = true
-        isWorking = true; errorMessage = nil; progress = 0; progressIsIndeterminate = false; setupStep = .checking; message = "Checking your Mac…"
+        isWorking = true
+        errorMessage = nil
+        progress = 0
+        progressIsIndeterminate = false
+        setupStep = .checking
+        message = "Checking your Mac…"
         lastReadinessReport = nil
-        cacheRecoveryAttempted = false
-        steamLaunchArgumentsApplied = false
         let started = Date()
         if state.phase == .failedRecoverable { state.retryCount += 1 }
-        state.lastError = nil; state.lastErrorCode = nil; state.lastProcessType = nil; state.lastExitCode = nil
+        state.lastError = nil
+        state.lastErrorCode = nil
+        state.lastProcessType = nil
+        state.lastExitCode = nil
+
         Task {
             do {
                 diagnostics.breadcrumb("setup_started", context: diagnosticContext(stage: "checking_requirements"))
@@ -102,25 +108,39 @@ final class PortsideModel: ObservableObject {
                 updateProgress(0, phase: .requirementsChecking)
                 try requirements.validate()
                 diagnostics.breadcrumb("requirements_checked", context: diagnosticContext(stage: "checking_requirements"))
+
                 if !(await RosettaManager.status()).installed {
-                    state.phase = .rosettaRequired; persistState(); setupStep = .rosettaRequired; message = "Preparing Rosetta…"; progressIsIndeterminate = true
+                    state.phase = .rosettaRequired
+                    persistState()
+                    setupStep = .rosettaRequired
+                    message = "Preparing Rosetta…"
+                    progressIsIndeterminate = true
                     let result = try await RosettaManager.install()
-                    guard result.status == 0, (await RosettaManager.status()).installed else { throw RuntimePipelineError.rosettaUnavailable }
-                }
-                setupStep = .preparing; updateProgress(0.08, phase: .graphicsInstalling)
-                try store.prepareDirectories()
-                diagnostics.breadcrumb("runtime_download_started", context: diagnosticContext(stage: "runtime"))
-                let result = try await runtimeProvider.install { [weak self] value, phase in
-                    Task { @MainActor in
-                        self?.updateProgress(value, phase: phase)
+                    guard result.status == 0, (await RosettaManager.status()).installed else {
+                        throw RuntimePipelineError.rosettaUnavailable
                     }
                 }
+
+                setupStep = .preparing
+                updateProgress(0.08, phase: .graphicsInstalling)
+                try store.prepareDirectories()
+                await stopManagedSteamIfNeeded()
+                diagnostics.breadcrumb("runtime_download_started", context: diagnosticContext(stage: "runtime"))
+                let result = try await runtimeProvider.install { [weak self] value, phase in
+                    Task { @MainActor in self?.updateProgress(value, phase: phase) }
+                }
                 state.runtimeRecord = result.record
-                state.runtime = RuntimeDescriptor(name: result.record.manifest.identifier, version: result.record.manifest.version, executablePath: result.record.executablePath.path, redistributable: false, licenseNote: result.record.manifest.license)
+                state.runtime = RuntimeDescriptor(
+                    name: result.record.manifest.identifier,
+                    version: result.record.manifest.version,
+                    executablePath: result.record.executablePath.path,
+                    redistributable: false,
+                    licenseNote: result.record.manifest.license
+                )
                 diagnostics.breadcrumb("runtime_verified", context: diagnosticContext(stage: "runtime", runtimeVersion: result.record.manifest.version))
                 diagnostics.breadcrumb("prefix_created", context: diagnosticContext(stage: "prefix", runtimeVersion: result.record.manifest.version))
-                let existingSteam = SteamInstaller.locateInstalledExecutable()
-                if existingSteam == nil {
+
+                if SteamInstaller.locateInstalledExecutable() == nil {
                     setupStep = .downloading
                     diagnostics.breadcrumb("steam_install_started", context: diagnosticContext(stage: "steam_download"))
                     _ = try await SteamInstaller.download { [weak self] value in
@@ -131,6 +151,7 @@ final class PortsideModel: ObservableObject {
                     updateProgress(0.84, phase: .steamInstalling)
                     try await SteamInstaller.install(using: state.runtime!, logger: logger)
                 }
+
                 guard let steamExecutable = SteamInstaller.locateInstalledExecutable() else {
                     throw PortsideError.processLaunchFailed("Steam installer finished without creating steam.exe.")
                 }
@@ -141,8 +162,9 @@ final class PortsideModel: ObservableObject {
                     throw PortsideError.runtimeUnavailable
                 }
                 let windows10Result = try await WinePrefixManager.ensureWindows10(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix, logger: logger)
-                guard windows10Result.status == 0 else { throw RuntimePipelineError.processFailed("Windows 10 prefix configuration", windows10Result.status) }
-                try await migrateNativeSteamLoginIfNeeded(runtimePath: runtimePath)
+                guard windows10Result.status == 0 else {
+                    throw RuntimePipelineError.processFailed("Windows 10 prefix configuration", windows10Result.status)
+                }
                 updateProgress(0.96, phase: .validatingInstallation)
                 let launchOutcome = try await openSteamAndWait(executable: steamExecutable)
                 if launchOutcome == .alreadyCoordinated {
@@ -152,11 +174,12 @@ final class PortsideModel: ObservableObject {
                     return
                 }
                 state.lastSetupDuration = Date().timeIntervalSince(started)
-                setupStep = .ready; updateProgress(1, phase: .steamReady)
+                setupStep = .ready
+                updateProgress(1, phase: .steamReady)
                 logger.write("Setup completed")
                 terminateAfterHandOff()
             } catch {
-                if supervisor.isRunning { supervisor.requestStop() }
+                await stopManagedSteamIfNeeded()
                 state.phase = .failedRecoverable
                 state.lastError = PortsideLogger.sanitize(error.localizedDescription)
                 state.lastErrorCode = errorCode(for: error)
@@ -169,12 +192,11 @@ final class PortsideModel: ObservableObject {
                 errorMessage = "Could not complete setup."
                 message = "Could not complete setup."
                 logger.write(error.localizedDescription, level: .error)
-                let diagnosticErrorCode = errorCode(for: error)
                 diagnostics.capture(error: error, context: diagnosticContext(
                     stage: "failed",
-                    errorCode: diagnosticErrorCode,
+                    errorCode: errorCode(for: error),
                     duration: Date().timeIntervalSince(started),
-                    cacheRecoveryAttempted: cacheRecoveryAttempted
+                    report: lastReadinessReport
                 ))
             }
             isWorking = false
@@ -183,14 +205,22 @@ final class PortsideModel: ObservableObject {
 
     func installRosetta() {
         guard !isWorking else { return }
-        isWorking = true; message = "Preparing Rosetta…"
+        isWorking = true
+        message = "Preparing Rosetta…"
         Task {
             do {
                 let result = try await RosettaManager.install()
-                guard result.status == 0, (await RosettaManager.status()).installed else { throw RuntimePipelineError.rosettaUnavailable }
-                setupStep = .checking; isWorking = false; setUp()
+                guard result.status == 0, (await RosettaManager.status()).installed else {
+                    throw RuntimePipelineError.rosettaUnavailable
+                }
+                setupStep = .checking
+                isWorking = false
+                setUp()
             } catch {
-                isWorking = false; setupStep = .failed; errorMessage = "Could not complete setup."; logger.write(error.localizedDescription, level: .error)
+                isWorking = false
+                setupStep = .failed
+                errorMessage = "Could not complete setup."
+                logger.write(error.localizedDescription, level: .error)
                 diagnostics.capture(error: error, context: diagnosticContext(stage: "rosetta", errorCode: errorCode(for: error)))
             }
         }
@@ -198,11 +228,12 @@ final class PortsideModel: ObservableObject {
 
     func launchSteam() {
         guard !isWorking else { return }
-        isWorking = true; errorMessage = nil; message = "Preparing Portside…"
+        isWorking = true
+        errorMessage = nil
+        message = "Preparing Portside…"
         lastReadinessReport = nil
-        cacheRecoveryAttempted = false
-        steamLaunchArgumentsApplied = false
         let started = Date()
+
         Task {
             do {
                 try requirements.validate()
@@ -211,17 +242,15 @@ final class PortsideModel: ObservableObject {
                 guard let steamExecutable = (storedSteamExecutable.flatMap { FileManager.default.isExecutableFile(atPath: $0.path) ? $0 : nil }) ?? SteamInstaller.locateInstalledExecutable() else {
                     throw PortsideError.processLaunchFailed("Steam is not installed yet.")
                 }
-                guard FileManager.default.isExecutableFile(atPath: state.runtimeRecord?.executablePath.path ?? state.runtime?.executablePath ?? ""),
-                      FileManager.default.fileExists(atPath: PortsidePaths.steamPrefix.appendingPathComponent("system.reg").path) else {
+                guard hasValidInstalledEnvironment,
+                      let runtimePath = state.runtimeRecord?.executablePath else {
                     throw PortsideError.runtimeUnavailable
                 }
-                guard let runtimePath = state.runtimeRecord?.executablePath ?? state.runtime?.executablePath.map(URL.init(fileURLWithPath:)) else {
-                    throw PortsideError.runtimeUnavailable
-                }
-                try await migrateNativeSteamLoginIfNeeded(runtimePath: runtimePath)
                 state.steamExecutablePath = steamExecutable.path
-                state.phase = .steamLaunching; persistState(); message = "Opening Steam…"
-                let launchOutcome = try await openSteamAndWait(executable: steamExecutable)
+                state.phase = .steamLaunching
+                persistState()
+                message = "Opening Steam…"
+                let launchOutcome = try await openSteamAndWait(executable: steamExecutable, runtimePath: runtimePath)
                 if launchOutcome == .alreadyCoordinated {
                     isWorking = false
                     showsInstaller = false
@@ -233,28 +262,20 @@ final class PortsideModel: ObservableObject {
                 message = "Ready"
                 terminateAfterHandOff()
             } catch {
-                if supervisor.isRunning { supervisor.requestStop() }
                 state.setupCompleted = false
                 state.lastSetupDuration = Date().timeIntervalSince(started)
                 errorMessage = "Could not complete setup."
                 setupStep = .failed
-                state.phase = .failedRecoverable; state.lastError = PortsideLogger.sanitize(error.localizedDescription); state.lastErrorCode = errorCode(for: error); persistState()
+                state.phase = .failedRecoverable
+                state.lastError = PortsideLogger.sanitize(error.localizedDescription)
+                state.lastErrorCode = errorCode(for: error)
+                persistState()
                 logger.write(error.localizedDescription, level: .error)
-                let diagnosticErrorCode = errorCode(for: error)
                 diagnostics.capture(error: error, context: diagnosticContext(
                     stage: "launch",
-                    errorCode: diagnosticErrorCode,
-                    cefStrategy: lastReadinessReport?.cefStrategy,
-                    cefFailureCategory: lastReadinessReport?.logAnalysis.failureCategories.first,
-                    webhelperRestartCount: lastReadinessReport?.webhelperRestartCount,
-                    webhelperStarted: lastReadinessReport?.webhelperStarted,
-                    webhelperExitCode: lastReadinessReport?.webhelperExitCode,
-                    rendererMode: lastReadinessReport?.rendererMode,
-                    gpuProcessStatus: lastReadinessReport?.gpuProcessStatus,
-                    windowDetected: lastReadinessReport?.windowDetected,
-                    browserReadyDetected: lastReadinessReport?.browserReadyDetected,
-                    windowVisualState: lastReadinessReport?.windowVisualState.rawValue,
-                    cacheRecoveryAttempted: cacheRecoveryAttempted
+                    errorCode: errorCode(for: error),
+                    duration: Date().timeIntervalSince(started),
+                    report: lastReadinessReport
                 ))
                 showsInstaller = true
                 NSApp.unhide(nil)
@@ -270,7 +291,6 @@ final class PortsideModel: ObservableObject {
         case .runtimeDownloading, .runtimeVerifying: return "Downloading required components…"
         case .runtimeInstalling, .prefixCreating, .graphicsInstalling: return "Preparing the game environment…"
         case .steamDownloading, .steamInstalling: return "Installing Steam…"
-        case .steamNativeLogin: return "Preparing your Steam account…"
         case .steamUpdating: return "Updating Steam…"
         case .steamLaunching: return "Opening Steam…"
         case .validatingInstallation: return "Finishing…"
@@ -288,10 +308,6 @@ final class PortsideModel: ObservableObject {
         persistState()
     }
 
-    private func setIndeterminate(_ value: Bool) {
-        progressIsIndeterminate = value
-    }
-
     private func phaseRank(_ phase: EnvironmentPhase) -> Int {
         switch phase {
         case .requirementsChecking: return 0
@@ -303,11 +319,10 @@ final class PortsideModel: ObservableObject {
         case .prefixCreating: return 6
         case .steamDownloading: return 7
         case .steamInstalling: return 8
-        case .steamNativeLogin: return 9
-        case .steamUpdating: return 10
-        case .steamLaunching: return 11
-        case .validatingInstallation: return 12
-        case .steamReady: return 13
+        case .steamUpdating: return 9
+        case .steamLaunching: return 10
+        case .validatingInstallation: return 11
+        case .steamReady: return 12
         case .failedRecoverable, .failedFatal: return 99
         }
     }
@@ -335,27 +350,16 @@ final class PortsideModel: ObservableObject {
             case .steamInstallerUnavailable: return "steam_download_failed"
             case .processLaunchFailed(let reason):
                 let normalized = reason.lowercased()
-                if normalized.contains("cef") || normalized.contains("unverified") { return "steam_cef_ui_unverified" }
-                if normalized.contains("black") { return "steam_black_window" }
-                if normalized.contains("interface") || normalized.contains("window") { return "steam_window_failed" }
+                if normalized.contains("window") || normalized.contains("handoff") { return "steam_window_failed" }
                 return "steam_launch_failed"
             case .invalidPath: return "permission_denied"
-            }
-        }
-        if let migrationError = error as? SteamNativeLoginMigrationError {
-            switch migrationError {
-            case .missingSourceItem, .copyFailed: return "steam_native_login_copy_failed"
-            case .loginNotDetected: return "steam_native_login_not_detected"
-            case .nativeSteamInstallationFailed: return "native_steam_install_failed"
-            case .nativeSteamApplicationUnavailable: return "native_steam_launch_failed"
             }
         }
         return "portside_error"
     }
 
-    private func diagnosticContext(stage: String? = nil, errorCode: String? = nil, runtimeVersion: String? = nil, duration: TimeInterval? = nil, cefStrategy: String? = nil, cefFailureCategory: String? = nil, webhelperRestartCount: Int? = nil, webhelperStarted: Bool? = nil, webhelperExitCode: Int32? = nil, rendererMode: String? = nil, gpuProcessStatus: String? = nil, windowDetected: Bool? = nil, browserReadyDetected: Bool? = nil, windowVisualState: String? = nil, cacheRecoveryAttempted: Bool? = nil, steamVersion: String? = nil) -> DiagnosticContext {
-        let observedArchitecture = lastReadinessReport?.logAnalysis.effectiveCEFArchitecture
-        return DiagnosticContext(
+    private func diagnosticContext(stage: String? = nil, errorCode: String? = nil, runtimeVersion: String? = nil, duration: TimeInterval? = nil, report: SteamReadinessReport? = nil) -> DiagnosticContext {
+        DiagnosticContext(
             stage: stage,
             errorCode: errorCode,
             macOSVersion: requirements.macOSVersion,
@@ -367,88 +371,14 @@ final class PortsideModel: ObservableObject {
             exitCode: state.lastExitCode,
             duration: duration ?? state.lastSetupDuration,
             retryCount: state.retryCount,
-            cefStrategy: cefStrategy,
-            cefFailureCategory: cefFailureCategory,
-            webhelperRestartCount: webhelperRestartCount,
-            webhelperStarted: webhelperStarted,
-            webhelperExitCode: webhelperExitCode,
-            rendererMode: rendererMode,
-            gpuProcessStatus: gpuProcessStatus,
-            windowDetected: windowDetected,
-            browserReadyDetected: browserReadyDetected,
-            windowVisualState: windowVisualState,
-            cacheRecoveryAttempted: cacheRecoveryAttempted,
-            steamVersion: steamVersion,
-            steamLaunchProfile: steamLaunchArgumentsApplied ? SteamInstaller.loginLaunchProfile.identifier : nil,
-            steamLaunchArgumentsApplied: steamLaunchArgumentsApplied ? true : nil,
-            requestedCEFArchitecture: steamLaunchArgumentsApplied ? SteamInstaller.loginLaunchProfile.requestedCEFArchitecture : nil,
-            effectiveCEFArchitecture: observedArchitecture,
-            legacyLoginFlagIgnored: observedArchitecture == "64bit" ? true : nil,
-            webhelperProcessCount: lastReadinessReport?.webhelperProcessCount
+            webhelperRestartCount: report?.webhelperRestartCount,
+            webhelperStarted: report?.webhelperStarted,
+            webhelperExitCode: report?.webhelperExitCode,
+            windowDetected: report?.windowDetected,
+            webhelperProcessCount: report?.webhelperProcessCount,
+            msyncBootstrapped: report?.runtimeSynchronization.bootstrapped,
+            msyncRunning: report?.runtimeSynchronization.running
         )
-    }
-
-    private func logSteamLaunchProfile() {
-        logger.write("steam_launch_profile=\(SteamInstaller.loginLaunchProfile.identifier)")
-        #if DEBUG
-        for (index, argument) in SteamInstaller.loginLaunchProfile.arguments.enumerated() {
-            logger.write("steam_launch_argument[\(index)]=\(argument)")
-        }
-        #endif
-    }
-
-    private func logSteamReadiness(_ report: SteamReadinessReport) {
-        logger.write("steamwebhelper_process_count=\(report.webhelperProcessCount)")
-        if let effectiveArchitecture = report.logAnalysis.effectiveCEFArchitecture {
-            let legacyFlagIgnored = effectiveArchitecture == String("64bit")
-            logger.write("requested_cef_architecture=\(SteamInstaller.loginLaunchProfile.requestedCEFArchitecture) effective_cef_architecture=\(effectiveArchitecture) legacy_login_flag_ignored=\(legacyFlagIgnored)")
-        }
-    }
-
-    private func migrateNativeSteamLoginIfNeeded(runtimePath: URL) async throws {
-        guard !SteamNativeLoginMigration.isComplete(fileManager: .default) else { return }
-
-        state.lastProcessType = "steam-bootstrap"
-        state.phase = .steamUpdating
-        message = friendlyMessage(for: .steamUpdating)
-        progressIsIndeterminate = true
-        persistState()
-        diagnostics.breadcrumb("steam_update_started", context: diagnosticContext(stage: "steam_update"))
-
-        if !steamMonitor.bootstrapComplete(prefix: PortsidePaths.steamPrefix) {
-            try supervisor.launchSteam(state: state, arguments: SteamInstaller.bootstrapArguments)
-            guard await steamMonitor.waitForBootstrap(prefix: PortsidePaths.steamPrefix) else {
-                throw PortsideError.processLaunchFailed("Steam bootstrap did not complete before the timeout.")
-            }
-            supervisor.requestStop()
-            guard await supervisor.waitForStop(timeout: 10) else {
-                throw PortsideError.processLaunchFailed("Steam bootstrap could not be closed before login migration.")
-            }
-        }
-
-        await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
-        guard await steamMonitor.waitForSteamToStop(timeout: 20) else {
-            throw PortsideError.processLaunchFailed("The Windows Steam process could not be closed before login migration.")
-        }
-        guard await steamProcessLauncher.waitForExit(timeout: 10) else {
-            throw PortsideError.processLaunchFailed("The Windows Steam launcher could not be closed before login migration.")
-        }
-
-        state.lastProcessType = "native-steam-login-migration"
-        state.phase = .steamNativeLogin
-        message = friendlyMessage(for: .steamNativeLogin)
-        persistState()
-        diagnostics.breadcrumb("steam_native_login_migration_started", context: diagnosticContext(stage: "native_steam_login_migration"))
-
-        do {
-            _ = try await steamNativeLoginCoordinator.migrateIfNeeded()
-            progressIsIndeterminate = false
-            diagnostics.event("steam_native_login_migration_completed", context: diagnosticContext(stage: "native_steam_login_migration"))
-        } catch {
-            progressIsIndeterminate = false
-            diagnostics.event("steam_native_login_migration_failed", context: diagnosticContext(stage: "native_steam_login_migration", errorCode: errorCode(for: error)))
-            throw error
-        }
     }
 
     private enum SteamOpenOutcome: Equatable {
@@ -456,10 +386,9 @@ final class PortsideModel: ObservableObject {
         case alreadyCoordinated
     }
 
-    private func openSteamAndWait(executable: URL) async throws -> SteamOpenOutcome {
-        guard let runtimePath = state.runtimeRecord?.executablePath ?? state.runtime?.executablePath.map(URL.init(fileURLWithPath:)) else {
-            throw PortsideError.runtimeUnavailable
-        }
+    private func openSteamAndWait(executable: URL, runtimePath: URL? = nil) async throws -> SteamOpenOutcome {
+        let runtimePath = runtimePath ?? state.runtimeRecord?.executablePath
+        guard let runtimePath else { throw PortsideError.runtimeUnavailable }
         guard steamLaunchLock == nil else {
             logger.write("Steam launch is already being coordinated by this Portside instance")
             return .alreadyCoordinated
@@ -470,77 +399,38 @@ final class PortsideModel: ObservableObject {
         }
         steamLaunchLock = launchLock
         defer { steamLaunchLock = nil }
+
         state.lastProcessType = "steam-launch"
-        state.phase = .steamLaunching; message = friendlyMessage(for: .steamLaunching); persistState()
+        state.phase = .steamLaunching
+        message = friendlyMessage(for: .steamLaunching)
+        persistState()
         diagnostics.breadcrumb("steam_launch_requested", context: diagnosticContext(stage: "launching_steam"))
-        setIndeterminate(true)
-        await stopLegacySteamIfNeeded(runtimePath: runtimePath)
-        if await steamMonitor.isSteamProcessRunning() {
-            logger.write("Stopping an existing Steam process before opening the UI")
-            await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
-            guard await steamMonitor.waitForSteamToStop() else {
-                throw PortsideError.processLaunchFailed("Steam could not be restarted after its update.")
-            }
-        }
+        progressIsIndeterminate = true
+
+        await stopManagedSteamIfNeeded()
         guard await steamProcessLauncher.waitForExit(timeout: 10) else {
-            throw PortsideError.processLaunchFailed("The previous Wine Steam process could not be closed safely.")
+            throw PortsideError.processLaunchFailed("The previous managed Steam launcher could not be closed safely.")
         }
-        let policyResult = try await WinePrefixManager.configureSilentCrashHandling(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix, logger: logger)
-        guard policyResult.status == 0 else { throw RuntimePipelineError.processFailed("Wine crash-dialog configuration", policyResult.status) }
-        let windows10Result = try await WinePrefixManager.ensureWindows10(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix, logger: logger)
-        guard windows10Result.status == 0 else { throw RuntimePipelineError.processFailed("Windows 10 prefix configuration", windows10Result.status) }
-        let loginStateBeforeLaunch = SteamNativeLoginMigration.loginState(at: SteamNativeLoginMigration.managedSteamDirectory)
-        let loginArguments = SteamInstaller.bootstrapArguments
-        logger.write("Launching Steam login phase with arguments: \(loginArguments.joined(separator: " "))")
-        diagnostics.event("steam_login_phase_started", context: diagnosticContext(stage: "steam_login_phase", cefStrategy: "legacy-login"))
+
+        let existingWebhelperLines = await steamMonitor.captureWebhelperLines()
+        logger.write("Launching steam.exe without experimental launch flags")
         _ = try await steamProcessLauncher.launch(
             runtimePath: runtimePath,
             prefix: PortsidePaths.steamPrefix,
             steamExecutable: executable,
-            arguments: loginArguments,
-            esyncEnabled: true
+            arguments: SteamInstaller.launchArguments
         )
-        steamLaunchArgumentsApplied = true
-        logSteamLaunchProfile()
-        diagnostics.event("steam_launch_profile_applied", context: diagnosticContext(stage: "steam_login_phase", cefStrategy: "legacy-login"))
+        diagnostics.breadcrumb("steam_started", context: diagnosticContext(stage: "steam_process_started"))
 
-        guard await steamMonitor.waitForSteamLogin(prefix: PortsidePaths.steamPrefix, initialLoginState: loginStateBeforeLaunch) else {
-            diagnostics.event("steam_login_phase_failed", context: diagnosticContext(stage: "steam_login_phase", errorCode: "steam_login_not_completed", cefStrategy: "legacy-login"))
-            throw PortsideError.processLaunchFailed("Windows Steam closed before login completed.")
+        let report = await steamMonitor.waitForSteamHandoff(prefix: PortsidePaths.steamPrefix, baselineWebhelperLines: existingWebhelperLines)
+        lastReadinessReport = report
+        logger.write("steamwebhelper_process_count=\(report.webhelperProcessCount)")
+        guard report.status == .ready else {
+            diagnostics.event("steam_handoff_failed", context: diagnosticContext(stage: "steam_handoff", errorCode: "steam_\(report.status.rawValue)", report: report))
+            throw PortsideError.processLaunchFailed("Steam did not present a stable managed window.")
         }
-        diagnostics.event("steam_login_detected", context: diagnosticContext(stage: "steam_login_phase", cefStrategy: "legacy-login"))
-
-        if supervisor.isRunning {
-            supervisor.requestStop()
-            _ = await supervisor.waitForStop(timeout: 5)
-        }
-        await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
-        guard await steamMonitor.waitForSteamToStop(timeout: 20) else {
-            throw PortsideError.processLaunchFailed("Windows Steam could not be closed after login.")
-        }
-        guard await steamProcessLauncher.waitForExit(timeout: 10) else {
-            throw PortsideError.processLaunchFailed("The Windows Steam launcher could not be closed after login.")
-        }
-
-        let noBrowserArguments = SteamInstaller.noBrowserMiniGamesListArguments
-        logger.write("Launching Steam handoff with arguments: \(noBrowserArguments.joined(separator: " "))")
-        diagnostics.event("steam_no_browser_started", context: diagnosticContext(stage: "steam_no_browser_handoff", cefStrategy: "no-browser-minigames"))
-        _ = try await steamProcessLauncher.launch(
-            runtimePath: runtimePath,
-            prefix: PortsidePaths.steamPrefix,
-            steamExecutable: executable,
-            arguments: noBrowserArguments,
-            esyncEnabled: true
-        )
-        guard await steamMonitor.waitForStableSteamProcess(prefix: PortsidePaths.steamPrefix) else {
-            diagnostics.event("steam_no_browser_failed", context: diagnosticContext(stage: "steam_no_browser_handoff", errorCode: "steam_handoff_not_stable", cefStrategy: "no-browser-minigames"))
-            await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
-            _ = await steamMonitor.waitForSteamToStop(timeout: 10)
-            _ = await steamProcessLauncher.waitForExit(timeout: 10)
-            throw PortsideError.processLaunchFailed("Steam did not remain running after the no-browser handoff.")
-        }
-        _ = await steamMonitor.activateVisibleSteamWindow(prefix: PortsidePaths.steamPrefix)
-        diagnostics.event("steam_no_browser_completed", context: diagnosticContext(stage: "steam_no_browser_handoff", cefStrategy: "no-browser-minigames"))
+        diagnostics.event("steam_window_detected", context: diagnosticContext(stage: "steam_handoff", report: report))
+        diagnostics.event("steam_ui_ready", context: diagnosticContext(stage: "steam_handoff", report: report))
         state.phase = .steamReady
         state.setupCompleted = true
         state.lastSteamStatus = .ready
@@ -550,13 +440,15 @@ final class PortsideModel: ObservableObject {
         return .ready
     }
 
-    private func readinessScore(_ report: SteamReadinessReport) -> Int {
-        (report.webhelperStarted ? 4 : 0)
-            + (report.windowDetected ? 4 : 0)
-            + (report.browserReadyDetected ? 2 : 0)
-            + (report.logAnalysis.contentWindowEvidence ? 2 : 0)
-            + (report.cefArgumentsObserved ? 1 : 0)
-            - (report.webhelperRestartCount * 2)
+    private func stopManagedSteamIfNeeded() async {
+        guard let runtimePath = state.runtimeRecord?.executablePath ?? state.runtime?.executablePath.map(URL.init(fileURLWithPath:)),
+              FileManager.default.isExecutableFile(atPath: runtimePath.path) else { return }
+        if await steamMonitor.isSteamProcessRunning(prefix: PortsidePaths.steamPrefix) {
+            logger.write("Stopping the existing Portside Steam process before continuing")
+            await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
+            _ = await steamMonitor.waitForSteamToStop(prefix: PortsidePaths.steamPrefix, timeout: 20)
+        }
+        _ = await steamProcessLauncher.waitForExit(timeout: 10)
     }
 
     private func terminateAfterHandOff() {
@@ -572,21 +464,17 @@ final class PortsideModel: ObservableObject {
         }
     }
 
-    private func stopLegacySteamIfNeeded(runtimePath: URL) async {
-        let legacyPrefix = PortsidePaths.legacyPrefixes.appendingPathComponent("Steam", isDirectory: true)
-        let legacyExecutable = legacyPrefix.appendingPathComponent("drive_c/Program Files (x86)/Steam/steam.exe")
-        guard FileManager.default.fileExists(atPath: legacyExecutable.path) else { return }
-        logger.write("Stopping Steam from the legacy prefix before opening the managed prefix")
-        await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: legacyPrefix)
-    }
-
     private func persistState() {
         state.lastUpdated = Date()
         try? store.save(state)
     }
 
     func stopSteam() {
-        supervisor.requestStop(); message = "Steam was asked to close safely."
+        Task {
+            guard let runtimePath = state.runtimeRecord?.executablePath else { return }
+            await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
+            message = "Steam was asked to close safely."
+        }
     }
 
     func repair() {
@@ -625,7 +513,10 @@ final class PortsideModel: ObservableObject {
     func reset() {
         do {
             try FileManager.default.removeItem(at: PortsidePaths.root)
-            state = EnvironmentState(); setupStep = .checking; message = "Portside was reset."; errorMessage = nil
+            state = EnvironmentState()
+            setupStep = .checking
+            message = "Portside was reset."
+            errorMessage = nil
         } catch {
             errorMessage = "Could not reset Portside."
             diagnostics.capture(error: error, context: diagnosticContext(stage: "reset", errorCode: "permission_denied"))

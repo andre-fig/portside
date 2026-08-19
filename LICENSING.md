@@ -6,7 +6,7 @@ The repository currently has no third-party Swift package dependencies. Portside
 
 ## Runtime status
 
-The app does not bundle Wine, CrossOver, Game Porting Toolkit, D3DMetal, Rosetta, GStreamer, DXMT, or game binaries. It downloads Wine Staging 11.15 from the pinned Gcenx release and GStreamer 1.28.5 from the official GStreamer site at setup time, verifies both, and stores them under the user’s Portside directory. Wine source is LGPL-2.1-or-later; GStreamer is LGPL-2.1-or-later plus component-specific licenses. Gcenx’s packaging repository does not expose an SPDX license in its GitHub metadata, so commercial redistribution of that packaged artifact still requires upstream confirmation. Portside currently downloads rather than redistributes it.
+The app does not bundle Wine, CrossOver, Game Porting Toolkit, D3DMetal, Rosetta, GStreamer, DXMT, or game binaries. It downloads Wine Staging 11.6_1 from the pinned Gcenx release and GStreamer 1.28.5 from the official GStreamer site at setup time, verifies both, and stores them under the user’s Portside directory. Wine source is LGPL-2.1-or-later; GStreamer is LGPL-2.1-or-later plus component-specific licenses. Gcenx’s packaging repository does not expose an SPDX license in its GitHub metadata, so commercial redistribution of that packaged artifact still requires upstream confirmation. Portside currently downloads rather than redistributes it.
 
 DXMT is intentionally not installed: its current GitHub metadata reports `NOASSERTION` for the license. Direct3D 9/10/11 use WineD3D shipped with the Wine build.
 

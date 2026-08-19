@@ -9,21 +9,15 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
     private static let allowedTagKeys: Set<String> = [
         "stage", "error_code", "portside_version", "portside_build", "macos_version", "architecture",
         "runtime_name", "runtime_version", "graphics_backend", "process_type", "exit_code", "duration", "retry_count",
-        "cef_strategy", "cef_failure_category", "webhelper_restart_count", "webhelper_started", "webhelper_exit_code",
-        "renderer_mode", "gpu_process_status", "window_detected", "browser_ready", "browser_ready_detected", "cache_recovery_attempted",
-        "window_visual_state", "steam_version", "steam_launch_profile", "steam_launch_arguments_applied",
-        "requested_cef_architecture", "effective_cef_architecture", "legacy_login_flag_ignored", "webhelper_process_count"
+        "webhelper_restart_count", "webhelper_started", "webhelper_exit_code", "window_detected", "steam_version",
+        "webhelper_process_count", "msync_bootstrapped", "msync_running"
     ]
     private static let allowedBreadcrumbs: Set<String> = [
         "setup_started", "requirements_checked", "runtime_download_started", "runtime_verified", "prefix_created",
         "steam_install_started", "steam_update_started", "steam_launch_requested", "process_exited", "repair_requested",
         "steam_started", "steamwebhelper_started", "steamwebhelper_exit_code", "steamwebhelper_crash_loop",
-        "steamwebhelper_timeout", "steam_login_ui_unverified", "steam_html_cache_recovery_attempted",
-        "steam_cef_initialization_failed", "steam_window_detected", "steam_cef_strategy_attempted",
-        "cef_ui_unverified", "cef_failure_detected", "steam_ui_ready", "steam_launch_profile_applied",
-        "steam_native_login_migration_started", "steam_native_login_migration_completed", "steam_native_login_migration_failed",
-        "steam_native_login_required", "steam_login_phase_started", "steam_login_detected", "steam_login_phase_failed",
-        "steam_no_browser_started", "steam_no_browser_completed", "steam_no_browser_failed"
+        "steamwebhelper_timeout", "steam_window_detected", "steam_ui_ready", "steam_handoff_failed",
+        "msync_bootstrapped", "msync_up_and_running"
     ]
 
     public init() {

@@ -2,35 +2,28 @@
 
 **Your Steam library, now on Mac.**
 
-Portside is a native SwiftUI macOS wrapper that prepares a private compatibility workspace and launches the official Windows Steam client. It does not replace Steam’s library UI, collect Steam credentials, distribute games, or bypass DRM/anti-cheat.
-
-This repository contains a native Apple silicon MVP. During setup it downloads a pinned Wine Staging 11.15 macOS build, verifies its SHA-256, safely extracts it into Portside’s private runtime directory, downloads the official GStreamer 1.28.5 runtime package, verifies and extracts it locally, creates a win64 prefix, and downloads `SteamSetup.exe` from Steam’s official Fastly CDN. WineD3D is the default graphics layer for Direct3D 9/10/11. No runtime or Steam binary is bundled in the app.
+Portside is a native SwiftUI macOS app that prepares a private Wine workspace and launches the official Windows Steam client. It does not replace Steam’s library UI, collect Steam credentials, distribute games, or bypass DRM/anti-cheat.
 
 ## Build and test
 
 ```sh
-swift build
 swift test
+swift build
 ./scripts/package_app.sh
 open build/Portside.app
 ```
 
-The package targets macOS 13+ and builds the current architecture by default. `package_app.sh` produces an arm64 ad-hoc-signed `.app` bundle; it is not notarized.
+The package targets macOS 13+ on Apple silicon. The app does not bundle Wine or Steam binaries; setup downloads the pinned runtime and the official Steam installer over HTTPS and verifies the runtime checksum before installation.
 
-## MVP behavior
+## Runtime and launch behavior
 
-- Rosetta is detected by executing a harmless x86-64 `/usr/bin/true`; if missing, Portside offers the official macOS installation flow.
-- The runtime manifest is fixed to Wine 11.15 and includes release checksum, source, architecture, license note, and validation date.
-- The installer is invoked with a fixed argument list and the expected Steam executable is verified.
-- The Windows installer is run silently with the separate, case-sensitive `/S` argument; its output is captured internally and never shown in the Portside UI.
-- Steam bootstrap and all post-install login launches use the centralized `cef_32bit_legacy_login` profile in this exact order: `-udpforce`, `-noreactlogin`, `-allosarches`, `-cef-force-32bit`; these arguments are never sent to `SteamSetup.exe`.
-- Steam launches explicitly with the US English language argument and does not inherit a Portuguese locale from an existing Wine prefix.
-- The first launch starts setup automatically in a single native progress window; after a valid installation, Portside launches exactly one supervised Wine Steam process directly, without creating a second macOS `Steam.app`, then exits its own interface after verified UI handoff.
-- Wine crash dialogs are disabled in the private prefix and `winedbg.exe` is disabled for Portside-owned processes; failures are logged and surfaced as recoverable Portside errors.
-- Sentry starts invisibly through `DiagnosticsService`; Release events use sanitized structured CEF/readiness context only, with PII, full log attachments, and tracing disabled by default.
-- Download interruptions leave a `.part` file and resume with HTTP Range requests.
-- Archive entries are preflighted for absolute paths and `..` traversal before extraction.
-- Recoverable failures provide a single retry action; technical diagnostics are sent automatically through the configured Sentry integration.
-- Portside has no game catalog or App ID allowlist; Steam remains responsible for the library and game installation.
+- Release uses one runtime: Gcenx Wine Staging 11.6_1, with the pinned metadata in [`docs/runtime-manifest.json`](docs/runtime-manifest.json).
+- WineD3D is the graphics layer for Direct3D 9/10/11. D3DMetal, GPTK, Sikarugir Launcher and Sikarugir Creator are not bundled.
+- The existing Portside prefix is preserved. A recoverable snapshot is created before prefix initialization or runtime transition; `steamapps`, saves and user data are not deleted.
+- SteamSetup.exe is run silently with the separate `/S` argument. Later, `steam.exe` is launched directly through Wine with an empty argument list. No shell, native macOS Steam installation, native-login migration, CEF flags or GPU fallback cascade is used.
+- The app prevents concurrent Portside launches from creating duplicate managed Steam processes and closes itself after a stable process handoff.
+- Wine crash dialogs are disabled for the private prefix and failures are logged locally and sent to Sentry as sanitized technical events. Screen Recording permission is never requested.
 
-The real Steam/game validation matrix still requires completing the first zero-click setup on an interactive GUI session. See `docs/VALIDATION.md`.
+Sikarugir remains a development-only comparison reference. It is not selected by Release because an official, checksum-pinned `WS12WineSikarugir10.0_6` artifact and redistributable runtime package could not be verified.
+
+The real interactive Steam login and library rendering still require validation on a display. See [`docs/VALIDATION.md`](docs/VALIDATION.md).
