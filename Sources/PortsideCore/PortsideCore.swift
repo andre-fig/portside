@@ -399,9 +399,9 @@ public final class SecureDownloader: NSObject, @unchecked Sendable {
 
 public enum SteamInstaller {
     public static let officialURL = URL(string: "https://cdn.fastly.steamstatic.com/client/installer/SteamSetup.exe")!
-    public static let bootstrapArguments = ["-silent"]
-    public static let defaultLanguageArguments = ["-language", "english"]
     public static let loginLaunchProfile = SteamLaunchProfile.cef32LegacyLogin
+    public static let bootstrapArguments = loginLaunchProfile.arguments
+    public static let defaultLanguageArguments = ["-language", "english"]
     public static let uiArguments = SteamLaunchConfiguration.normal.arguments
     public static let fallbackUIArguments = SteamLaunchConfiguration.fallback.arguments
     public static let uiLaunchConfigurations = [SteamLaunchConfiguration.normal, SteamLaunchConfiguration.disableGPU, SteamLaunchConfiguration.fallback]

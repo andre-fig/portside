@@ -154,8 +154,8 @@ final class PortsideCoreTests: XCTestCase {
         }
     }
 
-    func testBootstrapUsesOnlySilentArgument() {
-        XCTAssertEqual(SteamInstaller.bootstrapArguments, ["-silent"])
+    func testBootstrapUsesLegacyLoginProfile() {
+        XCTAssertEqual(SteamInstaller.bootstrapArguments, ["-udpforce", "-noreactlogin", "-allosarches", "-cef-force-32bit"])
         XCTAssertEqual(SteamInstaller.defaultLanguageArguments, ["-language", "english"])
         XCTAssertFalse(SteamInstaller.bootstrapArguments.contains { $0.contains("sh") || $0.contains("bash") })
         XCTAssertEqual(WineRuntimePolicy.debug, "-all")

@@ -23,8 +23,7 @@ The package targets macOS 13+ and builds the current architecture by default. `p
 - The runtime manifest is fixed to Wine 11.15 and includes release checksum, source, architecture, license note, and validation date.
 - The installer is invoked with a fixed argument list and the expected Steam executable is verified.
 - The Windows installer is run silently with the separate, case-sensitive `/S` argument; its output is captured internally and never shown in the Portside UI.
-- Steam bootstrap is attempted with `-silent`, validated using its installed-client marker, and followed by controlled CEF launch strategies for login (`normal`, `-cef-disable-gpu`, then `-cef-disable-gpu -cef-disable-gpu-compositing`).
-- The post-install Steam login launch uses the centralized `cef_32bit_legacy_login` profile in this exact order: `-udpforce`, `-noreactlogin`, `-allosarches`, `-cef-force-32bit`; these arguments are never sent to `SteamSetup.exe`.
+- Steam bootstrap and all post-install login launches use the centralized `cef_32bit_legacy_login` profile in this exact order: `-udpforce`, `-noreactlogin`, `-allosarches`, `-cef-force-32bit`; these arguments are never sent to `SteamSetup.exe`.
 - Steam launches explicitly with the US English language argument and does not inherit a Portuguese locale from an existing Wine prefix.
 - The first launch starts setup automatically in a single native progress window; after a valid installation, Portside launches exactly one supervised Wine Steam process directly, without creating a second macOS `Steam.app`, then exits its own interface after verified UI handoff.
 - Wine crash dialogs are disabled in the private prefix and `winedbg.exe` is disabled for Portside-owned processes; failures are logged and surfaced as recoverable Portside errors.
