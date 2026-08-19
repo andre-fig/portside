@@ -628,6 +628,7 @@ struct RootView: View {
                     if model.setupStep == .failed { FailureView(model: model) }
                     else { SetupProgressView(model: model) }
                 }
+                .ignoresSafeArea(.container, edges: .top)
             } else {
                 ReadyView()
             }
@@ -673,21 +674,20 @@ struct InstallerHeader: View {
     @ObservedObject var model: PortsideModel
 
     var body: some View {
-        ZStack {
-            HStack(alignment: .center, spacing: 12) {
-                PortsideLogoView(size: 34)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Portside")
-                        .font(.headline)
-                    Text(model.state.setupCompleted && model.setupStep == .failed ? "Steam could not be opened" : "Preparing Steam for your Mac")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
+        HStack(alignment: .center, spacing: 12) {
+            PortsideLogoView(size: 34)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Portside")
+                    .font(.headline)
+                Text(model.state.setupCompleted && model.setupStep == .failed ? "Steam could not be opened" : "Preparing Steam for your Mac")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
+            Spacer()
         }
         .padding(.horizontal, 22)
-        .frame(maxWidth: .infinity, minHeight: InstallerLayout.headerHeight, maxHeight: InstallerLayout.headerHeight, alignment: .center)
+        .frame(height: InstallerLayout.headerHeight, alignment: .center)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
