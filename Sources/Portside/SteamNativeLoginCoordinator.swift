@@ -120,16 +120,13 @@ final class SteamNativeLoginCoordinator {
     }
 
     private func waitForNativeLogin(at sourceRoot: URL) async throws {
-        let timeout = max(30, min(900, TimeInterval(ProcessInfo.processInfo.environment["PORTSIDE_NATIVE_LOGIN_TIMEOUT"] ?? "300") ?? 300))
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
+        while true {
             if SteamNativeLoginMigration.loginState(at: sourceRoot, fileManager: fileManager) == .loggedIn {
                 logger.write("Native Steam login state detected")
                 return
             }
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            try await Task.sleep(nanoseconds: 2_000_000_000)
         }
-        throw SteamNativeLoginMigrationError.loginNotDetected
     }
 
     private func terminateNativeSteam(_ application: NSRunningApplication) async throws {

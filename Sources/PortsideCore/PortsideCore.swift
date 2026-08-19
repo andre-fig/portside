@@ -509,9 +509,12 @@ public enum SteamNativeLoginMigration {
         }
         let loginUsersURL = sourceRoot.appendingPathComponent("config/loginusers.vdf")
         guard let contents = try? String(contentsOf: loginUsersURL, encoding: .utf8) else { return .notLoggedIn }
-        let hasRecentAccount = contents.range(of: #"(?m)\"MostRecent\"\s+\"1\""#, options: .regularExpression) != nil
-        let hasSavedLogin = contents.range(of: #"(?m)\"(AllowAutoLogin|RememberPassword)\"\s+\"1\""#, options: .regularExpression) != nil
-        return hasRecentAccount && hasSavedLogin ? .loggedIn : .notLoggedIn
+        let hasAutoLogin = contents.range(of: #"(?m)\"AllowAutoLogin\"\s+\"1\""#, options: .regularExpression) != nil
+        let hasRememberedPassword = contents.range(of: #"(?m)\"RememberPassword\"\s+\"1\""#, options: .regularExpression) != nil
+        let userDataDirectory = sourceRoot.appendingPathComponent("userdata", isDirectory: true)
+        let userDataEntries = (try? fileManager.contentsOfDirectory(at: userDataDirectory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        let hasUserData = !userDataEntries.isEmpty
+        return hasUserData && (hasAutoLogin || hasRememberedPassword) ? .loggedIn : .notLoggedIn
     }
 
     @discardableResult

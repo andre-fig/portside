@@ -166,6 +166,7 @@ final class PortsideCoreTests: XCTestCase {
         try FileManager.default.createDirectory(at: source.appendingPathComponent("config", isDirectory: true), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: source.appendingPathComponent("userdata", isDirectory: true), withIntermediateDirectories: true)
         try Data().write(to: source.appendingPathComponent("registry.vdf"))
+        try Data("profile".utf8).write(to: source.appendingPathComponent("userdata/localconfig.vdf"))
         defer { try? FileManager.default.removeItem(at: root) }
 
         try "\"MostRecent\" \"1\"\n\"AllowAutoLogin\" \"1\"".write(to: source.appendingPathComponent("config/loginusers.vdf"), atomically: true, encoding: .utf8)
