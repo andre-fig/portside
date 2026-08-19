@@ -8,7 +8,7 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
     private static let allowedTagKeys: Set<String> = [
         "stage", "error_code", "portside_version", "portside_build", "macos_version", "architecture",
         "runtime_name", "runtime_version", "graphics_backend", "process_type", "exit_code", "duration", "retry_count",
-        "cef_strategy", "webhelper_restart_count"
+        "cef_strategy", "webhelper_restart_count", "host_bundle_identifier"
     ]
     private static let allowedBreadcrumbs: Set<String> = [
         "setup_started", "requirements_checked", "runtime_download_started", "runtime_verified", "prefix_created",

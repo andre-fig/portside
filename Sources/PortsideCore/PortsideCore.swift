@@ -15,9 +15,10 @@ public enum PortsidePaths {
     public static var cache: URL { root.appendingPathComponent("Cache", isDirectory: true) }
     public static var downloads: URL { root.appendingPathComponent("Downloads", isDirectory: true) }
     public static var diagnostics: URL { root.appendingPathComponent("Diagnostics", isDirectory: true) }
+    public static var launchers: URL { root.appendingPathComponent("Launchers", isDirectory: true) }
 
     public static var allDirectories: [URL] {
-        [root, runtime, prefix, steamPrefix, logs, cache, downloads, diagnostics]
+        [root, runtime, prefix, steamPrefix, logs, cache, downloads, diagnostics, launchers]
     }
 }
 
@@ -130,6 +131,7 @@ public struct DiagnosticContext: Sendable, Equatable {
     public var retryCount: Int
     public var cefStrategy: String?
     public var webhelperRestartCount: Int?
+    public var hostBundleIdentifier: String?
 
     public init(
         stage: String? = nil,
@@ -146,12 +148,13 @@ public struct DiagnosticContext: Sendable, Equatable {
         duration: TimeInterval? = nil,
         retryCount: Int = 0,
         cefStrategy: String? = nil,
-        webhelperRestartCount: Int? = nil
+        webhelperRestartCount: Int? = nil,
+        hostBundleIdentifier: String? = nil
     ) {
         self.stage = stage; self.errorCode = errorCode; self.portsideVersion = portsideVersion; self.portsideBuild = portsideBuild
         self.macOSVersion = macOSVersion; self.architecture = architecture; self.runtimeName = runtimeName; self.runtimeVersion = runtimeVersion
         self.graphicsBackend = graphicsBackend; self.processType = processType; self.exitCode = exitCode; self.duration = duration; self.retryCount = retryCount
-        self.cefStrategy = cefStrategy; self.webhelperRestartCount = webhelperRestartCount
+        self.cefStrategy = cefStrategy; self.webhelperRestartCount = webhelperRestartCount; self.hostBundleIdentifier = hostBundleIdentifier
     }
 
     public var fields: [String: String] {
@@ -164,7 +167,8 @@ public struct DiagnosticContext: Sendable, Equatable {
             ("stage", stage), ("error_code", errorCode), ("macos_version", macOSVersion), ("architecture", architecture),
             ("runtime_name", runtimeName), ("runtime_version", runtimeVersion), ("graphics_backend", graphicsBackend),
             ("process_type", processType), ("exit_code", exitCode.map(String.init)), ("duration", duration.map { String(format: "%.2f", $0) }),
-            ("cef_strategy", cefStrategy), ("webhelper_restart_count", webhelperRestartCount.map(String.init))
+            ("cef_strategy", cefStrategy), ("webhelper_restart_count", webhelperRestartCount.map(String.init)),
+            ("host_bundle_identifier", hostBundleIdentifier)
         ]
         for (key, value) in optionalValues where value != nil { values[key] = value! }
         return values

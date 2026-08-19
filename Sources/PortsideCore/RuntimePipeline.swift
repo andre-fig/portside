@@ -98,19 +98,40 @@ public enum WineRuntimePolicy {
     public static let dllOverrides = "winedbg.exe=d;mscoree,mshtml="
 }
 
-public enum WineRuntimeBranding {
-    /// Gives the private runtime a useful macOS identity when Wine creates helper
-    /// windows. This only changes Portside's managed copy of the runtime.
-    public static func apply(to installedRoot: URL, fileManager: FileManager = .default) throws {
-        let plistURL = installedRoot.appendingPathComponent("Contents/Info.plist")
-        guard fileManager.fileExists(atPath: plistURL.path) else { return }
-        let data = try Data(contentsOf: plistURL)
-        guard var plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else { return }
-        plist["CFBundleName"] = "Steam"
-        plist["CFBundleDisplayName"] = "Steam"
-        plist["CFBundleIdentifier"] = "com.portside.managed-steam"
-        let output = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
-        try output.write(to: plistURL, options: .atomic)
+public enum SteamHostMetadata {
+    public static let bundleIdentifier = "com.portside.steam-launcher"
+    public static let displayName = "Steam"
+    public static let launcherDirectoryName = "Steam.app"
+    public static let templateRelativePath = "Contents/Helpers/Steam.app"
+}
+
+public struct SteamHostLaunchSpec: Equatable, Sendable {
+    public let runtimePath: String
+    public let prefixPath: String
+    public let steamExecutablePath: String
+    public let steamArguments: [String]
+
+    public init(runtimePath: String, prefixPath: String, steamExecutablePath: String, steamArguments: [String] = []) {
+        self.runtimePath = runtimePath
+        self.prefixPath = prefixPath
+        self.steamExecutablePath = steamExecutablePath
+        self.steamArguments = steamArguments
+    }
+
+    public var arguments: [String] {
+        ["--runtime", runtimePath, "--prefix", prefixPath, "--steam", steamExecutablePath, "--"] + steamArguments
+    }
+
+    public var childEnvironment: [String: String] {
+        [
+            "WINEPREFIX": prefixPath,
+            "WINEARCH": "win64",
+            "WINEDLLOVERRIDES": WineRuntimePolicy.dllOverrides,
+            "WINEDEBUG": WineRuntimePolicy.debug,
+            "PATH": URL(fileURLWithPath: runtimePath).deletingLastPathComponent().path,
+            "DYLD_FRAMEWORK_PATH": GStreamerManager.frameworkURL.deletingLastPathComponent().path,
+            "GST_PLUGIN_PATH": GStreamerManager.frameworkURL.appendingPathComponent("Versions/1.0/lib/gstreamer-1.0").path
+        ]
     }
 }
 
@@ -478,7 +499,6 @@ public final class FreeWineRuntimeProvider: @unchecked Sendable {
         }
         let finalExecutable = installedRoot.appendingPathComponent(manifest.relativeExecutablePath)
         guard fileManager.isExecutableFile(atPath: finalExecutable.path) else { throw RuntimePipelineError.runtimeStructureInvalid }
-        try WineRuntimeBranding.apply(to: installedRoot, fileManager: fileManager)
         progress?(0.8, .prefixCreating)
         let prefix = PortsidePaths.steamPrefix
         try fileManager.createDirectory(at: prefix, withIntermediateDirectories: true)

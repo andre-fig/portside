@@ -8,9 +8,15 @@ The current environment is an Apple silicon Mac (`arm64`, Apple M4 Pro reported 
 
 ## Automatic launch and diagnostics
 
-The app starts setup from `PortsideApp.init` without an onboarding action. A valid persisted environment goes directly to the normal Steam launch path; an incomplete environment enters the single progress window and resumes idempotently. Failure is the only state with recovery actions.
+The app starts setup from `PortsideApp.init` without an onboarding action. A valid persisted environment goes directly to the normal Steam launch path; an incomplete environment enters the single progress window and resumes idempotently. Failure is the only state with recovery actions. The visible session is opened through the private `~/Library/Application Support/Portside/Launchers/Steam.app` bundle (`CFBundleDisplayName=Steam`, `CFBundleIdentifier=com.portside.steam-launcher`), while Wine remains an internal runtime process.
 
 `DiagnosticsService` keeps Sentry out of the core pipeline. Release configuration uses the supplied DSN, `sendDefaultPii=false`, zero tracing sample rate, no network breadcrumbs, no replay, no user object, a `beforeSend` allowlist, and a 30-event cache limit. Debug builds intentionally use no DSN. Manual diagnostics require an explicit confirmation and attach only a capped sanitized report. `scripts/package_app.sh` creates `build/Portside.app.dSYM`; upload is optional and requires an external `sentry-cli` plus `SENTRY_AUTH_TOKEN`.
+
+## Steam launcher identity
+
+The original process inspection showed `NSRunningApplication.localizedName == "wine"`, an empty bundle identifier, and a bundle URL resolving to the runtime's Unix Wine executable. Changing the shared Wine runtime `Info.plist` therefore did not control the foreground application's LaunchServices identity. Portside now copies the signed Steam launcher template, including `Contents/Resources/Steam.icns`, into the private Launchers directory and opens it with `NSWorkspace.OpenConfiguration`; the native host also refreshes its in-memory icon from the installed `steam.exe`, passes a fixed argument array, and keeps `WINEPREFIX` scoped to its child process.
+
+The host is validated with `plutil` and `codesign --verify --deep --strict`. In the available agent session, `NSRunningApplication` reported the foreground launcher as `Steam` with bundle identifier `com.portside.steam-launcher`; `screencapture` could not capture the desktop, so Dock tooltip and Command+Tab were not independently screenshot-verified here.
 
 ## Runtime pipeline
 

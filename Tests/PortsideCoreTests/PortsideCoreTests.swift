@@ -229,25 +229,30 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
     }
 
-    func testManagedRuntimeBrandingUsesSteamIdentity() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-branding-\(UUID().uuidString)", isDirectory: true)
-        let contents = root.appendingPathComponent("Contents", isDirectory: true)
-        let plistURL = contents.appendingPathComponent("Info.plist")
-        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
-        let initial: [String: Any] = [
-            "CFBundleName": "Wine Staging",
-            "CFBundleIdentifier": "org.winehq.wine-staging.wine"
-        ]
-        try PropertyListSerialization.data(fromPropertyList: initial, format: .xml, options: 0).write(to: plistURL)
-        defer { try? FileManager.default.removeItem(at: root) }
+    func testSteamHostMetadataIsStable() {
+        XCTAssertEqual(SteamHostMetadata.displayName, "Steam")
+        XCTAssertEqual(SteamHostMetadata.bundleIdentifier, "com.portside.steam-launcher")
+        XCTAssertEqual(SteamHostMetadata.launcherDirectoryName, "Steam.app")
+        XCTAssertEqual(SteamHostMetadata.templateRelativePath, "Contents/Helpers/Steam.app")
+    }
 
-        try WineRuntimeBranding.apply(to: root)
+    func testSteamHostLaunchSpecKeepsArgumentsSeparateAndScopesEnvironmentToChild() {
+        let spec = SteamHostLaunchSpec(
+            runtimePath: "/private/Runtime/bin/wine",
+            prefixPath: "/private/Prefix/Steam",
+            steamExecutablePath: "/private/Prefix/Steam/drive_c/steam.exe",
+            steamArguments: ["-cef-disable-gpu", "--flag with spaces"]
+        )
 
-        let data = try Data(contentsOf: plistURL)
-        let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any])
-        XCTAssertEqual(plist["CFBundleName"] as? String, "Steam")
-        XCTAssertEqual(plist["CFBundleDisplayName"] as? String, "Steam")
-        XCTAssertEqual(plist["CFBundleIdentifier"] as? String, "com.portside.managed-steam")
+        XCTAssertEqual(spec.arguments, [
+            "--runtime", "/private/Runtime/bin/wine",
+            "--prefix", "/private/Prefix/Steam",
+            "--steam", "/private/Prefix/Steam/drive_c/steam.exe",
+            "--", "-cef-disable-gpu", "--flag with spaces"
+        ])
+        XCTAssertFalse(spec.arguments.joined(separator: " ").contains("sh -c"))
+        XCTAssertEqual(spec.childEnvironment["WINEPREFIX"], "/private/Prefix/Steam")
+        XCTAssertEqual(spec.childEnvironment["WINEDEBUG"], "-all")
     }
 
     func testEnvironmentPhaseIsCodable() throws {
