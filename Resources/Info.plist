@@ -3,6 +3,8 @@
 <plist version="1.0"><dict>
 <key>CFBundleDisplayName</key><string>Portside</string>
 <key>CFBundleExecutable</key><string>Portside</string>
+<key>CFBundleIconFile</key><string>PortsideIcon</string>
+<key>CFBundleIconName</key><string>PortsideIcon</string>
 <key>CFBundleIdentifier</key><string>com.portside.app</string>
 <key>CFBundleName</key><string>Portside</string>
 <key>CFBundlePackageType</key><string>APPL</string>
