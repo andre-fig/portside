@@ -230,6 +230,11 @@ final class PortsideCoreTests: XCTestCase {
 
     func testBootstrapUsesLegacyLoginProfile() {
         XCTAssertEqual(SteamInstaller.bootstrapArguments, ["-udpforce", "-noreactlogin", "-allosarches", "-cef-force-32bit"])
+        XCTAssertEqual(SteamInstaller.noBrowserMiniGamesListArguments, ["-no-browser", "+open", "steam://open/minigameslist"])
+        XCTAssertEqual(SteamInstaller.bootstrapArguments.count, 4)
+        XCTAssertEqual(SteamInstaller.noBrowserMiniGamesListArguments.count, 3)
+        XCTAssertFalse(SteamInstaller.bootstrapArguments.contains { $0.contains(" ") || $0.contains("\"") })
+        XCTAssertFalse(SteamInstaller.noBrowserMiniGamesListArguments.contains { $0.contains(" ") || $0.contains("\"") })
         XCTAssertEqual(SteamInstaller.defaultLanguageArguments, ["-language", "english"])
         XCTAssertFalse(SteamInstaller.bootstrapArguments.contains { $0.contains("sh") || $0.contains("bash") })
         XCTAssertEqual(WineRuntimePolicy.debug, "-all")

@@ -1116,6 +1116,59 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         return false
     }
 
+    /// Waits for the legacy no-browser Steam handoff without inspecting a window
+    /// or requiring Screen Recording permission.
+    public func waitForStableSteamProcess(prefix: URL = PortsidePaths.steamPrefix, timeout: TimeInterval = 20, requiredStableDuration: TimeInterval = 3) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        var stableSince: Date?
+        while Date() < deadline {
+            let snapshot = await processSnapshot()
+            let isRunning = managedProcessSnapshot(snapshot, prefix: prefix, processNames: ["steam.exe"])
+            if isRunning {
+                stableSince = stableSince ?? Date()
+                if let stableSince, Date().timeIntervalSince(stableSince) >= requiredStableDuration {
+                    logger.write("Steam no-browser handoff process remained stable")
+                    return true
+                }
+            } else {
+                stableSince = nil
+            }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        logger.write("Steam no-browser handoff process did not remain stable before the timeout", level: .warning)
+        return false
+    }
+
+    /// Waits for the user to finish the first Steam login. This phase intentionally
+    /// has no timeout: the user may need as long as necessary to complete MFA or a
+    /// CAPTCHA. It only ends when Steam exits or its login becomes observable.
+    public func waitForSteamLogin(prefix: URL = PortsidePaths.steamPrefix, initialLoginState: SteamNativeLoginState? = nil) async -> Bool {
+        // Wine can return from the launcher a moment before steam.exe and its
+        // helpers are visible in the process table. This is only a startup grace
+        // period; once Steam is observed, there is deliberately no login timeout.
+        let startupDeadline = Date().addingTimeInterval(30)
+        var didObserveSteam = false
+        while true {
+            let snapshot = await processSnapshot()
+            let steamRunning = managedProcessSnapshot(snapshot, prefix: prefix, processNames: ["steam.exe", "steamwebhelper"])
+            if steamRunning { didObserveSteam = true }
+            guard steamRunning || (!didObserveSteam && Date() < startupDeadline) else {
+                logger.write("Windows Steam exited before login completed", level: .warning)
+                return false
+            }
+
+            let currentLoginState = SteamNativeLoginMigration.loginState(at: prefix)
+            // Existing migrated data is only a baseline. It must not make the
+            // first phase skip the real Windows login handshake.
+            let loginStateChanged = initialLoginState.map { $0 != .loggedIn && currentLoginState == .loggedIn } ?? (currentLoginState == .loggedIn)
+            if steamLoginDetected(in: snapshot) || loginStateChanged {
+                logger.write("Windows Steam login detected")
+                return true
+            }
+            try? await Task.sleep(for: .seconds(1))
+        }
+    }
+
     private func stableDuration(since date: Date?) -> TimeInterval {
         guard let date else { return 0 }
         return max(0, Date().timeIntervalSince(date))
@@ -1139,6 +1192,18 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         return lines.contains { text in
             text.contains(managedPrefix) && processNames.contains { text.contains($0) }
         }
+    }
+
+    private func steamLoginDetected(in snapshot: String) -> Bool {
+        let lines = snapshot.split(whereSeparator: \.isNewline).map(String.init)
+        for line in lines where line.contains("steamwebhelper") || line.contains("steam.exe") {
+            for marker in ["--steamid=", "-steamid="] {
+                guard let range = line.range(of: marker) else { continue }
+                let value = line[range.upperBound...].prefix { $0.isNumber }
+                if !value.isEmpty && value != "0" { return true }
+            }
+        }
+        return false
     }
 
     private func cefArgumentsReachedWebhelper(snapshot: String, strategy: SteamLaunchConfiguration) -> Bool {

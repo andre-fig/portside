@@ -22,7 +22,8 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
         "steam_cef_initialization_failed", "steam_window_detected", "steam_cef_strategy_attempted",
         "cef_ui_unverified", "cef_failure_detected", "steam_ui_ready", "steam_launch_profile_applied",
         "steam_native_login_migration_started", "steam_native_login_migration_completed", "steam_native_login_migration_failed",
-        "steam_native_login_required"
+        "steam_native_login_required", "steam_login_phase_started", "steam_login_detected", "steam_login_phase_failed",
+        "steam_no_browser_started", "steam_no_browser_completed", "steam_no_browser_failed"
     ]
 
     public init() {

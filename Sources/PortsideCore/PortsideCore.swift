@@ -402,6 +402,7 @@ public enum SteamInstaller {
     public static let loginLaunchProfile = SteamLaunchProfile.cef32LegacyLogin
     public static let bootstrapArguments = loginLaunchProfile.arguments
     public static let defaultLanguageArguments = ["-language", "english"]
+    public static let noBrowserMiniGamesListArguments = ["-no-browser", "+open", "steam://open/minigameslist"]
     public static let uiArguments = SteamLaunchConfiguration.normal.arguments
     public static let fallbackUIArguments = SteamLaunchConfiguration.fallback.arguments
     public static let uiLaunchConfigurations = [SteamLaunchConfiguration.normal, SteamLaunchConfiguration.noESync, SteamLaunchConfiguration.disableGPU, SteamLaunchConfiguration.fallback]
