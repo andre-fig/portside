@@ -408,7 +408,7 @@ struct InstallerHeader: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            PortsideLogoView(size: 42)
+            PortsideLogoView(size: 34)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Portside Installer")
                     .font(.headline)
@@ -419,7 +419,7 @@ struct InstallerHeader: View {
             Spacer()
         }
         .padding(.horizontal, 22)
-        .frame(height: 68)
+        .frame(height: 54)
     }
 }
 
