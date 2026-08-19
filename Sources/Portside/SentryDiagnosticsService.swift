@@ -9,8 +9,9 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
         "stage", "error_code", "portside_version", "portside_build", "macos_version", "architecture",
         "runtime_name", "runtime_version", "graphics_backend", "process_type", "exit_code", "duration", "retry_count",
         "cef_strategy", "cef_failure_category", "webhelper_restart_count", "webhelper_started", "webhelper_exit_code",
-        "renderer_mode", "gpu_process_status", "window_detected", "browser_ready_detected", "cache_recovery_attempted",
-        "window_visual_state", "steam_version"
+        "renderer_mode", "gpu_process_status", "window_detected", "browser_ready", "browser_ready_detected", "cache_recovery_attempted",
+        "window_visual_state", "steam_version", "steam_launch_profile", "steam_launch_arguments_applied",
+        "requested_cef_architecture", "effective_cef_architecture", "legacy_login_flag_ignored", "webhelper_process_count"
     ]
     private static let allowedBreadcrumbs: Set<String> = [
         "setup_started", "requirements_checked", "runtime_download_started", "runtime_verified", "prefix_created",
@@ -18,7 +19,7 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
         "steam_started", "steamwebhelper_started", "steamwebhelper_exit_code", "steamwebhelper_crash_loop",
         "steamwebhelper_timeout", "steam_login_ui_unverified", "steam_html_cache_recovery_attempted",
         "steam_cef_initialization_failed", "steam_window_detected", "steam_cef_strategy_attempted",
-        "cef_ui_unverified", "cef_failure_detected", "steam_ui_ready"
+        "cef_ui_unverified", "cef_failure_detected", "steam_ui_ready", "steam_launch_profile_applied"
     ]
 
     public init() {

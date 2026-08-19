@@ -52,6 +52,39 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertFalse(context.fields.keys.contains("steam_id"))
     }
 
+    func testSteamCEF32BitLaunchProfileIsExactAndStructured() {
+        let profile = SteamInstaller.loginLaunchProfile
+        XCTAssertEqual(profile.identifier, "cef_32bit_legacy_login")
+        XCTAssertEqual(profile.requestedCEFArchitecture, "32bit")
+        XCTAssertEqual(profile.arguments, ["-udpforce", "-noreactlogin", "-allosarches", "-cef-force-32bit"])
+        XCTAssertFalse(profile.arguments.contains { $0.contains("=") || $0.contains(" ") || $0.contains("\"") })
+
+        for strategy in SteamInstaller.uiLaunchConfigurations {
+            let arguments = SteamInstaller.loginLaunchArguments(for: strategy)
+            XCTAssertEqual(Array(arguments.prefix(profile.arguments.count)), profile.arguments)
+            XCTAssertEqual(Array(arguments.dropFirst(profile.arguments.count).prefix(2)), SteamInstaller.defaultLanguageArguments)
+            XCTAssertFalse(arguments.contains { $0 == "-allowseaches" || $0 == "-allosarches=" })
+        }
+
+        let context = DiagnosticContext(
+            stage: "steam_launch",
+            steamLaunchProfile: profile.identifier,
+            steamLaunchArgumentsApplied: true,
+            requestedCEFArchitecture: profile.requestedCEFArchitecture,
+            effectiveCEFArchitecture: "64bit",
+            legacyLoginFlagIgnored: true,
+            webhelperProcessCount: 3
+        )
+        XCTAssertEqual(context.fields["steam_launch_profile"], "cef_32bit_legacy_login")
+        XCTAssertEqual(context.fields["steam_launch_arguments_applied"], "true")
+        XCTAssertEqual(context.fields["requested_cef_architecture"], "32bit")
+        XCTAssertEqual(context.fields["effective_cef_architecture"], "64bit")
+        XCTAssertEqual(context.fields["legacy_login_flag_ignored"], "true")
+        XCTAssertEqual(context.fields["webhelper_process_count"], "3")
+        XCTAssertFalse(context.fields.keys.contains("steam_id"))
+        XCTAssertFalse(context.fields.keys.contains("cookie"))
+    }
+
     func testWineEnvironmentInheritsHostContextAndPrependsRuntimePaths() {
         let environment = WineProcessEnvironment.make(
             runtimeExecutable: URL(fileURLWithPath: "/private/Runtime/bin/wine"),
@@ -77,6 +110,26 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertTrue(environment["PATH"]?.contains("/usr/bin") == true)
         XCTAssertFalse(environment["DYLD_FRAMEWORK_PATH"]?.isEmpty ?? true)
         XCTAssertTrue(environment["GST_PLUGIN_PATH"]?.contains("gstreamer-1.0") == true)
+    }
+
+    func testSteamHostPreservesSteamIdentityAndSeparatesChildArguments() {
+        XCTAssertEqual(SteamHostMetadata.bundleIdentifier, "com.portside.steam-launcher")
+        XCTAssertEqual(SteamHostMetadata.displayName, "Steam")
+        XCTAssertEqual(SteamHostMetadata.launcherBuild, "2")
+        let specification = SteamHostLaunchSpec(
+            runtimePath: "/private/Runtime/bin/wine",
+            prefixPath: "/private/Prefix/Steam",
+            steamExecutablePath: "C:\\Program Files (x86)\\Steam\\steam.exe",
+            steamArguments: ["-language", "english", "-cef-disable-gpu"]
+        )
+        XCTAssertEqual(specification.arguments, [
+            "--runtime", "/private/Runtime/bin/wine",
+            "--prefix", "/private/Prefix/Steam",
+            "--steam", "C:\\Program Files (x86)\\Steam\\steam.exe",
+            "--", "-language", "english", "-cef-disable-gpu"
+        ])
+        XCTAssertEqual(specification.childEnvironment["WINEPREFIX"], "/private/Prefix/Steam")
+        XCTAssertEqual(specification.childEnvironment["WINEDEBUG"], "-all")
     }
 
     func testDownloaderRejectsUnapprovedHostBeforeNetworkAccess() async {
@@ -170,7 +223,7 @@ final class PortsideCoreTests: XCTestCase {
             "webhelper_gpu.txt": "ANGLE renderer selected\n",
             "cef_log.txt": "GPU process crashed\n",
             "steamui_html.txt": "BrowserReady\nCreateResponse\nGetDesiredSteamUIWindows\n",
-            "webhelper.txt": "renderer process exited\n",
+            "webhelper.txt": "renderer process exited\nC:\\Program Files (x86)\\Steam\\bin\\cef\\cef.win64\\steamwebhelper.exe\n",
             "bootstrap_log.txt": "missing dll: d3dcompiler_47.dll\n",
             "console_log.txt": "ERR_CONNECTION_RESET\n",
             "connection_log.txt": "CRL - Verification failed\n"
@@ -187,6 +240,7 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertTrue(analysis.failureCategories.contains("cef_dependency_missing"))
         XCTAssertTrue(analysis.failureCategories.contains("cef_network_failure"))
         XCTAssertTrue(analysis.failureCategories.contains("cef_certificate_failure"))
+        XCTAssertEqual(analysis.effectiveCEFArchitecture, "64bit")
         XCTAssertFalse(analysis.failureCategories.contains("gpu"))
         XCTAssertFalse(analysis.hasStrongUIEvidence == true)
     }
@@ -211,6 +265,44 @@ final class PortsideCoreTests: XCTestCase {
         try "BrowserReady\nCreateResponse\nGetDesiredSteamUIWindows\nPopupHTMLWindow\n".write(to: logs.appendingPathComponent("steamui_html.txt"), atomically: true, encoding: .utf8)
         let verified = SteamCEFLogAnalyzer.analyze(prefix: root)
         XCTAssertTrue(verified.hasStrongUIEvidence)
+    }
+
+    func testSteamCEFLogAnalyzerUsesOnlyLinesWrittenAfterLaunchBaseline() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-cef-baseline-\(UUID().uuidString)", isDirectory: true)
+        let logs = root.appendingPathComponent("drive_c/Program Files (x86)/Steam/logs", isDirectory: true)
+        let htmlLog = logs.appendingPathComponent("steamui_html.txt")
+        let gpuLog = logs.appendingPathComponent("webhelper_gpu.txt")
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        try "BrowserReady\nCreateResponse\nGetDesiredSteamUIWindows\nANGLE renderer selected\n".write(to: htmlLog, atomically: true, encoding: .utf8)
+        try "ANGLE renderer error before this attempt\n".write(to: gpuLog, atomically: true, encoding: .utf8)
+        let baseline = SteamCEFLogAnalyzer.captureBaseline(prefix: root)
+        let handle = try FileHandle(forWritingTo: gpuLog)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("BrowserReady\nCreateResponse\nGetDesiredSteamUIWindows\n".utf8))
+        try handle.close()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let analysis = SteamCEFLogAnalyzer.analyze(prefix: root, baseline: baseline)
+        XCTAssertTrue(analysis.browserReadyDetected)
+        XCTAssertTrue(analysis.contentWindowEvidence)
+        XCTAssertFalse(analysis.failureCategories.contains("cef_angle_failed"))
+        XCTAssertTrue(analysis.hasStrongUIEvidence)
+    }
+
+    func testSteamCEFLogAnalyzerReadsGPUAndConnectionFailuresFromFreshLogs() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-cef-fresh-failures-\(UUID().uuidString)", isDirectory: true)
+        let logs = root.appendingPathComponent("drive_c/Program Files (x86)/Steam/logs", isDirectory: true)
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        try "GPU process started\nEGLCreateContext failed: requested GLES version is unsupported\nCompositor context lost\n".write(to: logs.appendingPathComponent("webhelper_gpu.txt"), atomically: true, encoding: .utf8)
+        try "WSALookupServiceBegin failed with: 8\n".write(to: logs.appendingPathComponent("connection_log.txt"), atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let analysis = SteamCEFLogAnalyzer.analyze(prefix: root)
+        XCTAssertEqual(analysis.gpuProcessStatus, "started")
+        XCTAssertTrue(analysis.failureCategories.contains("cef_angle_failed"))
+        XCTAssertTrue(analysis.failureCategories.contains("cef_compositor_failed"))
+        XCTAssertTrue(analysis.failureCategories.contains("cef_network_failure"))
+        XCTAssertTrue(analysis.failureCategories.contains("cef_network_failed"))
     }
 
     func testSteamCEFLogAnalyzerClassifiesWebhelperCrashLoopAndResourceFailure() throws {

@@ -141,6 +141,12 @@ public struct DiagnosticContext: Sendable, Equatable {
     public var windowVisualState: String?
     public var cacheRecoveryAttempted: Bool?
     public var steamVersion: String?
+    public var steamLaunchProfile: String?
+    public var steamLaunchArgumentsApplied: Bool?
+    public var requestedCEFArchitecture: String?
+    public var effectiveCEFArchitecture: String?
+    public var legacyLoginFlagIgnored: Bool?
+    public var webhelperProcessCount: Int?
 
     public init(
         stage: String? = nil,
@@ -167,7 +173,13 @@ public struct DiagnosticContext: Sendable, Equatable {
         browserReadyDetected: Bool? = nil,
         windowVisualState: String? = nil,
         cacheRecoveryAttempted: Bool? = nil,
-        steamVersion: String? = nil
+        steamVersion: String? = nil,
+        steamLaunchProfile: String? = nil,
+        steamLaunchArgumentsApplied: Bool? = nil,
+        requestedCEFArchitecture: String? = nil,
+        effectiveCEFArchitecture: String? = nil,
+        legacyLoginFlagIgnored: Bool? = nil,
+        webhelperProcessCount: Int? = nil
     ) {
         self.stage = stage; self.errorCode = errorCode; self.portsideVersion = portsideVersion; self.portsideBuild = portsideBuild
         self.macOSVersion = macOSVersion; self.architecture = architecture; self.runtimeName = runtimeName; self.runtimeVersion = runtimeVersion
@@ -176,6 +188,9 @@ public struct DiagnosticContext: Sendable, Equatable {
         self.webhelperStarted = webhelperStarted; self.webhelperExitCode = webhelperExitCode; self.rendererMode = rendererMode
         self.gpuProcessStatus = gpuProcessStatus; self.windowDetected = windowDetected; self.browserReadyDetected = browserReadyDetected
         self.windowVisualState = windowVisualState; self.cacheRecoveryAttempted = cacheRecoveryAttempted; self.steamVersion = steamVersion
+        self.steamLaunchProfile = steamLaunchProfile; self.steamLaunchArgumentsApplied = steamLaunchArgumentsApplied
+        self.requestedCEFArchitecture = requestedCEFArchitecture; self.effectiveCEFArchitecture = effectiveCEFArchitecture
+        self.legacyLoginFlagIgnored = legacyLoginFlagIgnored; self.webhelperProcessCount = webhelperProcessCount
     }
 
     public var fields: [String: String] {
@@ -192,9 +207,13 @@ public struct DiagnosticContext: Sendable, Equatable {
             ("webhelper_restart_count", webhelperRestartCount.map(String.init)),
             ("webhelper_started", webhelperStarted.map(String.init)), ("webhelper_exit_code", webhelperExitCode.map(String.init)),
             ("renderer_mode", rendererMode), ("gpu_process_status", gpuProcessStatus),
-            ("window_detected", windowDetected.map(String.init)), ("browser_ready_detected", browserReadyDetected.map(String.init)),
+            ("window_detected", windowDetected.map(String.init)), ("browser_ready", browserReadyDetected.map(String.init)),
+            ("browser_ready_detected", browserReadyDetected.map(String.init)),
             ("window_visual_state", windowVisualState),
             ("cache_recovery_attempted", cacheRecoveryAttempted.map(String.init)), ("steam_version", steamVersion),
+            ("steam_launch_profile", steamLaunchProfile), ("steam_launch_arguments_applied", steamLaunchArgumentsApplied.map(String.init)),
+            ("requested_cef_architecture", requestedCEFArchitecture), ("effective_cef_architecture", effectiveCEFArchitecture),
+            ("legacy_login_flag_ignored", legacyLoginFlagIgnored.map(String.init)), ("webhelper_process_count", webhelperProcessCount.map(String.init)),
         ]
         for (key, value) in optionalValues where value != nil { values[key] = value! }
         return values
@@ -254,9 +273,9 @@ public final class PortsideLogger: @unchecked Sendable {
     private let logURL: URL
     private let lock = NSLock()
 
-    public init(fileManager: FileManager = .default) {
+    public init(fileManager: FileManager = .default, logFileName: String = "portside.log") {
         self.fileManager = fileManager
-        self.logURL = PortsidePaths.logs.appendingPathComponent("portside.log")
+        self.logURL = PortsidePaths.logs.appendingPathComponent(logFileName)
     }
 
     public func write(_ message: String, level: Level = .info) {
@@ -301,7 +320,7 @@ public final class PortsideLogger: @unchecked Sendable {
     private func rotateIfNeeded() {
         guard let attributes = try? fileManager.attributesOfItem(atPath: logURL.path),
               let size = attributes[.size] as? NSNumber, size.int64Value > 512_000 else { return }
-        let rotated = PortsidePaths.logs.appendingPathComponent("portside.log.1")
+        let rotated = logURL.appendingPathExtension("1")
         try? fileManager.removeItem(at: rotated)
         try? fileManager.moveItem(at: logURL, to: rotated)
     }
@@ -382,10 +401,15 @@ public enum SteamInstaller {
     public static let officialURL = URL(string: "https://cdn.fastly.steamstatic.com/client/installer/SteamSetup.exe")!
     public static let bootstrapArguments = ["-silent"]
     public static let defaultLanguageArguments = ["-language", "english"]
+    public static let loginLaunchProfile = SteamLaunchProfile.cef32LegacyLogin
     public static let uiArguments = SteamLaunchConfiguration.normal.arguments
     public static let fallbackUIArguments = SteamLaunchConfiguration.fallback.arguments
     public static let uiLaunchConfigurations = [SteamLaunchConfiguration.normal, SteamLaunchConfiguration.disableGPU, SteamLaunchConfiguration.fallback]
     public static var localURL: URL { PortsidePaths.downloads.appendingPathComponent("SteamSetup.exe") }
+
+    public static func loginLaunchArguments(for configuration: SteamLaunchConfiguration) -> [String] {
+        loginLaunchProfile.arguments + defaultLanguageArguments + configuration.arguments
+    }
 
     public static var steamExecutableCandidates: [URL] {
         [
@@ -437,6 +461,24 @@ public enum SteamInstaller {
             throw PortsideError.processLaunchFailed("Steam installer finished without creating steam.exe.")
         }
     }
+}
+
+public struct SteamLaunchProfile: Equatable, Sendable {
+    public let identifier: String
+    public let arguments: [String]
+    public let requestedCEFArchitecture: String
+
+    public init(identifier: String, arguments: [String], requestedCEFArchitecture: String) {
+        self.identifier = identifier
+        self.arguments = arguments
+        self.requestedCEFArchitecture = requestedCEFArchitecture
+    }
+
+    public static let cef32LegacyLogin = SteamLaunchProfile(
+        identifier: "cef_32bit_legacy_login",
+        arguments: ["-udpforce", "-noreactlogin", "-allosarches", "-cef-force-32bit"],
+        requestedCEFArchitecture: "32bit"
+    )
 }
 
 public struct SteamLaunchConfiguration: Equatable, Sendable {

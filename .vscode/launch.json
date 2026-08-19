@@ -19,6 +19,26 @@
       "target": "Portside",
       "configuration": "release",
       "preLaunchTask": "swift: Build Release Portside"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:portside}",
+      "name": "Debug SteamHost",
+      "target": "SteamHost",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug SteamHost"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:portside}",
+      "name": "Release SteamHost",
+      "target": "SteamHost",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release SteamHost"
     }
   ]
 }
