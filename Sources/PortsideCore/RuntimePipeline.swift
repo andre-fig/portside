@@ -139,39 +139,6 @@ public enum WineProcessEnvironment {
     }
 }
 
-public enum SteamHostMetadata {
-    public static let bundleIdentifier = "com.portside.steam-launcher"
-    public static let displayName = "Steam"
-    public static let launcherBuild = "2"
-    public static let launcherDirectoryName = "Steam.app"
-    public static let templateRelativePath = "Contents/Helpers/Steam.app"
-}
-
-public struct SteamHostLaunchSpec: Equatable, Sendable {
-    public let runtimePath: String
-    public let prefixPath: String
-    public let steamExecutablePath: String
-    public let steamArguments: [String]
-
-    public init(runtimePath: String, prefixPath: String, steamExecutablePath: String, steamArguments: [String] = []) {
-        self.runtimePath = runtimePath
-        self.prefixPath = prefixPath
-        self.steamExecutablePath = steamExecutablePath
-        self.steamArguments = steamArguments
-    }
-
-    public var arguments: [String] {
-        ["--runtime", runtimePath, "--prefix", prefixPath, "--steam", steamExecutablePath, "--"] + steamArguments
-    }
-
-    public var childEnvironment: [String: String] {
-        WineProcessEnvironment.make(
-            runtimeExecutable: URL(fileURLWithPath: runtimePath),
-            prefix: URL(fileURLWithPath: prefixPath)
-        )
-    }
-}
-
 public struct InstalledRuntimeRecord: Codable, Equatable, Sendable {
     public let manifest: RuntimeManifest
     public let installedPath: URL
@@ -845,51 +812,9 @@ public enum SteamWindowPixelAnalyzer {
         return .unavailable
     }
 
-    public static func inspect(windowID: CGWindowID, bounds: CGRect? = nil) -> SteamWindowVisualState {
-        guard let image = CGWindowListCreateImage(
-            .null,
-            .optionIncludingWindow,
-            windowID,
-            [.bestResolution, .boundsIgnoreFraming]
-        ) else {
-            return inspectFromMainDisplay(bounds: bounds)
-        }
-        return classify(image: image) ?? inspectFromMainDisplay(bounds: bounds)
-    }
-
-    private static func classify(image: CGImage) -> SteamWindowVisualState? {
-        guard let providerData = image.dataProvider?.data else { return nil }
-        let alphaFirst = image.alphaInfo == .first || image.alphaInfo == .premultipliedFirst || image.alphaInfo == .noneSkipFirst
-        return classify(
-            width: image.width,
-            height: image.height,
-            bytesPerRow: image.bytesPerRow,
-            bytesPerPixel: max(1, image.bitsPerPixel / 8),
-            alphaFirst: alphaFirst,
-            data: [UInt8](providerData as Data)
-        )
-    }
-
-    private static func inspectFromMainDisplay(bounds: CGRect?) -> SteamWindowVisualState {
-        guard let bounds, let displayImage = CGDisplayCreateImage(CGMainDisplayID()) else { return .unavailable }
-        let displayBounds = CGDisplayBounds(CGMainDisplayID())
-        let scaleX = CGFloat(displayImage.width) / max(displayBounds.width, 1)
-        let scaleY = CGFloat(displayImage.height) / max(displayBounds.height, 1)
-        let width = bounds.width * scaleX
-        let height = bounds.height * scaleY
-        guard width >= 2, height >= 2 else { return .unavailable }
-        let x = (bounds.minX - displayBounds.minX) * scaleX
-        let topY = (bounds.minY - displayBounds.minY) * scaleY
-        let bottomY = CGFloat(displayImage.height) - ((bounds.maxY - displayBounds.minY) * scaleY)
-        let candidates = [
-            CGRect(x: x, y: bottomY, width: width, height: height),
-            CGRect(x: x, y: topY, width: width, height: height)
-        ].compactMap { $0.intersection(CGRect(x: 0, y: 0, width: displayImage.width, height: displayImage.height)) }
-        let states = candidates.compactMap { displayImage.cropping(to: $0).flatMap(classify(image:)) }
-        if states.contains(.rendered) { return .rendered }
-        if states.contains(.black) { return .black }
-        return .unavailable
-    }
+    /// Pixel classification is available only for bytes supplied by a caller.
+    /// Portside deliberately does not capture another application's window or the
+    /// display, because those CoreGraphics APIs require Screen Recording access.
 }
 
 public final class SteamLaunchLock: @unchecked Sendable {
@@ -925,8 +850,6 @@ public final class SteamLaunchLock: @unchecked Sendable {
 
 private struct SteamWindowSnapshot {
     let processIdentifier: pid_t
-    let windowID: CGWindowID
-    let bounds: CGRect
 }
 
 public struct SteamReadinessReport: Sendable, Equatable {
@@ -1064,10 +987,8 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         var webhelperStableSince: Date?
         var windowDetected = false
         var windowVisualState = SteamWindowVisualState.unavailable
-        var blackWindowSince: Date?
         var cefArgumentsObserved = strategy.arguments.isEmpty
         var loggedUnverifiedWindow = false
-        var loggedBlackWindow = false
         while Date() < deadline {
             let snapshot = await processSnapshot()
             terminateWineDebuggersIfNeeded(in: snapshot, stage: "Steam startup")
@@ -1092,22 +1013,13 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
             if sawSteam, let window = visibleSteamWindow(processSnapshot: snapshot) {
                 NSRunningApplication(processIdentifier: window.processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
                 windowDetected = true
-                windowVisualState = SteamWindowPixelAnalyzer.inspect(windowID: window.windowID, bounds: window.bounds)
-                if windowVisualState == .black {
-                    if blackWindowSince == nil { blackWindowSince = Date() }
-                    if !loggedBlackWindow {
-                        logger.write("Steam login window is black; moving to the next controlled CEF strategy", level: .warning)
-                        loggedBlackWindow = true
-                    }
-                    if stableDuration(since: blackWindowSince) >= 3 {
-                        break
-                    }
-                } else if windowVisualState == .rendered {
-                    blackWindowSince = nil
-                }
+                // Window metadata is safe to inspect without Screen Recording
+                // permission. Pixel inspection is intentionally unavailable.
+                windowVisualState = .unavailable
                 let stableSeconds = stableDuration(since: webhelperStableSince)
                 let analysis = SteamCEFLogAnalyzer.analyze(prefix: prefix, minimumModificationDate: attemptStartedAt, baseline: logBaseline)
-                if webhelperWasRunning && webhelperStarted && stableSeconds >= 2 && cefArgumentsObserved && analysis.hasStrongUIEvidence && windowVisualState == .rendered {
+                let visualStateAllowsReadiness = windowVisualState != .black
+                if webhelperWasRunning && webhelperStarted && stableSeconds >= 2 && cefArgumentsObserved && analysis.hasStrongUIEvidence && visualStateAllowsReadiness {
                     logger.write("Steam window detected and activated")
                     return SteamReadinessReport(status: .ready, cefStrategy: strategy.identifier, webhelperStarted: webhelperStarted, webhelperExitCode: analysis.webhelperExitCode, webhelperRestartCount: max(webhelperRestartCount, analysis.webhelperRestartCount), webhelperProcessCount: webhelperProcessCount, webhelperStableDuration: stableSeconds, windowDetected: windowDetected, cefArgumentsObserved: cefArgumentsObserved, browserReadyDetected: analysis.browserReadyDetected, rendererMode: analysis.rendererMode, gpuProcessStatus: analysis.gpuProcessStatus, windowVisualState: windowVisualState, logAnalysis: analysis)
                 }
@@ -1267,14 +1179,8 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
                 return processArguments.contains("steam.exe") || processArguments.contains("steamwebhelper")
             }
             guard owner.contains("steam") || steamTitle || (owner.contains("wine") && isSteamProcess) else { return nil }
-            guard let windowID = (window[kCGWindowNumber as String] as? NSNumber).map({ CGWindowID($0.uint32Value) }) else { return nil }
             return SteamWindowSnapshot(
-                processIdentifier: ownerPID,
-                windowID: windowID,
-                bounds: CGRect(x: (bounds?["X"] as? NSNumber)?.doubleValue ?? 0,
-                               y: (bounds?["Y"] as? NSNumber)?.doubleValue ?? 0,
-                               width: width,
-                               height: height)
+                processIdentifier: ownerPID
             )
         }.first
     }

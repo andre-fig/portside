@@ -26,7 +26,7 @@ The package targets macOS 13+ and builds the current architecture by default. `p
 - Steam bootstrap is attempted with `-silent`, validated using its installed-client marker, and followed by controlled CEF launch strategies for login (`normal`, `-cef-disable-gpu`, then `-cef-disable-gpu -cef-disable-gpu-compositing`).
 - The post-install Steam login launch uses the centralized `cef_32bit_legacy_login` profile in this exact order: `-udpforce`, `-noreactlogin`, `-allosarches`, `-cef-force-32bit`; these arguments are never sent to `SteamSetup.exe`.
 - Steam launches explicitly with the US English language argument and does not inherit a Portuguese locale from an existing Wine prefix.
-- The first launch starts setup automatically in a single native progress window; after a valid installation, Portside launches one supervised Wine Steam process through a private dedicated `Steam.app`, preserving Steam identity in the Dock and ⌘Tab, then exits its own interface after verified UI handoff.
+- The first launch starts setup automatically in a single native progress window; after a valid installation, Portside launches exactly one supervised Wine Steam process directly, without creating a second macOS `Steam.app`, then exits its own interface after verified UI handoff.
 - Wine crash dialogs are disabled in the private prefix and `winedbg.exe` is disabled for Portside-owned processes; failures are logged and surfaced as recoverable Portside errors.
 - Sentry starts invisibly through `DiagnosticsService`; Release events use sanitized structured CEF/readiness context only, with PII, full log attachments, and tracing disabled by default.
 - Download interruptions leave a `.part` file and resume with HTTP Range requests.

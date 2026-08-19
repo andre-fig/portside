@@ -20,10 +20,6 @@ let package = Package(
                 .product(name: "Sentry", package: "sentry-cocoa")
             ]
         ),
-        .executableTarget(
-            name: "SteamHost",
-            dependencies: ["PortsideCore"]
-        ),
         .testTarget(name: "PortsideCoreTests", dependencies: ["PortsideCore"])
     ]
 )

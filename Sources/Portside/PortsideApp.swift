@@ -46,7 +46,7 @@ final class PortsideModel: ObservableObject {
     let runtimeProvider = FreeWineRuntimeProvider()
     let supervisor = ProcessSupervisor()
     let steamMonitor = SteamReadinessMonitor()
-    let steamHostLauncher = SteamHostLauncher()
+    let steamProcessLauncher = SteamProcessLauncher()
     let diagnostics: DiagnosticsService
     private var didStartAutomatically = false
     private var handoffExitScheduled = false
@@ -435,8 +435,8 @@ final class PortsideModel: ObservableObject {
                 throw PortsideError.processLaunchFailed("Steam could not be restarted after its update.")
             }
         }
-        guard await steamHostLauncher.waitForExit(timeout: 10) else {
-            throw PortsideError.processLaunchFailed("The previous Steam host could not be closed safely.")
+        guard await steamProcessLauncher.waitForExit(timeout: 10) else {
+            throw PortsideError.processLaunchFailed("The previous Wine Steam process could not be closed safely.")
         }
         let strategies = SteamInstaller.uiLaunchConfigurations
         let cefAttemptTimeout = max(10, min(180, TimeInterval(ProcessInfo.processInfo.environment["PORTSIDE_CEF_ATTEMPT_TIMEOUT"] ?? "60") ?? 60))
@@ -449,13 +449,13 @@ final class PortsideModel: ObservableObject {
                 }
                 await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
                 _ = await steamMonitor.waitForSteamToStop(timeout: 10)
-                _ = await steamHostLauncher.waitForExit(timeout: 10)
+                _ = await steamProcessLauncher.waitForExit(timeout: 10)
             }
             let launchStartedAt = Date()
             let logBaseline = SteamCEFLogAnalyzer.captureBaseline(prefix: PortsidePaths.steamPrefix)
             diagnostics.event("steam_cef_strategy_attempted", context: diagnosticContext(stage: "launching_steam", cefStrategy: strategy.identifier))
             let launchArguments = SteamInstaller.loginLaunchArguments(for: strategy)
-            _ = try await steamHostLauncher.launch(
+            _ = try await steamProcessLauncher.launch(
                 runtimePath: runtimePath,
                 prefix: PortsidePaths.steamPrefix,
                 steamExecutable: executable,
@@ -497,7 +497,7 @@ final class PortsideModel: ObservableObject {
             if supervisor.isRunning { supervisor.requestStop() }
             await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
             _ = await steamMonitor.waitForSteamToStop(timeout: 10)
-            _ = await steamHostLauncher.waitForExit(timeout: 10)
+            _ = await steamProcessLauncher.waitForExit(timeout: 10)
             let backups = try SteamHTMLCacheRecovery.renameHTMLCache(prefix: PortsidePaths.steamPrefix, logger: logger)
             if !backups.isEmpty {
                 cacheRecoveryAttempted = true
@@ -506,7 +506,7 @@ final class PortsideModel: ObservableObject {
                 let launchStartedAt = Date()
                 let logBaseline = SteamCEFLogAnalyzer.captureBaseline(prefix: PortsidePaths.steamPrefix)
                 let launchArguments = SteamInstaller.loginLaunchArguments(for: strategy)
-                _ = try await steamHostLauncher.launch(runtimePath: runtimePath, prefix: PortsidePaths.steamPrefix, steamExecutable: executable, arguments: launchArguments)
+                _ = try await steamProcessLauncher.launch(runtimePath: runtimePath, prefix: PortsidePaths.steamPrefix, steamExecutable: executable, arguments: launchArguments)
                 steamLaunchArgumentsApplied = true
                 logSteamLaunchProfile()
                 diagnostics.event("steam_launch_profile_applied", context: diagnosticContext(stage: "cef_cache_recovery"))
@@ -526,7 +526,7 @@ final class PortsideModel: ObservableObject {
         if supervisor.isRunning { supervisor.requestStop() }
         await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
         _ = await steamMonitor.waitForSteamToStop(timeout: 10)
-        _ = await steamHostLauncher.waitForExit(timeout: 10)
+        _ = await steamProcessLauncher.waitForExit(timeout: 10)
         diagnostics.event("steamwebhelper_timeout", context: diagnosticContext(stage: "steam_readiness", cefStrategy: bestReport?.1.cefStrategy, cefFailureCategory: bestReport?.1.logAnalysis.failureCategories.first, webhelperRestartCount: bestReport?.1.webhelperRestartCount, webhelperStarted: bestReport?.1.webhelperStarted, webhelperExitCode: bestReport?.1.webhelperExitCode, rendererMode: bestReport?.1.rendererMode, gpuProcessStatus: bestReport?.1.gpuProcessStatus, windowDetected: bestReport?.1.windowDetected, browserReadyDetected: bestReport?.1.browserReadyDetected, windowVisualState: bestReport?.1.windowVisualState.rawValue, cacheRecoveryAttempted: cacheRecoveryAttempted, steamVersion: bestReport?.1.logAnalysis.steamVersion))
         throw PortsideError.processLaunchFailed("Steam UI remained unverified after controlled CEF recovery.")
     }

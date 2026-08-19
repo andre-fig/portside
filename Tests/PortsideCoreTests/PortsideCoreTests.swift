@@ -112,26 +112,6 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertTrue(environment["GST_PLUGIN_PATH"]?.contains("gstreamer-1.0") == true)
     }
 
-    func testSteamHostPreservesSteamIdentityAndSeparatesChildArguments() {
-        XCTAssertEqual(SteamHostMetadata.bundleIdentifier, "com.portside.steam-launcher")
-        XCTAssertEqual(SteamHostMetadata.displayName, "Steam")
-        XCTAssertEqual(SteamHostMetadata.launcherBuild, "2")
-        let specification = SteamHostLaunchSpec(
-            runtimePath: "/private/Runtime/bin/wine",
-            prefixPath: "/private/Prefix/Steam",
-            steamExecutablePath: "C:\\Program Files (x86)\\Steam\\steam.exe",
-            steamArguments: ["-language", "english", "-cef-disable-gpu"]
-        )
-        XCTAssertEqual(specification.arguments, [
-            "--runtime", "/private/Runtime/bin/wine",
-            "--prefix", "/private/Prefix/Steam",
-            "--steam", "C:\\Program Files (x86)\\Steam\\steam.exe",
-            "--", "-language", "english", "-cef-disable-gpu"
-        ])
-        XCTAssertEqual(specification.childEnvironment["WINEPREFIX"], "/private/Prefix/Steam")
-        XCTAssertEqual(specification.childEnvironment["WINEDEBUG"], "-all")
-    }
-
     func testDownloaderRejectsUnapprovedHostBeforeNetworkAccess() async {
         let downloader = SecureDownloader(allowedHosts: ["cdn.fastly.steamstatic.com"])
         let destination = FileManager.default.temporaryDirectory.appendingPathComponent("portside-blocked-download-\(UUID().uuidString)")
