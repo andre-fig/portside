@@ -2,6 +2,15 @@ import "reflect-metadata";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
+
+function waitForShutdown(): Promise<void> {
+  return new Promise((resolve) => {
+    const shutdown = () => resolve();
+    process.once("SIGTERM", shutdown);
+    process.once("SIGINT", shutdown);
+  });
+}
+
 async function run(): Promise<void> {
   try {
     console.log(
@@ -11,6 +20,7 @@ async function run(): Promise<void> {
         at: new Date().toISOString(),
       }),
     );
+    await waitForShutdown();
   } finally {
     await prisma.$disconnect();
   }
