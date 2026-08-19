@@ -11,10 +11,14 @@ swift build -c release --arch arm64 --product Portside --package-path "$ROOT_DIR
 rm -rf "$APP_DIR"
 rm -rf "$DSYM_DIR"
 rm -rf "$ICONSET_DIR"
-mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
+mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" "$APP_DIR/Contents/Frameworks"
 cp "$ROOT_DIR/.build/arm64-apple-macosx/release/Portside" "$APP_DIR/Contents/MacOS/Portside"
 cp "$ROOT_DIR/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
 cp "$ROOT_DIR/Resources/PortsideLogo.png" "$APP_DIR/Contents/Resources/PortsideLogo.png"
+SPARKLE_FRAMEWORK="$ROOT_DIR/.build/arm64-apple-macosx/release/Sparkle.framework"
+[ -d "$SPARKLE_FRAMEWORK" ] || { echo "Sparkle.framework was not produced by SwiftPM" >&2; exit 1; }
+cp -R "$SPARKLE_FRAMEWORK" "$APP_DIR/Contents/Frameworks/"
+install_name_tool -add_rpath '@executable_path/../Frameworks' "$APP_DIR/Contents/MacOS/Portside" 2>/dev/null || true
 mkdir -p "$ICONSET_DIR"
 for SIZE in 16 32 128 256 512; do
     sips -z "$SIZE" "$SIZE" "$ROOT_DIR/Resources/PortsideLogo.png" --out "$ICONSET_DIR/icon_${SIZE}x${SIZE}.png" >/dev/null

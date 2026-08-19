@@ -393,11 +393,17 @@ public final class SikarugirUpdateService: @unchecked Sendable {
     private let downloader: SecureDownloader
     private let logger: PortsideLogger
     private let fileManager: FileManager
+    private let backend: PortsideBackendClient?
+    private let allowDirectOfficialSources: Bool
+    private let currentVersion: String
 
-    public init(downloader: SecureDownloader = SecureDownloader(), logger: PortsideLogger = PortsideLogger(), fileManager: FileManager = .default) {
+    public init(downloader: SecureDownloader = SecureDownloader(), logger: PortsideLogger = PortsideLogger(), fileManager: FileManager = .default, backendConfiguration: PortsideBackendConfiguration? = nil, allowDirectOfficialSources: Bool = true, currentVersion: String = "0.1.0") {
         self.downloader = downloader
         self.logger = logger
         self.fileManager = fileManager
+        self.backend = backendConfiguration.flatMap { try? PortsideBackendClient(configuration: $0) }
+        self.allowDirectOfficialSources = allowDirectOfficialSources
+        self.currentVersion = currentVersion
     }
 
     public static func latestStableEngine(in engineList: String) -> String? {
@@ -412,6 +418,7 @@ public final class SikarugirUpdateService: @unchecked Sendable {
     }
 
     public func fetchOfficialEngineList() async throws -> String {
+        guard allowDirectOfficialSources else { throw PortsideCommercialError.backendUnavailable }
         let destination = PortsidePaths.manifests.appendingPathComponent("EngineList.txt")
         let result = try await downloader.download(from: SikarugirOfficialCatalog.engineListURL, to: destination)
         logger.write("Fetched official EngineList.txt (\(result.bytes) bytes)")
@@ -423,6 +430,11 @@ public final class SikarugirUpdateService: @unchecked Sendable {
     }
 
     public func downloadBaselineArtifacts(progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> [SikarugirArtifact: URL] {
+        if let backend {
+            logger.write("Downloading approved runtime components from Portside storage")
+            return try await backend.downloadBaselineArtifacts(currentVersion: currentVersion, progress: progress)
+        }
+        guard allowDirectOfficialSources else { throw PortsideCommercialError.backendUnavailable }
         try validatePinnedCatalog()
         try fileManager.createDirectory(at: PortsidePaths.downloads, withIntermediateDirectories: true)
         var result: [SikarugirArtifact: URL] = [:]

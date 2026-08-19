@@ -5,8 +5,10 @@ import PortsideCore
 @main
 struct PortsideApp: App {
     @StateObject private var model: PortsideModel
+    private let updateCoordinator: PortsideUpdateCoordinator
 
     init() {
+        updateCoordinator = PortsideUpdateCoordinator()
         let model = PortsideModel(diagnostics: SentryDiagnosticsService())
         _model = StateObject(wrappedValue: model)
         Task { @MainActor in model.startAutomatically() }
@@ -14,8 +16,8 @@ struct PortsideApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView(model: model)
-                .frame(width: 460, height: model.setupStep == .failed ? 320 : 260)
+                RootView(model: model)
+                .frame(width: 460, height: model.setupStep == .failed ? 320 : model.setupStep == .license ? 330 : 260)
         }
         .defaultSize(width: 460, height: 260)
         .windowResizability(.contentSize)
@@ -38,8 +40,10 @@ final class PortsideModel: ObservableObject {
     @Published var isWorking = false
     @Published var showsInstaller = true
     @Published var didExportReport = false
+    @Published var licenseKey = ""
+    @Published var licenseMessage = "Enter the purchase key from your Portside order."
 
-    enum SetupStep { case checking, rosettaRequired, downloading, installing, opening, ready, failed }
+    enum SetupStep { case checking, license, rosettaRequired, downloading, installing, opening, ready, failed }
 
     private let store = EnvironmentStore()
     private let logger = PortsideLogger()
@@ -48,11 +52,31 @@ final class PortsideModel: ObservableObject {
     private let steamLauncher: SteamProcessLauncher
     private let readinessMonitor: SteamReadinessMonitor
     private let diagnostics: DiagnosticsService
+    private let licenseClient: PortsideLicenseClient?
+    private let requiresCommercialLicense: Bool
+    private var hasValidLicense = false
     private var startedAutomatically = false
 
     init(diagnostics: DiagnosticsService = NoopDiagnosticsService()) {
         self.diagnostics = diagnostics
-        self.updateService = SikarugirUpdateService(logger: PortsideLogger(logFileName: "sikarugir-update.log"))
+        let backendConfiguration = PortsideBackendConfiguration.fromBundle()
+        #if DEBUG
+        self.requiresCommercialLicense = false
+        #else
+        self.requiresCommercialLicense = backendConfiguration.isConfigured
+        #endif
+        self.licenseClient = backendConfiguration.isConfigured ? PortsideLicenseClient(configuration: backendConfiguration) : nil
+        #if DEBUG
+        let allowDirectOfficialSources = true
+        #else
+        let allowDirectOfficialSources = false
+        #endif
+        self.updateService = SikarugirUpdateService(
+            logger: PortsideLogger(logFileName: "sikarugir-update.log"),
+            backendConfiguration: PortsideBackendConfiguration.fromBundle(),
+            allowDirectOfficialSources: allowDirectOfficialSources,
+            currentVersion: (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.1.0"
+        )
         self.wrapperInstaller = SikarugirWrapperInstaller(logger: PortsideLogger(logFileName: "sikarugir-install.log"))
         self.steamLauncher = SteamProcessLauncher()
         self.readinessMonitor = SteamReadinessMonitor()
@@ -63,6 +87,14 @@ final class PortsideModel: ObservableObject {
     func startAutomatically() {
         guard !startedAutomatically else { return }
         startedAutomatically = true
+        if requiresCommercialLicense {
+            prepareLicense()
+        } else {
+            continueAfterLicense()
+        }
+    }
+
+    private func continueAfterLicense() {
         if let wrapperPath = state.wrapperPath.map(URL.init(fileURLWithPath:)),
            isValidWrapper(wrapperPath),
            state.setupCompleted {
@@ -73,8 +105,53 @@ final class PortsideModel: ObservableObject {
         }
     }
 
+    private func prepareLicense() {
+        setupStep = .license
+        showsInstaller = true
+        guard let licenseClient else {
+            licenseMessage = "Portside services are not available yet."
+            return
+        }
+        Task { @MainActor in
+            do {
+                _ = try await licenseClient.validate()
+                hasValidLicense = true
+                continueAfterLicense()
+            } catch {
+                licenseMessage = "Activate Portside with the purchase key from your order."
+            }
+        }
+    }
+
+    func activateLicense() {
+        guard !licenseKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let licenseClient else {
+            licenseMessage = "Enter your purchase key to continue."
+            return
+        }
+        isWorking = true
+        licenseMessage = "Activating Portside…"
+        Task { @MainActor in
+            do {
+                _ = try await licenseClient.activate(licenseKey: licenseKey)
+                hasValidLicense = true
+                licenseKey = ""
+                licenseMessage = "Portside is activated."
+                isWorking = false
+                setUp()
+            } catch {
+                licenseMessage = "That purchase key could not be activated. Check it and try again."
+                diagnostics.capture(error: error, context: context(stage: "license_activation", errorCode: "license_activation_failed"))
+            }
+            isWorking = false
+        }
+    }
+
     func setUp() {
         guard !isWorking else { return }
+        if requiresCommercialLicense && !hasValidLicense {
+            prepareLicense()
+            return
+        }
         isWorking = true
         showsInstaller = true
         setupStep = .checking
@@ -307,7 +384,21 @@ struct RootView: View {
                     .padding(.horizontal, 22)
                     .frame(height: 58)
                     Divider()
-                    if model.setupStep == .failed {
+                    if model.setupStep == .license {
+                        VStack(spacing: 14) {
+                            Spacer()
+                            Text("Activate Portside").font(.title3.weight(.medium))
+                            Text(model.licenseMessage).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                            SecureField("Purchase key", text: $model.licenseKey)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 330)
+                            Button("Activate") { model.activateLicense() }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(model.isWorking)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 28)
+                    } else if model.setupStep == .failed {
                         VStack(spacing: 16) {
                             Spacer()
                             Text(model.message).font(.title3.weight(.medium))

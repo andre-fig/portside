@@ -302,23 +302,35 @@ public struct DownloadResult: Sendable, Equatable {
 
 public final class SecureDownloader: @unchecked Sendable {
     private let allowedHosts: Set<String>
+    private let maxBytes: Int64
     private let session: URLSession
 
-    public init(allowedHosts: Set<String> = ["github.com", "raw.githubusercontent.com", "api.github.com", "objects.githubusercontent.com"]) {
+    public init(allowedHosts: Set<String> = ["github.com", "raw.githubusercontent.com", "api.github.com", "objects.githubusercontent.com"], maxBytes: Int64 = 2_147_483_648) {
         self.allowedHosts = allowedHosts
-        self.session = URLSession(configuration: .ephemeral)
+        self.maxBytes = maxBytes
+        self.session = URLSession(configuration: .ephemeral, delegate: RedirectPolicy(allowedHosts: allowedHosts), delegateQueue: nil)
     }
 
     public func download(from source: URL, to destination: URL, expectedSHA256: String? = nil, expectedSize: Int64? = nil) async throws -> DownloadResult {
         guard source.scheme == "https", let host = source.host, allowedHosts.contains(host) else { throw PortsideError.invalidArtifact("unapproved download host") }
         let (data, response) = try await session.data(from: source)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { throw PortsideError.invalidArtifact("HTTP \(http.statusCode)") }
+        if Int64(data.count) > maxBytes { throw PortsideError.invalidArtifact("download exceeds configured size limit") }
         if let expectedSize, Int64(data.count) != expectedSize { throw PortsideError.invalidArtifact("unexpected size") }
         let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         if let expectedSHA256, digest.lowercased() != expectedSHA256.lowercased() { throw PortsideError.checksumMismatch(expected: expectedSHA256, actual: digest) }
         try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: destination, options: .atomic)
         return DownloadResult(url: destination, bytes: Int64(data.count), sha256: digest)
+    }
+}
+
+private final class RedirectPolicy: NSObject, URLSessionTaskDelegate {
+    private let allowedHosts: Set<String>
+    init(allowedHosts: Set<String>) { self.allowedHosts = allowedHosts }
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        guard let url = request.url, url.scheme == "https", let host = url.host, allowedHosts.contains(host) else { completionHandler(nil); return }
+        completionHandler(request)
     }
 }
 

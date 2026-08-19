@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import PortsideCore
 
 final class PortsideCoreTests: XCTestCase {
@@ -180,5 +181,52 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertFalse(text.localizedCaseInsensitiveContains("password"))
         XCTAssertFalse(text.localizedCaseInsensitiveContains("cookie"))
         XCTAssertFalse(text.localizedCaseInsensitiveContains("token"))
+    }
+
+    func testSignedRuntimeManifestAndMinimumVersionAreValidated() throws {
+        let signingKey = Curve25519.Signing.PrivateKey()
+        var unsigned: [String: Any] = [
+            "schemaVersion": 1,
+            "channel": "staging",
+            "manifestVersion": "1.0.0",
+            "minimumPortsideVersion": "0.1.0",
+            "publishedAt": "2026-08-19T00:00:00Z",
+            "components": [[
+                "id": "engine",
+                "component": "WS12WineSikarugir10.0_6",
+                "version": "10.0.6",
+                "downloadURL": "https://downloads.example.invalid/engine.tar.xz",
+                "sha256": String(repeating: "a", count: 64),
+                "size": 10,
+                "critical": false,
+                "rollbackVersion": NSNull()
+            ]],
+            "rendererDefaults": ["renderer": "wineD3D"],
+            "compatibilityRules": [],
+            "critical": false,
+            "rollbackVersion": NSNull(),
+            "signatureKeyId": "manifest-1",
+            "signature": NSNull()
+        ]
+        let unsignedData = try JSONSerialization.data(withJSONObject: unsigned, options: [.sortedKeys])
+        let signature = try signingKey.signature(for: unsignedData).base64EncodedString()
+        unsigned["signature"] = signature
+        let data = try JSONSerialization.data(withJSONObject: unsigned, options: [.sortedKeys])
+        let manifest = try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", currentVersion: "0.1.0")
+        XCTAssertEqual(manifest.components.count, 1)
+        XCTAssertThrowsError(try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", currentVersion: "0.0.9"))
+    }
+
+    func testLicenseTokenAcceptsOnlyTheConfiguredSignature() throws {
+        let signingKey = Curve25519.Signing.PrivateKey()
+        let header = Data("{\"alg\":\"EdDSA\",\"typ\":\"PORTSIDE-LICENSE\"}".utf8).base64EncodedString()
+        let payload = Data("{\"licenseId\":\"lic-1\",\"deviceId\":\"dev-1\",\"plan\":\"standard\",\"issuedAt\":4102444800,\"expiresAt\":4103654400,\"offlineUntil\":4103654400,\"keyId\":\"license-1\"}".utf8).base64EncodedString()
+        let input = "\(header).\(payload)"
+        let signatureData = try signingKey.signature(for: Data(input.utf8))
+        let token = "\(input).\(signatureData.base64EncodedString())"
+        XCTAssertEqual(try PortsideLicenseClient.verifyLocal(token: token, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "license-1").deviceId, "dev-1")
+        var invalidSignature = signatureData
+        invalidSignature[0] ^= 0x01
+        XCTAssertThrowsError(try PortsideLicenseClient.verifyLocal(token: "\(input).\(invalidSignature.base64EncodedString())", publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "license-1"))
     }
 }

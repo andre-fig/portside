@@ -14,4 +14,14 @@
 <key>LSArchitecturePriority</key><array><string>arm64</string></array>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSPrincipalClass</key><string>NSApplication</string>
+<key>SUFeedURL</key><string></string>
+<key>SUPublicEDKey</key><string></string>
+<key>SUEnableAutomaticChecks</key><true/>
+<key>SUAutomaticallyUpdate</key><true/>
+<key>SURequireSignedFeed</key><true/>
+<key>PortsideAPIBaseURL</key><string></string>
+<key>PortsideArtifactHosts</key><string></string>
+<key>PortsideRuntimeManifestPublicKey</key><string></string>
+<key>PortsideLicensePublicKey</key><string></string>
+<key>PortsideLicenseKeyID</key><string></string>
 </dict></plist>

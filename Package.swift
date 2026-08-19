@@ -9,7 +9,8 @@ let package = Package(
         .executable(name: "Portside", targets: ["Portside"])
     ],
     dependencies: [
-        .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.26.0")
+        .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.26.0"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.5")
     ],
     targets: [
         .target(name: "PortsideCore"),
@@ -17,7 +18,8 @@ let package = Package(
             name: "Portside",
             dependencies: [
                 "PortsideCore",
-                .product(name: "Sentry", package: "sentry-cocoa")
+                .product(name: "Sentry", package: "sentry-cocoa"),
+                .product(name: "Sparkle", package: "Sparkle")
             ]
         ),
         .testTarget(name: "PortsideCoreTests", dependencies: ["PortsideCore"])
