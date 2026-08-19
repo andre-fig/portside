@@ -10,6 +10,7 @@ public enum PortsidePaths {
     public static var runtime: URL { root.appendingPathComponent("Runtime", isDirectory: true) }
     public static var prefix: URL { root.appendingPathComponent("Prefix", isDirectory: true) }
     public static var steamPrefix: URL { prefix.appendingPathComponent("Steam", isDirectory: true) }
+    public static var prefixRuntimeMetadata: URL { steamPrefix.appendingPathComponent(".portside-runtime.json") }
     public static var backups: URL { root.appendingPathComponent("Backups", isDirectory: true) }
     public static var logs: URL { root.appendingPathComponent("Logs", isDirectory: true) }
     public static var cache: URL { root.appendingPathComponent("Cache", isDirectory: true) }
@@ -134,6 +135,10 @@ public struct DiagnosticContext: Sendable, Equatable {
     public var windowDetected: Bool?
     public var steamVersion: String?
     public var webhelperProcessCount: Int?
+    public var processStarted: Bool?
+    public var processHandoffComplete: Bool?
+    public var interfaceVerification: String?
+    public var msyncApplicable: Bool?
     public var msyncBootstrapped: Bool?
     public var msyncRunning: Bool?
 
@@ -157,6 +162,10 @@ public struct DiagnosticContext: Sendable, Equatable {
         windowDetected: Bool? = nil,
         steamVersion: String? = nil,
         webhelperProcessCount: Int? = nil,
+        processStarted: Bool? = nil,
+        processHandoffComplete: Bool? = nil,
+        interfaceVerification: String? = nil,
+        msyncApplicable: Bool? = nil,
         msyncBootstrapped: Bool? = nil,
         msyncRunning: Bool? = nil
     ) {
@@ -165,6 +174,8 @@ public struct DiagnosticContext: Sendable, Equatable {
         self.graphicsBackend = graphicsBackend; self.processType = processType; self.exitCode = exitCode; self.duration = duration; self.retryCount = retryCount
         self.webhelperRestartCount = webhelperRestartCount; self.webhelperStarted = webhelperStarted; self.webhelperExitCode = webhelperExitCode
         self.windowDetected = windowDetected; self.steamVersion = steamVersion; self.webhelperProcessCount = webhelperProcessCount
+        self.processStarted = processStarted; self.processHandoffComplete = processHandoffComplete; self.interfaceVerification = interfaceVerification
+        self.msyncApplicable = msyncApplicable
         self.msyncBootstrapped = msyncBootstrapped; self.msyncRunning = msyncRunning
     }
 
@@ -182,6 +193,9 @@ public struct DiagnosticContext: Sendable, Equatable {
             ("webhelper_started", webhelperStarted.map(String.init)), ("webhelper_exit_code", webhelperExitCode.map(String.init)),
             ("window_detected", windowDetected.map(String.init)), ("steam_version", steamVersion),
             ("webhelper_process_count", webhelperProcessCount.map(String.init)),
+            ("process_started", processStarted.map(String.init)), ("process_handoff_complete", processHandoffComplete.map(String.init)),
+            ("interface_verification", interfaceVerification),
+            ("msync_applicable", msyncApplicable.map(String.init)),
             ("msync_bootstrapped", msyncBootstrapped.map(String.init)), ("msync_running", msyncRunning.map(String.init)),
         ]
         for (key, value) in optionalValues where value != nil { values[key] = value! }
@@ -364,9 +378,14 @@ public final class SecureDownloader: NSObject, @unchecked Sendable {
 
 public enum SteamInstaller {
     public static let officialURL = URL(string: "https://cdn.fastly.steamstatic.com/client/installer/SteamSetup.exe")!
-    /// SteamSetup.exe is the only phase that receives installer arguments.
-    /// steam.exe itself is launched later with an empty argument list.
-    public static let launchArguments: [String] = []
+    /// These arguments are passed directly to steam.exe after installation.
+    /// SteamSetup.exe receives only its own installer arguments below.
+    public static let launchArguments: [String] = [
+        "-udpforce",
+        "-noreactlogin",
+        "-allosarches",
+        "-cef-force-32bit"
+    ]
     public static var localURL: URL { PortsidePaths.downloads.appendingPathComponent("SteamSetup.exe") }
 
     public static var steamExecutableCandidates: [URL] {
@@ -445,7 +464,8 @@ public final class ProcessSupervisor: @unchecked Sendable {
     private let logger: PortsideLogger
     private var runtimeExecutablePath: URL?
     private var prefixURL: URL?
-    private var outputPipe: Pipe?
+    private var outputHandle: FileHandle?
+    private let outputURL = PortsidePaths.logs.appendingPathComponent("steam-process-supervisor.log")
 
     public init(logger: PortsideLogger = PortsideLogger()) { self.logger = logger }
 
@@ -471,20 +491,27 @@ public final class ProcessSupervisor: @unchecked Sendable {
             runtimeExecutable: URL(fileURLWithPath: runtimePath),
             prefix: PortsidePaths.steamPrefix
         )
-        let outputPipe = Pipe()
-        self.outputPipe = outputPipe
-        outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let output = String(data: data, encoding: .utf8), !output.isEmpty else { return }
-            self?.logger.write("steam_process_output: \(output)")
+        try? FileManager.default.createDirectory(at: PortsidePaths.logs, withIntermediateDirectories: true)
+        if let attributes = try? FileManager.default.attributesOfItem(atPath: outputURL.path),
+           (attributes[.size] as? NSNumber)?.int64Value ?? 0 > 2 * 1024 * 1024 {
+            let rotated = outputURL.appendingPathExtension("1")
+            try? FileManager.default.removeItem(at: rotated)
+            try? FileManager.default.moveItem(at: outputURL, to: rotated)
         }
-        task.standardOutput = outputPipe
-        task.standardError = outputPipe
+        if !FileManager.default.fileExists(atPath: outputURL.path) { FileManager.default.createFile(atPath: outputURL.path, contents: nil) }
+        guard let outputHandle = try? FileHandle(forWritingTo: outputURL) else {
+            throw PortsideError.processLaunchFailed("Steam output log could not be opened.")
+        }
+        _ = try? outputHandle.seekToEnd()
+        self.outputHandle = outputHandle
+        task.standardOutput = outputHandle
+        task.standardError = outputHandle
         task.terminationHandler = { [weak self] _ in
-            self?.outputPipe?.fileHandleForReading.readabilityHandler = nil
+            try? outputHandle.close()
+            self?.outputHandle = nil
         }
         do { try task.run(); process = task; logger.write("Steam process started") }
-        catch { throw PortsideError.processLaunchFailed("Steam could not be started.") }
+        catch { try? outputHandle.close(); throw PortsideError.processLaunchFailed("Steam could not be started.") }
     }
 
     public func requestStop() {

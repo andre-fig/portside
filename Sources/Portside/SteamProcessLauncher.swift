@@ -10,7 +10,8 @@ import PortsideCore
 final class SteamProcessLauncher {
     private let logger = PortsideLogger(logFileName: "steam-launch.log")
     private var process: Process?
-    private var outputPipe: Pipe?
+    private var outputHandle: FileHandle?
+    private let processLogURL = PortsidePaths.logs.appendingPathComponent("steam-process.log")
 
     func launch(runtimePath: URL, prefix: URL, steamExecutable: URL, arguments: [String] = []) async throws -> Process {
         guard process?.isRunning != true else {
@@ -23,34 +24,32 @@ final class SteamProcessLauncher {
         process.environment = WineProcessEnvironment.make(runtimeExecutable: runtimePath, prefix: prefix)
         process.currentDirectoryURL = prefix
 
-        let outputPipe = Pipe()
-        outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty,
-                  let output = String(data: data, encoding: .utf8),
-                  !output.isEmpty else { return }
-            self?.logger.write("steam_process_output: \(output)")
+        let outputHandle: FileHandle
+        do {
+            outputHandle = try openRotatingProcessLog()
+        } catch {
+            throw PortsideError.processLaunchFailed("Steam output log could not be opened.")
         }
-        process.standardOutput = outputPipe
-        process.standardError = outputPipe
+        process.standardOutput = outputHandle
+        process.standardError = outputHandle
         process.terminationHandler = { [weak self] _ in
-            outputPipe.fileHandleForReading.readabilityHandler = nil
+            try? outputHandle.close()
             Task { @MainActor in
                 guard let self, self.process?.processIdentifier == process.processIdentifier else { return }
                 self.process = nil
-                self.outputPipe = nil
+                self.outputHandle = nil
             }
         }
 
         do {
             try process.run()
         } catch {
-            outputPipe.fileHandleForReading.readabilityHandler = nil
+            try? outputHandle.close()
             throw PortsideError.processLaunchFailed("Steam could not be started.")
         }
         self.process = process
-        self.outputPipe = outputPipe
-        logger.write("Wine Steam process started directly with no Steam launch flags")
+        self.outputHandle = outputHandle
+        logger.write("Wine Steam process started directly with arguments: \(arguments.joined(separator: " "))")
         return process
     }
 
@@ -59,12 +58,29 @@ final class SteamProcessLauncher {
         while Date() < deadline {
             guard process?.isRunning == true else {
                 process = nil
-                outputPipe = nil
+                outputHandle = nil
                 return true
             }
             try? await Task.sleep(for: .milliseconds(250))
         }
         return process?.isRunning != true
+    }
+
+    private func openRotatingProcessLog() throws -> FileHandle {
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: PortsidePaths.logs, withIntermediateDirectories: true)
+        if let attributes = try? fileManager.attributesOfItem(atPath: processLogURL.path),
+           (attributes[.size] as? NSNumber)?.int64Value ?? 0 > 2 * 1024 * 1024 {
+            let rotated = processLogURL.appendingPathExtension("1")
+            try? fileManager.removeItem(at: rotated)
+            try? fileManager.moveItem(at: processLogURL, to: rotated)
+        }
+        if !fileManager.fileExists(atPath: processLogURL.path) {
+            fileManager.createFile(atPath: processLogURL.path, contents: nil)
+        }
+        let handle = try FileHandle(forWritingTo: processLogURL)
+        try handle.seekToEnd()
+        return handle
     }
 
 }

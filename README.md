@@ -19,9 +19,9 @@ The package targets macOS 13+ on Apple silicon. The app does not bundle Wine or 
 
 - Release uses one runtime: Gcenx Wine Staging 11.6_1, with the pinned metadata in [`docs/runtime-manifest.json`](docs/runtime-manifest.json).
 - WineD3D is the graphics layer for Direct3D 9/10/11. D3DMetal, GPTK, Sikarugir Launcher and Sikarugir Creator are not bundled.
-- The existing Portside prefix is preserved. A recoverable snapshot is created before prefix initialization or runtime transition; `steamapps`, saves and user data are not deleted.
-- SteamSetup.exe is run silently with the separate `/S` argument. Later, `steam.exe` is launched directly through Wine with an empty argument list. No shell, native macOS Steam installation, native-login migration, CEF flags or GPU fallback cascade is used.
-- The app prevents concurrent Portside launches from creating duplicate managed Steam processes and closes itself after a stable process handoff.
+- The existing Portside prefix is preserved. A recovery point is created before a runtime transition using an APFS clone when available, or targeted Wine registry/link files otherwise; `steamapps`, saves, caches and user data are not copied or deleted.
+- SteamSetup.exe is run silently with the separate `/S` argument. Later, `steam.exe` is launched directly through Wine with the ordered CEF 32-bit login arguments `-udpforce`, `-noreactlogin`, `-allosarches`, and `-cef-force-32bit`. No shell, native macOS Steam installation, native-login migration or GPU fallback cascade is used.
+- The app records process start, webhelper start and process handoff separately. It never reports a window or rendered UI without manual visual validation, prevents concurrent Portside launches from creating duplicate managed Steam processes, and closes itself after a stable process handoff.
 - Wine crash dialogs are disabled for the private prefix and failures are logged locally and sent to Sentry as sanitized technical events. Screen Recording permission is never requested.
 
 Sikarugir remains a development-only comparison reference. It is not selected by Release because an official, checksum-pinned `WS12WineSikarugir10.0_6` artifact and redistributable runtime package could not be verified.

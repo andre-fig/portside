@@ -17,6 +17,7 @@ public enum EnvironmentPhase: String, Codable, CaseIterable, Sendable {
     case steamLaunching
     case validatingInstallation
     case steamReady
+    case steamProcessHandoffComplete
     case failedRecoverable
     case failedFatal
 }
@@ -75,7 +76,7 @@ public enum FreeRuntimeCatalog {
         relativeExecutablePath: "Contents/Resources/wine/bin/wine",
         license: "Wine LGPL-2.1-or-later; upstream packaging license must be reviewed before commercial bundling",
         sourceURL: URL(string: "https://gitlab.winehq.org/wine/wine")!,
-        includedComponents: ["Wine Staging", "Wine Mono 11.2.0", "Wine Gecko 2.47.4", "WineD3D"],
+        includedComponents: ["Wine Staging", "Wine Mono 11.0.0", "Wine Gecko 2.47.4", "WineD3D"],
         validatedAt: ISO8601DateFormatter().date(from: "2026-08-19T00:00:00Z") ?? Date(),
         bundleDirectoryName: "Wine Staging.app"
     )
@@ -100,6 +101,13 @@ public enum WineRuntimePolicy {
 }
 
 public enum WineProcessEnvironment {
+    public static let ownerMarkerKey = "PORTSIDE_WINE_PREFIX_MARKER"
+    public static let experimentalEnvironmentKeys: Set<String> = [
+        "WINEMSYNC", "WINEESYNC", "WINEFSYNC", "WINEFSYNC_FUTEX",
+        "DXVK_ASYNC", "DXVK_HUD", "DXVK_ENABLE_NVAPI", "MTL_HUD_ENABLED",
+        "WINE_D3D_CONFIG", "WINE_FULLSCREEN_FSR", "STAGING_SHARED_MEMORY",
+        "STAGING_WRITECOPY"
+    ]
     #if DEBUG
     public static var defaultWineDebug: String {
         ProcessInfo.processInfo.environment["PORTSIDE_DIAGNOSTIC_WINEDEBUG"] ?? WineRuntimePolicy.debug
@@ -115,10 +123,14 @@ public enum WineProcessEnvironment {
         wineDebug: String = WineProcessEnvironment.defaultWineDebug
     ) -> [String: String] {
         var environment = baseEnvironment
+        for key in Self.experimentalEnvironmentKeys {
+            environment.removeValue(forKey: key)
+        }
         environment["WINEPREFIX"] = prefix.path
         environment["WINEARCH"] = "win64"
         environment["WINEDLLOVERRIDES"] = WineRuntimePolicy.dllOverrides
         environment["WINEDEBUG"] = wineDebug
+        environment[Self.ownerMarkerKey] = Self.prefixMarker(for: prefix)
         environment["PATH"] = prepend(runtimeExecutable.deletingLastPathComponent().path, to: baseEnvironment["PATH"])
         environment["DYLD_FRAMEWORK_PATH"] = prepend(
             GStreamerManager.frameworkURL.deletingLastPathComponent().path,
@@ -129,6 +141,11 @@ public enum WineProcessEnvironment {
             to: baseEnvironment["GST_PLUGIN_PATH"]
         )
         return environment
+    }
+
+    public static func prefixMarker(for prefix: URL) -> String {
+        let digest = SHA256.hash(data: Data(prefix.standardizedFileURL.path.utf8))
+        return digest.prefix(12).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func prepend(_ value: String, to existing: String?) -> String {
@@ -150,8 +167,9 @@ public enum RuntimeValidationProfile {
         var environment = base
         switch self {
         case .officialWine:
-            environment.removeValue(forKey: "WINEMSYNC")
-            environment.removeValue(forKey: "WINEESYNC")
+            for key in WineProcessEnvironment.experimentalEnvironmentKeys {
+                environment.removeValue(forKey: key)
+            }
         case .sikarugirMSyncReference:
             environment["WINEMSYNC"] = "1"
             environment["WINEESYNC"] = "0"
@@ -160,30 +178,179 @@ public enum RuntimeValidationProfile {
     }
 }
 
+public enum PrefixSnapshotStrategy: String, Codable, Sendable {
+    case copyOnWrite
+    case targeted
+}
+
+public struct PrefixSnapshotManifest: Codable, Equatable, Sendable {
+    public let version: Int
+    public let strategy: PrefixSnapshotStrategy
+    public let capturedPaths: [String]
+    public let missingPaths: [String]
+
+    public init(version: Int = 1, strategy: PrefixSnapshotStrategy, capturedPaths: [String], missingPaths: [String]) {
+        self.version = version
+        self.strategy = strategy
+        self.capturedPaths = capturedPaths
+        self.missingPaths = missingPaths
+    }
+}
+
 /// A recoverable snapshot used before changing Wine runtime state in an existing
-/// prefix. The snapshot is intentionally retained after a successful migration.
+/// prefix. APFS clonefile is preferred. The fallback contains only Wine-managed
+/// registry/link state and deliberately excludes steamapps, games and caches.
 public enum PrefixSnapshot {
-    public static func create(prefix: URL, backupsRoot: URL = PortsidePaths.backups, fileManager: FileManager = .default) throws -> URL {
+    public static let manifestName = ".portside-snapshot.json"
+    public static let targetedRollbackPaths = ["system.reg", "user.reg", "userdef.reg", "dosdevices"]
+    private static let cloneSafetyReserve: Int64 = 128 * 1024 * 1024
+
+    public static func create(
+        prefix: URL,
+        backupsRoot: URL = PortsidePaths.backups,
+        fileManager: FileManager = .default,
+        strategy requestedStrategy: PrefixSnapshotStrategy? = nil,
+        availableStorage: Int64? = nil
+    ) throws -> URL {
         try fileManager.createDirectory(at: backupsRoot, withIntermediateDirectories: true)
+        let strategy = requestedStrategy ?? (canClone(prefix: prefix, fileManager: fileManager) ? .copyOnWrite : .targeted)
+        try validateAvailableSpace(prefix: prefix, strategy: strategy, availableStorage: availableStorage, fileManager: fileManager)
         let snapshot = backupsRoot.appendingPathComponent("Steam-prefix-\(UUID().uuidString)", isDirectory: true)
-        if fileManager.fileExists(atPath: prefix.path) {
-            try fileManager.copyItem(at: prefix, to: snapshot)
+        try fileManager.createDirectory(at: snapshot, withIntermediateDirectories: true)
+
+        var manifestStrategy = strategy
+        var capturedPaths: [String] = []
+        var missingPaths: [String] = []
+        if strategy == .copyOnWrite, fileManager.fileExists(atPath: prefix.path) {
+            let clonedPrefix = snapshot.appendingPathComponent("prefix", isDirectory: true)
+            if !cloneItem(from: prefix, to: clonedPrefix) {
+                manifestStrategy = .targeted
+                try captureTargetedPaths(prefix: prefix, snapshot: snapshot, fileManager: fileManager, capturedPaths: &capturedPaths, missingPaths: &missingPaths)
+            }
+        } else if strategy == .copyOnWrite {
+            try fileManager.createDirectory(at: snapshot.appendingPathComponent("prefix", isDirectory: true), withIntermediateDirectories: true)
         } else {
-            try fileManager.createDirectory(at: snapshot, withIntermediateDirectories: true)
+            try captureTargetedPaths(prefix: prefix, snapshot: snapshot, fileManager: fileManager, capturedPaths: &capturedPaths, missingPaths: &missingPaths)
         }
+
+        let manifest = PrefixSnapshotManifest(strategy: manifestStrategy, capturedPaths: capturedPaths, missingPaths: missingPaths)
+        let data = try JSONEncoder.portside.encode(manifest)
+        try data.write(to: snapshot.appendingPathComponent(manifestName), options: .atomic)
         return snapshot
     }
 
     public static func restore(snapshot: URL, prefix: URL, fileManager: FileManager = .default) throws {
+        let manifestURL = snapshot.appendingPathComponent(manifestName)
+        guard let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONDecoder.portside.decode(PrefixSnapshotManifest.self, from: data) else {
+            // Compatibility with snapshots created by the previous release. New
+            // snapshots never use this path and never copy the whole prefix.
+            try restoreClonedPrefix(snapshot: snapshot, prefix: prefix, fileManager: fileManager)
+            return
+        }
+        switch manifest.strategy {
+        case .copyOnWrite:
+            try restoreClonedPrefix(snapshot: snapshot.appendingPathComponent("prefix", isDirectory: true), prefix: prefix, fileManager: fileManager)
+        case .targeted:
+            try restoreTargeted(snapshot: snapshot, prefix: prefix, manifest: manifest, fileManager: fileManager)
+        }
+    }
+
+    public static func retainOnly(_ snapshot: URL, backupsRoot: URL = PortsidePaths.backups, fileManager: FileManager = .default) throws {
+        try fileManager.createDirectory(at: backupsRoot, withIntermediateDirectories: true)
+        let keepName = snapshot.lastPathComponent
+        let entries = try fileManager.contentsOfDirectory(at: backupsRoot, includingPropertiesForKeys: [.isDirectoryKey])
+        for entry in entries where entry.lastPathComponent.hasPrefix("Steam-prefix-") && entry.lastPathComponent != keepName {
+            try fileManager.removeItem(at: entry)
+        }
+    }
+
+    public static func validateAvailableSpace(
+        prefix: URL,
+        strategy: PrefixSnapshotStrategy,
+        availableStorage: Int64? = nil,
+        fileManager: FileManager = .default
+    ) throws {
+        let available = availableStorage ?? ((try? prefix.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage) ?? 0)
+        let required = estimatedBytes(prefix: prefix, strategy: strategy, fileManager: fileManager) + cloneSafetyReserve
+        guard available >= required else {
+            throw RuntimePipelineError.snapshotInsufficientSpace(required: required, available: available)
+        }
+    }
+
+    private static func estimatedBytes(prefix: URL, strategy: PrefixSnapshotStrategy, fileManager: FileManager) -> Int64 {
+        guard strategy == .targeted else { return 64 * 1024 * 1024 }
+        return targetedRollbackPaths.reduce(Int64(0)) { total, relativePath in
+            total + byteSize(of: prefix.appendingPathComponent(relativePath), fileManager: fileManager)
+        }
+    }
+
+    private static func byteSize(of url: URL, fileManager: FileManager) -> Int64 {
+        guard fileManager.fileExists(atPath: url.path) else { return 0 }
+        if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+            return (fileManager.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey])?.compactMap { $0 as? URL }.reduce(Int64(0)) { total, child in
+                total + Int64((try? child.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+            }) ?? 0
+        }
+        return Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+    }
+
+    private static func canClone(prefix: URL, fileManager: FileManager) -> Bool {
+        guard fileManager.fileExists(atPath: prefix.path) else { return true }
+        let probe = fileManager.temporaryDirectory.appendingPathComponent("portside-clone-probe-\(UUID().uuidString)")
+        defer { try? fileManager.removeItem(at: probe) }
+        return cloneItem(from: prefix, to: probe)
+    }
+
+    private static func cloneItem(from source: URL, to destination: URL) -> Bool {
+        let result = source.withUnsafeFileSystemRepresentation { sourcePath in
+            destination.withUnsafeFileSystemRepresentation { destinationPath in
+                guard let sourcePath, let destinationPath else { return Int32(-1) }
+                return clonefile(sourcePath, destinationPath, 0)
+            }
+        }
+        return result == 0
+    }
+
+    private static func captureTargetedPaths(prefix: URL, snapshot: URL, fileManager: FileManager, capturedPaths: inout [String], missingPaths: inout [String]) throws {
+        let targetRoot = snapshot.appendingPathComponent("targeted", isDirectory: true)
+        for relativePath in targetedRollbackPaths {
+            let source = prefix.appendingPathComponent(relativePath)
+            guard fileManager.fileExists(atPath: source.path) else {
+                missingPaths.append(relativePath)
+                continue
+            }
+            let destination = targetRoot.appendingPathComponent(relativePath)
+            try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try fileManager.copyItem(at: source, to: destination)
+            capturedPaths.append(relativePath)
+        }
+    }
+
+    private static func restoreClonedPrefix(snapshot: URL, prefix: URL, fileManager: FileManager) throws {
         let parent = prefix.deletingLastPathComponent()
         try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
         let replacement = parent.appendingPathComponent(".restore-\(UUID().uuidString)", isDirectory: true)
-        try fileManager.copyItem(at: snapshot, to: replacement)
+        guard cloneItem(from: snapshot, to: replacement) || (try? fileManager.copyItem(at: snapshot, to: replacement)) != nil else {
+            throw RuntimePipelineError.archiveExtractionFailed("The runtime snapshot could not be restored.")
+        }
         if fileManager.fileExists(atPath: prefix.path) {
             let failedPrefix = parent.appendingPathComponent("Steam-prefix-failed-\(UUID().uuidString)", isDirectory: true)
             try fileManager.moveItem(at: prefix, to: failedPrefix)
         }
         try fileManager.moveItem(at: replacement, to: prefix)
+    }
+
+    private static func restoreTargeted(snapshot: URL, prefix: URL, manifest: PrefixSnapshotManifest, fileManager: FileManager) throws {
+        let targetRoot = snapshot.appendingPathComponent("targeted", isDirectory: true)
+        for relativePath in Set(manifest.capturedPaths + manifest.missingPaths) {
+            let destination = prefix.appendingPathComponent(relativePath)
+            if fileManager.fileExists(atPath: destination.path) { try fileManager.removeItem(at: destination) }
+            guard manifest.capturedPaths.contains(relativePath) else { continue }
+            let source = targetRoot.appendingPathComponent(relativePath)
+            try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try fileManager.copyItem(at: source, to: destination)
+        }
     }
 }
 
@@ -200,6 +367,30 @@ public struct InstalledRuntimeRecord: Codable, Equatable, Sendable {
     }
 }
 
+public struct PrefixRuntimeMetadata: Codable, Equatable, Sendable {
+    public let runtimeIdentifier: String
+    public let runtimeVersion: String
+    public let preparedAt: Date
+
+    public init(runtimeIdentifier: String, runtimeVersion: String, preparedAt: Date = Date()) {
+        self.runtimeIdentifier = runtimeIdentifier
+        self.runtimeVersion = runtimeVersion
+        self.preparedAt = preparedAt
+    }
+
+    public static func load(prefix: URL, fileManager: FileManager = .default) -> PrefixRuntimeMetadata? {
+        let url = prefix.appendingPathComponent(".portside-runtime.json")
+        guard fileManager.fileExists(atPath: url.path), let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder.portside.decode(PrefixRuntimeMetadata.self, from: data)
+    }
+
+    public func write(to prefix: URL, fileManager: FileManager = .default) throws {
+        try fileManager.createDirectory(at: prefix, withIntermediateDirectories: true)
+        let data = try JSONEncoder.portside.encode(self)
+        try data.write(to: prefix.appendingPathComponent(".portside-runtime.json"), options: .atomic)
+    }
+}
+
 public enum RuntimePipelineError: LocalizedError, Equatable {
     case checksumMismatch(expected: String, actual: String)
     case unexpectedArchiveEntry(String)
@@ -209,6 +400,8 @@ public enum RuntimePipelineError: LocalizedError, Equatable {
     case gstreamerInstallFailed(Int32, String)
     case processFailed(String, Int32)
     case processTimedOut(String)
+    case runtimeMigrationFailed(Int32)
+    case snapshotInsufficientSpace(required: Int64, available: Int64)
 
     public var errorDescription: String? {
         switch self {
@@ -220,6 +413,8 @@ public enum RuntimePipelineError: LocalizedError, Equatable {
         case .gstreamerInstallFailed: return "The audio/video support component could not be installed."
         case .processFailed(let process, _): return "The \(process) process did not complete successfully."
         case .processTimedOut(let process): return "The \(process) process timed out."
+        case .runtimeMigrationFailed: return "The existing Wine prefix could not be migrated safely to the selected runtime."
+        case .snapshotInsufficientSpace: return "There is not enough free space to create a safe runtime recovery point."
         }
     }
 }
@@ -509,6 +704,77 @@ public enum WinePrefixManager {
     }
 }
 
+public enum PrefixRuntimeMigration {
+    public static func requiresMigration(prefix: URL, manifest: RuntimeManifest, fileManager: FileManager = .default) -> Bool {
+        guard fileManager.fileExists(atPath: prefix.appendingPathComponent("system.reg").path) else { return false }
+        guard let metadata = PrefixRuntimeMetadata.load(prefix: prefix, fileManager: fileManager) else { return true }
+        return metadata.runtimeIdentifier != manifest.identifier || metadata.runtimeVersion != manifest.version
+    }
+
+    public static func updateIfNeeded(
+        prefix: URL,
+        runtimeExecutable: URL,
+        manifest: RuntimeManifest,
+        runner: ProcessRunning = SystemProcessRunner(),
+        logger: PortsideLogger = PortsideLogger(),
+        fileManager: FileManager = .default
+    ) async throws -> Bool {
+        let hasPrefix = fileManager.fileExists(atPath: prefix.appendingPathComponent("system.reg").path)
+        let needsMigration = requiresMigration(prefix: prefix, manifest: manifest, fileManager: fileManager)
+        guard !needsMigration || !hasPrefix else {
+            logger.write("Migrating the existing Wine prefix with wineboot -u")
+            let wineboot = runtimeExecutable.deletingLastPathComponent().appendingPathComponent("wineboot")
+            let result = try await runner.run(
+                ProcessLaunchSpec(
+                    executable: wineboot,
+                    arguments: ["-u"],
+                    environment: WineProcessEnvironment.make(runtimeExecutable: runtimeExecutable, prefix: prefix),
+                    workingDirectory: prefix
+                ),
+                logger: logger
+            )
+            guard result.status == 0 else { throw RuntimePipelineError.runtimeMigrationFailed(result.status) }
+            return true
+        }
+        if !hasPrefix {
+            logger.write("Initializing the Wine prefix with wineboot -u")
+            let wineboot = runtimeExecutable.deletingLastPathComponent().appendingPathComponent("wineboot")
+            let result = try await runner.run(
+                ProcessLaunchSpec(
+                    executable: wineboot,
+                    arguments: ["-u"],
+                    environment: WineProcessEnvironment.make(runtimeExecutable: runtimeExecutable, prefix: prefix),
+                    workingDirectory: prefix
+                ),
+                logger: logger
+            )
+            guard result.status == 0 else { throw RuntimePipelineError.runtimeMigrationFailed(result.status) }
+            return true
+        }
+        return false
+    }
+}
+
+public enum RuntimeStorage {
+    /// Removes only obsolete runtime directories after a successful prefix
+    /// migration. It never touches Prefix, Steam, steamapps or Downloads.
+    public static func removeObsolete11_15(
+        runtimeRoot: URL = PortsidePaths.runtime,
+        keepingVersion: String,
+        fileManager: FileManager = .default
+    ) throws -> [URL] {
+        try fileManager.createDirectory(at: runtimeRoot, withIntermediateDirectories: true)
+        let entries = try fileManager.contentsOfDirectory(at: runtimeRoot, includingPropertiesForKeys: [.isDirectoryKey])
+        var removed: [URL] = []
+        for entry in entries where entry.lastPathComponent.hasPrefix("11.15") && entry.lastPathComponent != keepingVersion {
+            guard (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+            try fileManager.removeItem(at: entry)
+            removed.append(entry)
+        }
+        return removed
+    }
+}
+
 public struct RuntimeInstallResult: Sendable, Equatable {
     public let record: InstalledRuntimeRecord
     public let prefixURL: URL
@@ -572,22 +838,32 @@ public final class FreeWineRuntimeProvider: @unchecked Sendable {
         progress?(0.8, .prefixCreating)
         let prefix = PortsidePaths.steamPrefix
         try fileManager.createDirectory(at: prefix, withIntermediateDirectories: true)
-        let snapshot = try PrefixSnapshot.create(prefix: prefix, fileManager: fileManager)
+        let hadExistingPrefix = fileManager.fileExists(atPath: prefix.appendingPathComponent("system.reg").path)
+        let snapshot = hadExistingPrefix ? try PrefixSnapshot.create(prefix: prefix, fileManager: fileManager) : nil
         do {
-            let environment = WineProcessEnvironment.make(runtimeExecutable: finalExecutable, prefix: prefix)
-            let wineboot = installedRoot.appendingPathComponent("Contents/Resources/wine/bin/wineboot")
-            if !fileManager.fileExists(atPath: prefix.appendingPathComponent("system.reg").path) {
-                logger.write("Initializing the prefix with the selected runtime")
-                let result = try await DirectProcess.run(executable: wineboot, arguments: ["-u"], environment: environment, logger: logger)
-                guard result.status == 0 else { throw RuntimePipelineError.processFailed("prefix initialization", result.status) }
-            }
+            _ = try await PrefixRuntimeMigration.updateIfNeeded(
+                prefix: prefix,
+                runtimeExecutable: finalExecutable,
+                manifest: manifest,
+                logger: logger,
+                fileManager: fileManager
+            )
             let registryResult = try await WinePrefixManager.configureSilentCrashHandling(runtimeExecutable: finalExecutable, prefix: prefix, logger: logger)
             guard registryResult.status == 0 else { throw RuntimePipelineError.processFailed("Wine crash-dialog configuration", registryResult.status) }
+            try PrefixRuntimeMetadata(runtimeIdentifier: manifest.identifier, runtimeVersion: manifest.version).write(to: prefix, fileManager: fileManager)
         } catch {
             logger.write("Runtime prefix transition failed; restoring the retained snapshot", level: .error)
-            try? PrefixSnapshot.restore(snapshot: snapshot, prefix: prefix, fileManager: fileManager)
+            if let snapshot {
+                try? PrefixSnapshot.restore(snapshot: snapshot, prefix: prefix, fileManager: fileManager)
+            }
             throw error
         }
+        if let snapshot {
+            try? PrefixSnapshot.retainOnly(snapshot, fileManager: fileManager)
+        }
+        // Cleanup is intentionally after migration metadata is committed and
+        // never removes the prefix or any Steam content.
+        _ = try? RuntimeStorage.removeObsolete11_15(runtimeRoot: PortsidePaths.runtime, keepingVersion: manifest.version, fileManager: fileManager)
         progress?(1, .steamInstalling)
         let record = InstalledRuntimeRecord(manifest: manifest, installedPath: installedRoot, executablePath: finalExecutable, graphicsBackend: FreeRuntimeCatalog.graphics, installedAt: Date(), gstreamerInstalled: GStreamerManager.isInstalled)
         let recordURL = installedRoot.appendingPathComponent("portside-runtime.json")
@@ -599,19 +875,23 @@ public final class FreeWineRuntimeProvider: @unchecked Sendable {
 public struct RuntimeSynchronizationState: Sendable, Equatable {
     public let bootstrapped: Bool
     public let running: Bool
+    public let applicable: Bool
 
-    public init(bootstrapped: Bool, running: Bool) {
+    public init(bootstrapped: Bool, running: Bool, applicable: Bool = false) {
         self.bootstrapped = bootstrapped
         self.running = running
+        self.applicable = applicable
     }
 }
 
 public enum RuntimeSynchronizationLog {
     public static func state(from output: String) -> RuntimeSynchronizationState {
         let lines = output.lowercased().split(whereSeparator: \.isNewline).map(String.init)
+        let hasSynchronizationMarkers = lines.contains { $0.contains("msync:") || $0.contains("esync:") }
         return RuntimeSynchronizationState(
             bootstrapped: lines.contains { $0.contains("msync: bootstrapped") },
-            running: lines.contains { $0.contains("msync: up and running") }
+            running: lines.contains { $0.contains("msync: up and running") },
+            applicable: hasSynchronizationMarkers
         )
     }
 }
@@ -650,9 +930,33 @@ public final class SteamLaunchLock: @unchecked Sendable {
 public enum SteamProcessStatus: String, Codable, Sendable {
     case notRunning
     case starting
-    case ready
+    case processHandoffComplete
     case exitedUnexpectedly
     case webhelperCrashLoop
+}
+
+public enum SteamInterfaceVerification: String, Codable, Sendable {
+    case notVerified = "not_verified"
+    case visuallyValidated = "visually_validated"
+}
+
+public enum SteamProcessOwnership {
+    public static let prefixEvidenceKey = "PORTSIDE_PREFIX_EVIDENCE"
+
+    public static func isManaged(snapshotLine: String, prefix: URL, processName: String) -> Bool {
+        let line = snapshotLine.lowercased()
+        let name = processName.lowercased()
+        let marker = "\(WineProcessEnvironment.ownerMarkerKey.lowercased())=\(WineProcessEnvironment.prefixMarker(for: prefix).lowercased())"
+        let evidence = "\(prefixEvidenceKey.lowercased())=\(WineProcessEnvironment.prefixMarker(for: prefix).lowercased())"
+        guard line.contains(name) else { return false }
+        // A legacy Portside launch may predate the owner marker. The exact
+        // managed steam.exe path is still safe evidence for stopping it; helper
+        // processes require the marker so an unrelated helper is never adopted.
+        if name == "steam.exe" && (line.contains(prefix.standardizedFileURL.path.lowercased()) || line.contains(evidence)) { return true }
+        guard line.contains(marker) || line.contains(evidence) else { return false }
+        if name == "steamwebhelper" { return true }
+        return line.contains(prefix.standardizedFileURL.path.lowercased())
+    }
 }
 
 private struct SteamProcessSnapshot {
@@ -662,40 +966,51 @@ private struct SteamProcessSnapshot {
 
 public struct SteamReadinessReport: Sendable, Equatable {
     public let status: SteamProcessStatus
+    public let processStarted: Bool
+    public let processHandoffComplete: Bool
     public let webhelperStarted: Bool
     public let webhelperExitCode: Int32?
     public let webhelperRestartCount: Int
     public let webhelperProcessCount: Int
     public let webhelperStableDuration: TimeInterval
     public let windowDetected: Bool
+    public let interfaceVerification: SteamInterfaceVerification
     public let runtimeSynchronization: RuntimeSynchronizationState
 
     public init(
         status: SteamProcessStatus,
+        processStarted: Bool = false,
+        processHandoffComplete: Bool = false,
         webhelperStarted: Bool,
         webhelperExitCode: Int32? = nil,
         webhelperRestartCount: Int = 0,
         webhelperProcessCount: Int = 0,
         webhelperStableDuration: TimeInterval = 0,
         windowDetected: Bool = false,
+        interfaceVerification: SteamInterfaceVerification = .notVerified,
         runtimeSynchronization: RuntimeSynchronizationState = RuntimeSynchronizationState(bootstrapped: false, running: false)
     ) {
         self.status = status
+        self.processStarted = processStarted
+        self.processHandoffComplete = processHandoffComplete
         self.webhelperStarted = webhelperStarted
         self.webhelperExitCode = webhelperExitCode
         self.webhelperRestartCount = webhelperRestartCount
         self.webhelperProcessCount = webhelperProcessCount
         self.webhelperStableDuration = webhelperStableDuration
         self.windowDetected = windowDetected
+        self.interfaceVerification = interfaceVerification
         self.runtimeSynchronization = runtimeSynchronization
     }
 }
 
 public final class SteamReadinessMonitor: @unchecked Sendable {
     private let logger: PortsideLogger
+    private let processLogURL: URL
 
-    public init(logger: PortsideLogger = PortsideLogger()) {
+    public init(logger: PortsideLogger = PortsideLogger(), processLogURL: URL = PortsidePaths.logs.appendingPathComponent("steam-process.log")) {
         self.logger = logger
+        self.processLogURL = processLogURL
     }
 
     public func waitForSteam(executable: URL, prefix: URL = PortsidePaths.steamPrefix, timeout: TimeInterval = 180) async -> SteamProcessStatus {
@@ -712,10 +1027,10 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         var helperRestarts = 0
         var helperStableSince: Date?
         var helperProcessCount = 0
-        var lastReport = RuntimeSynchronizationState(bootstrapped: false, running: false)
+        var lastReport = RuntimeSynchronizationState(bootstrapped: false, running: false, applicable: false)
 
         while Date() < deadline {
-            let snapshot = await processSnapshot()
+            let snapshot = await processSnapshot(prefix: prefix)
             let steam = managedProcessSnapshot(snapshot, prefix: prefix, processNames: ["steam.exe"])
             let helpers = managedProcessLines(snapshot, prefix: prefix, processName: "steamwebhelper", baseline: baselineWebhelperLines)
             let helperRunning = !helpers.isEmpty
@@ -741,14 +1056,17 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
                 }
                 let stableDuration = stableDuration(since: helperStableSince)
                 if helperStarted && stableDuration >= requiredStableDuration {
-                    logger.write("steam_window_handoff_detected")
+                    logger.write("steam_process_handoff_complete")
                     return SteamReadinessReport(
-                        status: .ready,
+                        status: .processHandoffComplete,
+                        processStarted: steamWasRunning,
+                        processHandoffComplete: true,
                         webhelperStarted: true,
                         webhelperRestartCount: helperRestarts,
                         webhelperProcessCount: helperProcessCount,
                         webhelperStableDuration: stableDuration,
-                        windowDetected: true,
+                        windowDetected: false,
+                        interfaceVerification: .notVerified,
                         runtimeSynchronization: lastReport
                     )
                 }
@@ -758,6 +1076,7 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
                 logger.write("steamwebhelper_crash_loop", level: .error)
                 return SteamReadinessReport(
                     status: .webhelperCrashLoop,
+                    processStarted: steamWasRunning,
                     webhelperStarted: helperStarted,
                     webhelperRestartCount: helperRestarts,
                     webhelperProcessCount: helperProcessCount,
@@ -766,15 +1085,14 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
                 )
             }
 
-            if let line = snapshot.split(whereSeparator: \.isNewline).first(where: { $0.contains("steam_process_output") }) {
-                lastReport = RuntimeSynchronizationLog.state(from: String(line))
-            }
+            lastReport = RuntimeSynchronizationLog.state(from: (try? String(contentsOf: processLogURL, encoding: .utf8)) ?? "")
             try? await Task.sleep(for: .milliseconds(750))
         }
 
         logger.write("steam_handoff_timeout", level: .error)
         return SteamReadinessReport(
             status: steamWasRunning ? (helperStarted ? .exitedUnexpectedly : .starting) : .notRunning,
+            processStarted: steamWasRunning,
             webhelperStarted: helperStarted,
             webhelperRestartCount: helperRestarts,
             webhelperProcessCount: helperProcessCount,
@@ -784,11 +1102,11 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
     }
 
     public func isSteamProcessRunning(prefix: URL = PortsidePaths.steamPrefix) async -> Bool {
-        managedProcessSnapshot(await processSnapshot(), prefix: prefix, processNames: ["steam.exe", "steamwebhelper"])
+        managedProcessSnapshot(await processSnapshot(prefix: prefix), prefix: prefix, processNames: ["steam.exe", "steamwebhelper"])
     }
 
     public func captureWebhelperLines() async -> Set<String> {
-        Set((await processSnapshot()).split(whereSeparator: \.isNewline).map(String.init).filter { $0.contains("steamwebhelper") })
+        Set((await processSnapshot(prefix: PortsidePaths.steamPrefix)).split(whereSeparator: \.isNewline).map(String.init).filter { $0.contains("steamwebhelper") })
     }
 
     public func stopSteam(runtimeExecutable: URL, prefix: URL) async {
@@ -821,62 +1139,82 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         return false
     }
 
-    public func activateVisibleSteamWindow(prefix: URL = PortsidePaths.steamPrefix) async -> Bool {
-        let snapshot = await processSnapshot()
+    public func requestSteamProcessActivation(prefix: URL = PortsidePaths.steamPrefix) async -> Bool {
+        let snapshot = await processSnapshot(prefix: prefix)
         guard managedProcessSnapshot(snapshot, prefix: prefix, processNames: ["steam.exe", "steamwebhelper"]),
               let steamProcess = steamProcessSnapshot(processSnapshot: snapshot, prefix: prefix) else { return false }
         NSRunningApplication(processIdentifier: steamProcess.processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         return true
     }
 
-    private func processSnapshot() async -> String {
+    private func processSnapshot(prefix: URL = PortsidePaths.steamPrefix) async -> String {
         let result = try? await DirectProcess.run(
             executable: URL(fileURLWithPath: "/bin/ps"),
-            arguments: ["-axo", "pid=,comm=,args="],
+            arguments: ["-axo", "pid=,ppid=,comm=,args="],
             logger: logger,
             logOutput: false
         )
-        return result?.output.lowercased() ?? ""
+        let rawLines = result?.output.lowercased().split(whereSeparator: \.isNewline).map(String.init) ?? []
+        let marker = WineProcessEnvironment.prefixMarker(for: prefix)
+        var enrichedLines: [String] = []
+        for line in rawLines {
+            guard line.contains("steam.exe") || line.contains("steamwebhelper") else {
+                enrichedLines.append(line)
+                continue
+            }
+            let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
+            guard let pid = fields.first.flatMap({ pid_t(String($0)) }) else {
+                enrichedLines.append(line)
+                continue
+            }
+            let files = try? await DirectProcess.run(
+                executable: URL(fileURLWithPath: "/usr/sbin/lsof"),
+                arguments: ["-p", String(pid), "-Fn"],
+                logger: logger,
+                logOutput: false
+            )
+            if files?.status == 0,
+               files?.output.lowercased().contains(prefix.standardizedFileURL.path.lowercased()) == true {
+                enrichedLines.append("\(line) \(SteamProcessOwnership.prefixEvidenceKey.lowercased())=\(marker)")
+            } else {
+                enrichedLines.append(line)
+            }
+        }
+        return enrichedLines.joined(separator: "\n")
     }
 
-    private func managedProcessLines(_ snapshot: String, prefix: URL, processName: String, baseline: Set<String>) -> [String] {
-        let managedPrefix = prefix.standardizedFileURL.path.lowercased()
+    private func managedProcessLines(_ snapshot: String, prefix: URL, processName: String, baseline _: Set<String>) -> [String] {
         return snapshot.split(whereSeparator: \.isNewline).map(String.init).filter { line in
-            guard line.contains(processName.lowercased()) else { return false }
-            return line.contains(managedPrefix) || !baseline.contains(line)
+            SteamProcessOwnership.isManaged(snapshotLine: line, prefix: prefix, processName: processName)
         }
     }
 
     private func managedProcessSnapshot(_ snapshot: String, prefix: URL, processNames: [String]) -> Bool {
         let lines = snapshot.split(whereSeparator: \.isNewline).map(String.init)
-        let managedPrefix = prefix.standardizedFileURL.path.lowercased()
         return lines.contains { line in
-            line.contains(managedPrefix) && processNames.contains { line.contains($0.lowercased()) }
+            processNames.contains { SteamProcessOwnership.isManaged(snapshotLine: line, prefix: prefix, processName: $0) }
         }
     }
 
     private func steamProcessSnapshot(processSnapshot: String, prefix: URL) -> SteamProcessSnapshot? {
-        let managedPrefix = prefix.standardizedFileURL.path.lowercased()
         for line in processSnapshot.split(whereSeparator: \.isNewline) {
             let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
             guard fields.count == 3, let processIdentifier = pid_t(fields[0]) else { continue }
             let commandLine = String(fields[1...].joined(separator: " "))
-            guard commandLine.contains(managedPrefix),
-                  commandLine.contains("steam.exe") else { continue }
+            guard !commandLine.contains("steamwebhelper"),
+                  SteamProcessOwnership.isManaged(snapshotLine: String(line), prefix: prefix, processName: "steam.exe") else { continue }
             return SteamProcessSnapshot(processIdentifier: processIdentifier, commandLine: commandLine)
         }
         return nil
     }
 
     private func forceTerminateManagedSteamIfNeeded(prefix: URL) async {
-        let snapshot = await processSnapshot()
-        let managedPrefix = prefix.standardizedFileURL.path.lowercased()
+        let snapshot = await processSnapshot(prefix: prefix)
         let pids = snapshot.split(whereSeparator: \.isNewline).compactMap { line -> pid_t? in
             let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
-            guard let pid = fields.first.flatMap({ pid_t($0) }), fields.count >= 3 else { return nil }
-            let commandLine = String(fields[2...].joined(separator: " "))
-            guard commandLine.contains(managedPrefix),
-                  commandLine.contains("steam.exe") || commandLine.contains("steamwebhelper") else { return nil }
+            guard let pid = fields.first.flatMap({ pid_t(String($0)) }), fields.count >= 3 else { return nil }
+            guard SteamProcessOwnership.isManaged(snapshotLine: String(line), prefix: prefix, processName: "steam.exe")
+                    || SteamProcessOwnership.isManaged(snapshotLine: String(line), prefix: prefix, processName: "steamwebhelper") else { return nil }
             return pid
         }
         for pid in pids {
@@ -884,13 +1222,12 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
             _ = kill(pid, SIGTERM)
         }
         try? await Task.sleep(for: .milliseconds(750))
-        let remaining = await processSnapshot()
+        let remaining = await processSnapshot(prefix: prefix)
         for pid in remaining.split(whereSeparator: \.isNewline).compactMap({ line -> pid_t? in
             let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
-            guard let pid = fields.first.flatMap({ pid_t($0) }), fields.count >= 3 else { return nil }
-            let commandLine = String(fields[2...].joined(separator: " "))
-            guard commandLine.contains(managedPrefix),
-                  commandLine.contains("steam.exe") || commandLine.contains("steamwebhelper") else { return nil }
+            guard let pid = fields.first.flatMap({ pid_t(String($0)) }), fields.count >= 3 else { return nil }
+            guard SteamProcessOwnership.isManaged(snapshotLine: String(line), prefix: prefix, processName: "steam.exe")
+                    || SteamProcessOwnership.isManaged(snapshotLine: String(line), prefix: prefix, processName: "steamwebhelper") else { return nil }
             return pid
         }) {
             logger.write("Force terminating managed Steam process pid=\(pid)", level: .error)

@@ -10,13 +10,13 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
         "stage", "error_code", "portside_version", "portside_build", "macos_version", "architecture",
         "runtime_name", "runtime_version", "graphics_backend", "process_type", "exit_code", "duration", "retry_count",
         "webhelper_restart_count", "webhelper_started", "webhelper_exit_code", "window_detected", "steam_version",
-        "webhelper_process_count", "msync_bootstrapped", "msync_running"
+        "webhelper_process_count", "process_started", "process_handoff_complete", "interface_verification", "msync_applicable", "msync_bootstrapped", "msync_running"
     ]
     private static let allowedBreadcrumbs: Set<String> = [
         "setup_started", "requirements_checked", "runtime_download_started", "runtime_verified", "prefix_created",
         "steam_install_started", "steam_update_started", "steam_launch_requested", "process_exited", "repair_requested",
         "steam_started", "steamwebhelper_started", "steamwebhelper_exit_code", "steamwebhelper_crash_loop",
-        "steamwebhelper_timeout", "steam_window_detected", "steam_ui_ready", "steam_handoff_failed",
+        "steamwebhelper_timeout", "steam_process_handoff_complete", "steam_handoff_failed",
         "msync_bootstrapped", "msync_up_and_running"
     ]
 

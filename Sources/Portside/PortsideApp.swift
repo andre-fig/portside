@@ -81,6 +81,8 @@ final class PortsideModel: ObservableObject {
             && runtimeRecord?.manifest.version == FreeRuntimeCatalog.wine.version
             && FileManager.default.isExecutableFile(atPath: runtimePath)
             && FileManager.default.fileExists(atPath: PortsidePaths.steamPrefix.appendingPathComponent("system.reg").path)
+            && PrefixRuntimeMetadata.load(prefix: PortsidePaths.steamPrefix)?.runtimeIdentifier == FreeRuntimeCatalog.wine.identifier
+            && PrefixRuntimeMetadata.load(prefix: PortsidePaths.steamPrefix)?.runtimeVersion == FreeRuntimeCatalog.wine.version
             && SteamInstaller.locateInstalledExecutable() != nil
     }
 
@@ -175,7 +177,7 @@ final class PortsideModel: ObservableObject {
                 }
                 state.lastSetupDuration = Date().timeIntervalSince(started)
                 setupStep = .ready
-                updateProgress(1, phase: .steamReady)
+                updateProgress(1, phase: .steamProcessHandoffComplete)
                 logger.write("Setup completed")
                 terminateAfterHandOff()
             } catch {
@@ -295,6 +297,7 @@ final class PortsideModel: ObservableObject {
         case .steamLaunching: return "Opening Steam…"
         case .validatingInstallation: return "Finishing…"
         case .steamReady: return "Ready"
+        case .steamProcessHandoffComplete: return "Steam process handoff complete"
         case .failedRecoverable, .failedFatal: return "Could not complete setup."
         }
     }
@@ -323,6 +326,7 @@ final class PortsideModel: ObservableObject {
         case .steamLaunching: return 10
         case .validatingInstallation: return 11
         case .steamReady: return 12
+        case .steamProcessHandoffComplete: return 13
         case .failedRecoverable, .failedFatal: return 99
         }
     }
@@ -335,6 +339,8 @@ final class PortsideModel: ObservableObject {
             case .rosettaUnavailable: return "rosetta_unavailable"
             case .gstreamerInstallFailed: return "gstreamer_setup_failed"
             case .processTimedOut: return "setup_timeout"
+            case .runtimeMigrationFailed: return "runtime_migration_failed"
+            case .snapshotInsufficientSpace: return "runtime_snapshot_space_failed"
             case .processFailed(let process, _):
                 let normalized = process.lowercased()
                 if normalized.contains("steam installer") { return "steam_install_failed" }
@@ -376,6 +382,10 @@ final class PortsideModel: ObservableObject {
             webhelperExitCode: report?.webhelperExitCode,
             windowDetected: report?.windowDetected,
             webhelperProcessCount: report?.webhelperProcessCount,
+            processStarted: report?.processStarted,
+            processHandoffComplete: report?.processHandoffComplete,
+            interfaceVerification: report?.interfaceVerification.rawValue,
+            msyncApplicable: report?.runtimeSynchronization.applicable,
             msyncBootstrapped: report?.runtimeSynchronization.bootstrapped,
             msyncRunning: report?.runtimeSynchronization.running
         )
@@ -413,7 +423,7 @@ final class PortsideModel: ObservableObject {
         }
 
         let existingWebhelperLines = await steamMonitor.captureWebhelperLines()
-        logger.write("Launching steam.exe without experimental launch flags")
+        logger.write("Launching steam.exe with cef_32bit_legacy_login arguments")
         _ = try await steamProcessLauncher.launch(
             runtimePath: runtimePath,
             prefix: PortsidePaths.steamPrefix,
@@ -425,15 +435,14 @@ final class PortsideModel: ObservableObject {
         let report = await steamMonitor.waitForSteamHandoff(prefix: PortsidePaths.steamPrefix, baselineWebhelperLines: existingWebhelperLines)
         lastReadinessReport = report
         logger.write("steamwebhelper_process_count=\(report.webhelperProcessCount)")
-        guard report.status == .ready else {
+        guard report.status == .processHandoffComplete else {
             diagnostics.event("steam_handoff_failed", context: diagnosticContext(stage: "steam_handoff", errorCode: "steam_\(report.status.rawValue)", report: report))
-            throw PortsideError.processLaunchFailed("Steam did not present a stable managed window.")
+            throw PortsideError.processLaunchFailed("Steam process handoff could not be completed.")
         }
-        diagnostics.event("steam_window_detected", context: diagnosticContext(stage: "steam_handoff", report: report))
-        diagnostics.event("steam_ui_ready", context: diagnosticContext(stage: "steam_handoff", report: report))
-        state.phase = .steamReady
+        diagnostics.event("steam_process_handoff_complete", context: diagnosticContext(stage: "steam_handoff", report: report))
+        state.phase = .steamProcessHandoffComplete
         state.setupCompleted = true
-        state.lastSteamStatus = .ready
+        state.lastSteamStatus = .processHandoffComplete
         state.lastError = nil
         persistState()
         showsInstaller = false

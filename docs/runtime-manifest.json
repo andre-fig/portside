@@ -12,7 +12,7 @@
     "bundleDirectory": "Wine Staging.app",
     "license": "Wine LGPL-2.1-or-later; upstream packaging license requires review",
     "source": "https://gitlab.winehq.org/wine/wine",
-    "components": ["Wine Staging", "Wine Mono 11.2.0", "Wine Gecko 2.47.4", "WineD3D"],
+    "components": ["Wine Staging", "Wine Mono 11.0.0", "Wine Gecko 2.47.4", "WineD3D"],
     "validatedAt": "2026-08-19T00:00:00Z"
   },
   "components": [
