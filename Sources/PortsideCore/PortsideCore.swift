@@ -168,14 +168,12 @@ public struct DiagnosticContext: Sendable, Equatable {
 public protocol DiagnosticsService: Sendable {
     func breadcrumb(_ name: String, context: DiagnosticContext)
     func capture(error: Error, context: DiagnosticContext)
-    func submitManualDiagnostic(report: Data, context: DiagnosticContext) -> String?
 }
 
 public struct NoopDiagnosticsService: DiagnosticsService {
     public init() {}
     public func breadcrumb(_ name: String, context: DiagnosticContext) {}
     public func capture(error: Error, context: DiagnosticContext) {}
-    public func submitManualDiagnostic(report: Data, context: DiagnosticContext) -> String? { nil }
 }
 
 public final class EnvironmentStore: @unchecked Sendable {

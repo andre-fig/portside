@@ -345,19 +345,6 @@ final class PortsideModel: ObservableObject {
         }
     }
 
-    func sendDiagnostic() {
-        let code = state.lastErrorCode ?? "portside_error"
-        let context = diagnosticContext(stage: "manual_diagnostic", errorCode: code)
-        var reportCode: String?
-        if let reportURL = try? DiagnosticReport.create(state: state, requirements: requirements, logger: logger),
-           let report = try? Data(contentsOf: reportURL) {
-            reportCode = diagnostics.submitManualDiagnostic(report: report, context: context)
-        } else {
-            diagnostics.capture(error: NSError(domain: "Portside", code: 1, userInfo: nil), context: context)
-        }
-        message = reportCode.map { "Diagnostics sent: \($0)" } ?? "Technical diagnostics sent."
-    }
-
     func openStorage() { NSWorkspace.shared.open(PortsidePaths.root) }
 
     func clearCache() {
@@ -476,25 +463,18 @@ struct SetupProgressView: View {
 struct FailureView: View {
     @ObservedObject var model: PortsideModel
     @State private var showDetails = false
-    @State private var showDiagnosticConfirmation = false
 
     var body: some View {
         VStack(spacing: 18) {
             Spacer()
             Text("Could not complete setup.").font(.title3.weight(.medium))
             HStack(spacing: 12) {
-                Button("Try Again") { model.setUp() }.buttonStyle(.borderedProminent)
-                Button("Repair Portside") { model.repair() }.buttonStyle(.bordered)
-                Button("Send Diagnostics") { showDiagnosticConfirmation = true }.buttonStyle(.bordered)
+                Button("Try Again") { model.repair() }.buttonStyle(.borderedProminent)
                 Button(showDetails ? "Hide Details" : "View Details") { showDetails.toggle() }.buttonStyle(.bordered)
             }.disabled(model.isWorking)
             if showDetails { Text(model.state.lastError ?? "No details available.").font(.caption).foregroundStyle(.secondary).textSelection(.enabled).frame(maxWidth: 520) }
             Spacer()
         }.padding(28).frame(width: 620, height: 331)
-        .confirmationDialog("Send diagnostics?", isPresented: $showDiagnosticConfirmation, titleVisibility: .visible) {
-            Button("Send Technical Data") { model.sendDiagnostic() }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("Only sanitized technical data will be sent. No credentials, Steam account data, or game list will be included.") }
     }
 }
 

@@ -61,16 +61,4 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
         SentrySDK.capture(error: safeError)
     }
 
-    public func submitManualDiagnostic(report: Data, context: DiagnosticContext) -> String? {
-        let limitedReport = Data(report.prefix(64_000))
-        SentrySDK.configureScope { scope in
-            for (key, value) in context.fields where Self.allowedTagKeys.contains(key) {
-                scope.setTag(value: value, key: key)
-            }
-            scope.addAttachment(Attachment(data: limitedReport, filename: "portside-diagnostic.txt", contentType: "text/plain"))
-        }
-        let eventID = SentrySDK.capture(message: "Portside manual diagnostic")
-        SentrySDK.configureScope { scope in scope.clearAttachments() }
-        return eventID.sentryIdString
-    }
 }
