@@ -138,9 +138,9 @@ public struct DiagnosticContext: Sendable, Equatable {
     public var gpuProcessStatus: String?
     public var windowDetected: Bool?
     public var browserReadyDetected: Bool?
+    public var windowVisualState: String?
     public var cacheRecoveryAttempted: Bool?
     public var steamVersion: String?
-    public var hostBundleIdentifier: String?
 
     public init(
         stage: String? = nil,
@@ -165,9 +165,9 @@ public struct DiagnosticContext: Sendable, Equatable {
         gpuProcessStatus: String? = nil,
         windowDetected: Bool? = nil,
         browserReadyDetected: Bool? = nil,
+        windowVisualState: String? = nil,
         cacheRecoveryAttempted: Bool? = nil,
-        steamVersion: String? = nil,
-        hostBundleIdentifier: String? = nil
+        steamVersion: String? = nil
     ) {
         self.stage = stage; self.errorCode = errorCode; self.portsideVersion = portsideVersion; self.portsideBuild = portsideBuild
         self.macOSVersion = macOSVersion; self.architecture = architecture; self.runtimeName = runtimeName; self.runtimeVersion = runtimeVersion
@@ -175,7 +175,7 @@ public struct DiagnosticContext: Sendable, Equatable {
         self.cefStrategy = cefStrategy; self.cefFailureCategory = cefFailureCategory; self.webhelperRestartCount = webhelperRestartCount
         self.webhelperStarted = webhelperStarted; self.webhelperExitCode = webhelperExitCode; self.rendererMode = rendererMode
         self.gpuProcessStatus = gpuProcessStatus; self.windowDetected = windowDetected; self.browserReadyDetected = browserReadyDetected
-        self.cacheRecoveryAttempted = cacheRecoveryAttempted; self.steamVersion = steamVersion; self.hostBundleIdentifier = hostBundleIdentifier
+        self.windowVisualState = windowVisualState; self.cacheRecoveryAttempted = cacheRecoveryAttempted; self.steamVersion = steamVersion
     }
 
     public var fields: [String: String] {
@@ -193,8 +193,8 @@ public struct DiagnosticContext: Sendable, Equatable {
             ("webhelper_started", webhelperStarted.map(String.init)), ("webhelper_exit_code", webhelperExitCode.map(String.init)),
             ("renderer_mode", rendererMode), ("gpu_process_status", gpuProcessStatus),
             ("window_detected", windowDetected.map(String.init)), ("browser_ready_detected", browserReadyDetected.map(String.init)),
+            ("window_visual_state", windowVisualState),
             ("cache_recovery_attempted", cacheRecoveryAttempted.map(String.init)), ("steam_version", steamVersion),
-            ("host_bundle_identifier", hostBundleIdentifier)
         ]
         for (key, value) in optionalValues where value != nil { values[key] = value! }
         return values
@@ -381,6 +381,7 @@ public final class SecureDownloader: NSObject, @unchecked Sendable {
 public enum SteamInstaller {
     public static let officialURL = URL(string: "https://cdn.fastly.steamstatic.com/client/installer/SteamSetup.exe")!
     public static let bootstrapArguments = ["-silent"]
+    public static let defaultLanguageArguments = ["-language", "english"]
     public static let uiArguments = SteamLaunchConfiguration.normal.arguments
     public static let fallbackUIArguments = SteamLaunchConfiguration.fallback.arguments
     public static let uiLaunchConfigurations = [SteamLaunchConfiguration.normal, SteamLaunchConfiguration.disableGPU, SteamLaunchConfiguration.fallback]
@@ -548,6 +549,15 @@ public final class ProcessSupervisor: @unchecked Sendable {
         task.standardError = FileHandle.nullDevice
         try? task.run()
         logger.write("Portside Wine process tree termination requested")
+    }
+
+    public func waitForStop(timeout: TimeInterval = 10) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !isRunning { return true }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        return !isRunning
     }
 }
 

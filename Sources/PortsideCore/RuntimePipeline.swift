@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import CryptoKit
+import Darwin
 
 public enum EnvironmentPhase: String, Codable, CaseIterable, Sendable {
     case requirementsChecking
@@ -127,38 +128,6 @@ public enum WineProcessEnvironment {
         let entries = existing.split(separator: ":").map(String.init)
         guard !entries.contains(value) else { return existing }
         return ([value] + entries).joined(separator: ":")
-    }
-}
-
-public enum SteamHostMetadata {
-    public static let bundleIdentifier = "com.portside.steam-launcher"
-    public static let displayName = "Steam"
-    public static let launcherDirectoryName = "Steam.app"
-    public static let templateRelativePath = "Contents/Helpers/Steam.app"
-}
-
-public struct SteamHostLaunchSpec: Equatable, Sendable {
-    public let runtimePath: String
-    public let prefixPath: String
-    public let steamExecutablePath: String
-    public let steamArguments: [String]
-
-    public init(runtimePath: String, prefixPath: String, steamExecutablePath: String, steamArguments: [String] = []) {
-        self.runtimePath = runtimePath
-        self.prefixPath = prefixPath
-        self.steamExecutablePath = steamExecutablePath
-        self.steamArguments = steamArguments
-    }
-
-    public var arguments: [String] {
-        ["--runtime", runtimePath, "--prefix", prefixPath, "--steam", steamExecutablePath, "--"] + steamArguments
-    }
-
-    public var childEnvironment: [String: String] {
-        WineProcessEnvironment.make(
-            runtimeExecutable: URL(fileURLWithPath: runtimePath),
-            prefix: URL(fileURLWithPath: prefixPath)
-        )
     }
 }
 
@@ -717,6 +686,146 @@ public enum SteamCEFLogAnalyzer {
     }
 }
 
+public enum SteamWindowVisualState: String, Codable, Sendable {
+    case unavailable
+    case black
+    case rendered
+}
+
+public enum SteamWindowPixelAnalyzer {
+    /// Classifies sampled window pixels without treating a dark Steam theme as a blank window.
+    /// A window is considered black only when its content is almost uniformly near zero.
+    public static func classify(
+        width: Int,
+        height: Int,
+        bytesPerRow: Int,
+        bytesPerPixel: Int,
+        alphaFirst: Bool = false,
+        data: [UInt8]
+    ) -> SteamWindowVisualState {
+        guard width > 0, height > 0, bytesPerPixel >= 3, bytesPerRow > 0 else { return .unavailable }
+        let colorOffset = alphaFirst && bytesPerPixel >= 4 ? 1 : 0
+        guard colorOffset + 2 < bytesPerPixel else { return .unavailable }
+
+        let sampleStepX = max(1, width / 16)
+        let sampleStepY = max(1, height / 12)
+        let contentStartY = height > 160 ? min(height - 1, height / 10) : 0
+        var samples = 0
+        var darkSamples = 0
+        var brightSamples = 0
+        var totalLuminance = 0.0
+
+        for y in stride(from: contentStartY, to: height, by: sampleStepY) {
+            for x in stride(from: 0, to: width, by: sampleStepX) {
+                let offset = (y * bytesPerRow) + (x * bytesPerPixel) + colorOffset
+                guard offset + 2 < data.count else { continue }
+                let red = Double(data[offset])
+                let green = Double(data[offset + 1])
+                let blue = Double(data[offset + 2])
+                let luminance = (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
+                samples += 1
+                totalLuminance += luminance
+                if max(red, green, blue) <= 12 { darkSamples += 1 }
+                if max(red, green, blue) >= 32 { brightSamples += 1 }
+            }
+        }
+
+        guard samples > 0 else { return .unavailable }
+        let meanLuminance = totalLuminance / Double(samples)
+        let brightFraction = Double(brightSamples) / Double(samples)
+        if meanLuminance < 18 && brightFraction < 0.025 {
+            return .black
+        }
+        if darkSamples < samples || meanLuminance >= 18 || brightFraction >= 0.025 {
+            return .rendered
+        }
+        return .unavailable
+    }
+
+    public static func inspect(windowID: CGWindowID, bounds: CGRect? = nil) -> SteamWindowVisualState {
+        guard let image = CGWindowListCreateImage(
+            .null,
+            .optionIncludingWindow,
+            windowID,
+            [.bestResolution, .boundsIgnoreFraming]
+        ) else {
+            return inspectFromMainDisplay(bounds: bounds)
+        }
+        return classify(image: image) ?? inspectFromMainDisplay(bounds: bounds)
+    }
+
+    private static func classify(image: CGImage) -> SteamWindowVisualState? {
+        guard let providerData = image.dataProvider?.data else { return nil }
+        let alphaFirst = image.alphaInfo == .first || image.alphaInfo == .premultipliedFirst || image.alphaInfo == .noneSkipFirst
+        return classify(
+            width: image.width,
+            height: image.height,
+            bytesPerRow: image.bytesPerRow,
+            bytesPerPixel: max(1, image.bitsPerPixel / 8),
+            alphaFirst: alphaFirst,
+            data: [UInt8](providerData as Data)
+        )
+    }
+
+    private static func inspectFromMainDisplay(bounds: CGRect?) -> SteamWindowVisualState {
+        guard let bounds, let displayImage = CGDisplayCreateImage(CGMainDisplayID()) else { return .unavailable }
+        let displayBounds = CGDisplayBounds(CGMainDisplayID())
+        let scaleX = CGFloat(displayImage.width) / max(displayBounds.width, 1)
+        let scaleY = CGFloat(displayImage.height) / max(displayBounds.height, 1)
+        let width = bounds.width * scaleX
+        let height = bounds.height * scaleY
+        guard width >= 2, height >= 2 else { return .unavailable }
+        let x = (bounds.minX - displayBounds.minX) * scaleX
+        let topY = (bounds.minY - displayBounds.minY) * scaleY
+        let bottomY = CGFloat(displayImage.height) - ((bounds.maxY - displayBounds.minY) * scaleY)
+        let candidates = [
+            CGRect(x: x, y: bottomY, width: width, height: height),
+            CGRect(x: x, y: topY, width: width, height: height)
+        ].compactMap { $0.intersection(CGRect(x: 0, y: 0, width: displayImage.width, height: displayImage.height)) }
+        let states = candidates.compactMap { displayImage.cropping(to: $0).flatMap(classify(image:)) }
+        if states.contains(.rendered) { return .rendered }
+        if states.contains(.black) { return .black }
+        return .unavailable
+    }
+}
+
+public final class SteamLaunchLock: @unchecked Sendable {
+    private let fileDescriptor: Int32
+    public let url: URL
+
+    private init(fileDescriptor: Int32, url: URL) {
+        self.fileDescriptor = fileDescriptor
+        self.url = url
+    }
+
+    public static func acquire(url: URL = PortsidePaths.root.appendingPathComponent("steam-launch.lock")) -> SteamLaunchLock? {
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let descriptor = open(url.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else { return nil }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            close(descriptor)
+            return nil
+        }
+        let owner = Data("pid=\(getpid())\n".utf8)
+        ftruncate(descriptor, 0)
+        owner.withUnsafeBytes { buffer in
+            _ = Darwin.write(descriptor, buffer.baseAddress, owner.count)
+        }
+        return SteamLaunchLock(fileDescriptor: descriptor, url: url)
+    }
+
+    deinit {
+        _ = flock(fileDescriptor, LOCK_UN)
+        close(fileDescriptor)
+    }
+}
+
+private struct SteamWindowSnapshot {
+    let processIdentifier: pid_t
+    let windowID: CGWindowID
+    let bounds: CGRect
+}
+
 public struct SteamReadinessReport: Sendable, Equatable {
     public let status: SteamProcessStatus
     public let cefStrategy: String
@@ -729,7 +838,38 @@ public struct SteamReadinessReport: Sendable, Equatable {
     public let browserReadyDetected: Bool
     public let rendererMode: String?
     public let gpuProcessStatus: String?
+    public let windowVisualState: SteamWindowVisualState
     public let logAnalysis: SteamCEFLogAnalysis
+
+    public init(
+        status: SteamProcessStatus,
+        cefStrategy: String,
+        webhelperStarted: Bool,
+        webhelperExitCode: Int32?,
+        webhelperRestartCount: Int,
+        webhelperStableDuration: TimeInterval,
+        windowDetected: Bool,
+        cefArgumentsObserved: Bool,
+        browserReadyDetected: Bool,
+        rendererMode: String?,
+        gpuProcessStatus: String?,
+        windowVisualState: SteamWindowVisualState = .unavailable,
+        logAnalysis: SteamCEFLogAnalysis
+    ) {
+        self.status = status
+        self.cefStrategy = cefStrategy
+        self.webhelperStarted = webhelperStarted
+        self.webhelperExitCode = webhelperExitCode
+        self.webhelperRestartCount = webhelperRestartCount
+        self.webhelperStableDuration = webhelperStableDuration
+        self.windowDetected = windowDetected
+        self.cefArgumentsObserved = cefArgumentsObserved
+        self.browserReadyDetected = browserReadyDetected
+        self.rendererMode = rendererMode
+        self.gpuProcessStatus = gpuProcessStatus
+        self.windowVisualState = windowVisualState
+        self.logAnalysis = logAnalysis
+    }
 }
 
 public enum SteamHTMLCacheRecovery {
@@ -770,7 +910,7 @@ public enum SteamHTMLCacheRecovery {
 
 public enum SteamProcessStatus: String, Codable, Sendable {
     case notRunning, wineProcessRunning, steamProcessRunning, webhelperNotStarted, webhelperCrashLoop
-    case windowNotVisible, rendererFailed, resourcesNotLoaded, cefFailed, uiUnverified, windowVisible, ready, exitedUnexpectedly
+    case windowNotVisible, blackWindow, rendererFailed, resourcesNotLoaded, cefFailed, uiUnverified, windowVisible, ready, exitedUnexpectedly
 }
 
 public final class SteamReadinessMonitor: @unchecked Sendable {
@@ -815,8 +955,11 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         var webhelperRestartCount = 0
         var webhelperStableSince: Date?
         var windowDetected = false
+        var windowVisualState = SteamWindowVisualState.unavailable
+        var blackWindowSince: Date?
         var cefArgumentsObserved = strategy.arguments.isEmpty
         var loggedUnverifiedWindow = false
+        var loggedBlackWindow = false
         while Date() < deadline {
             let snapshot = await processSnapshot()
             terminateWineDebuggersIfNeeded(in: snapshot, stage: "Steam startup")
@@ -837,14 +980,27 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
                 logger.write("steamwebhelper_exited", level: .warning)
             }
             webhelperWasRunning = webhelperRunning
-            if sawSteam, let processIdentifier = visibleSteamWindowProcessIdentifier(processSnapshot: snapshot) {
-                NSRunningApplication(processIdentifier: processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            if sawSteam, let window = visibleSteamWindow(processSnapshot: snapshot) {
+                NSRunningApplication(processIdentifier: window.processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
                 windowDetected = true
+                windowVisualState = SteamWindowPixelAnalyzer.inspect(windowID: window.windowID, bounds: window.bounds)
+                if windowVisualState == .black {
+                    if blackWindowSince == nil { blackWindowSince = Date() }
+                    if !loggedBlackWindow {
+                        logger.write("Steam login window is black; moving to the next controlled CEF strategy", level: .warning)
+                        loggedBlackWindow = true
+                    }
+                    if stableDuration(since: blackWindowSince) >= 3 {
+                        break
+                    }
+                } else if windowVisualState == .rendered {
+                    blackWindowSince = nil
+                }
                 let stableSeconds = stableDuration(since: webhelperStableSince)
                 let analysis = SteamCEFLogAnalyzer.analyze(prefix: prefix, minimumModificationDate: attemptStartedAt)
-                if webhelperWasRunning && webhelperStarted && stableSeconds >= 2 && cefArgumentsObserved && analysis.hasStrongUIEvidence {
+                if webhelperWasRunning && webhelperStarted && stableSeconds >= 2 && cefArgumentsObserved && analysis.hasStrongUIEvidence && windowVisualState == .rendered {
                     logger.write("Steam window detected and activated")
-                    return SteamReadinessReport(status: .ready, cefStrategy: strategy.identifier, webhelperStarted: webhelperStarted, webhelperExitCode: analysis.webhelperExitCode, webhelperRestartCount: max(webhelperRestartCount, analysis.webhelperRestartCount), webhelperStableDuration: stableSeconds, windowDetected: windowDetected, cefArgumentsObserved: cefArgumentsObserved, browserReadyDetected: analysis.browserReadyDetected, rendererMode: analysis.rendererMode, gpuProcessStatus: analysis.gpuProcessStatus, logAnalysis: analysis)
+                    return SteamReadinessReport(status: .ready, cefStrategy: strategy.identifier, webhelperStarted: webhelperStarted, webhelperExitCode: analysis.webhelperExitCode, webhelperRestartCount: max(webhelperRestartCount, analysis.webhelperRestartCount), webhelperStableDuration: stableSeconds, windowDetected: windowDetected, cefArgumentsObserved: cefArgumentsObserved, browserReadyDetected: analysis.browserReadyDetected, rendererMode: analysis.rendererMode, gpuProcessStatus: analysis.gpuProcessStatus, windowVisualState: windowVisualState, logAnalysis: analysis)
                 }
                 if !loggedUnverifiedWindow {
                     logger.write("Steam window detected before webhelper UI verification", level: .warning)
@@ -868,6 +1024,8 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
             status = .notRunning
         } else if !webhelperStarted {
             status = .webhelperNotStarted
+        } else if windowVisualState == .black {
+            status = .blackWindow
         } else if analysis.failureCategories.contains("cef_renderer_failed") {
             status = .rendererFailed
         } else if analysis.failureCategories.contains("cef_resources_not_loaded") {
@@ -881,7 +1039,7 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         } else {
             status = .exitedUnexpectedly
         }
-        return SteamReadinessReport(status: status, cefStrategy: strategy.identifier, webhelperStarted: webhelperStarted, webhelperExitCode: analysis.webhelperExitCode, webhelperRestartCount: restartCount, webhelperStableDuration: stableDuration(since: webhelperStableSince), windowDetected: windowDetected, cefArgumentsObserved: cefArgumentsObserved, browserReadyDetected: analysis.browserReadyDetected, rendererMode: analysis.rendererMode, gpuProcessStatus: analysis.gpuProcessStatus, logAnalysis: analysis)
+        return SteamReadinessReport(status: status, cefStrategy: strategy.identifier, webhelperStarted: webhelperStarted, webhelperExitCode: analysis.webhelperExitCode, webhelperRestartCount: restartCount, webhelperStableDuration: stableDuration(since: webhelperStableSince), windowDetected: windowDetected, cefArgumentsObserved: cefArgumentsObserved, browserReadyDetected: analysis.browserReadyDetected, rendererMode: analysis.rendererMode, gpuProcessStatus: analysis.gpuProcessStatus, windowVisualState: windowVisualState, logAnalysis: analysis)
     }
 
     public func isSteamProcessRunning(prefix: URL = PortsidePaths.steamPrefix) async -> Bool {
@@ -895,13 +1053,20 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
             logger.write("Could not locate wineserver while stopping Steam", level: .error)
             return
         }
-        _ = try? await DirectProcess.run(
-            executable: wineserver,
-            arguments: ["-k"],
-            environment: WineProcessEnvironment.make(runtimeExecutable: runtimeExecutable, prefix: prefix),
-            logger: logger
-        )
+        let killServer = Process()
+        killServer.executableURL = wineserver
+        killServer.arguments = ["-k"]
+        killServer.environment = WineProcessEnvironment.make(runtimeExecutable: runtimeExecutable, prefix: prefix)
+        killServer.standardOutput = FileHandle.nullDevice
+        killServer.standardError = FileHandle.nullDevice
+        try? killServer.run()
+        try? await Task.sleep(for: .milliseconds(750))
+        if killServer.isRunning {
+            killServer.terminate()
+            logger.write("wineserver -k exceeded the graceful stop window; continuing with managed process cleanup", level: .warning)
+        }
         logger.write("Steam process tree termination requested for the managed prefix")
+        await forceTerminateManagedSteamIfNeeded()
     }
 
     public func waitForSteamToStop(timeout: TimeInterval = 20) async -> Bool {
@@ -931,8 +1096,11 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         let managedPrefix = prefix.path.lowercased()
         let lines = snapshot.split(whereSeparator: \.isNewline).map(String.init)
         if processNames == ["steamwebhelper"] {
-            let managedSteamIsRunning = lines.contains { $0.contains(managedPrefix) && $0.contains("steam.exe") }
-            return managedSteamIsRunning && lines.contains { $0.contains("steamwebhelper") }
+            return lines.contains { $0.contains("steamwebhelper") }
+        }
+        if processNames == ["steam.exe", "steamwebhelper"] {
+            return lines.contains { $0.contains(managedPrefix) && $0.contains("steam.exe") }
+                || lines.contains { $0.contains("steamwebhelper") }
         }
         return lines.contains { text in
             text.contains(managedPrefix) && processNames.contains { text.contains($0) }
@@ -968,14 +1136,14 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
             logger.write("Existing Steam window was not accepted because CEF UI evidence is incomplete", level: .warning)
             return false
         }
-        guard let processIdentifier = visibleSteamWindowProcessIdentifier(processSnapshot: snapshot) else { return false }
-        NSRunningApplication(processIdentifier: processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        guard let window = visibleSteamWindow(processSnapshot: snapshot), SteamWindowPixelAnalyzer.inspect(windowID: window.windowID, bounds: window.bounds) == .rendered else { return false }
+        NSRunningApplication(processIdentifier: window.processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         return true
     }
 
-    private func visibleSteamWindowProcessIdentifier(processSnapshot: String) -> pid_t? {
+    private func visibleSteamWindow(processSnapshot: String) -> SteamWindowSnapshot? {
         guard let windows = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else { return nil }
-        return windows.compactMap { window -> pid_t? in
+        return windows.compactMap { window -> SteamWindowSnapshot? in
             let owner = (window[kCGWindowOwnerName as String] as? String)?.lowercased() ?? ""
             let name = (window[kCGWindowName as String] as? String)?.lowercased() ?? ""
             let steamTitle = ["steam", "login", "sign in", "update", "store", "library"].contains { name.contains($0) }
@@ -992,7 +1160,42 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
                 return processArguments.contains("steam.exe") || processArguments.contains("steamwebhelper")
             }
             guard owner.contains("steam") || steamTitle || (owner.contains("wine") && isSteamProcess) else { return nil }
-            return ownerPID
+            guard let windowID = (window[kCGWindowNumber as String] as? NSNumber).map({ CGWindowID($0.uint32Value) }) else { return nil }
+            return SteamWindowSnapshot(
+                processIdentifier: ownerPID,
+                windowID: windowID,
+                bounds: CGRect(x: (bounds?["X"] as? NSNumber)?.doubleValue ?? 0,
+                               y: (bounds?["Y"] as? NSNumber)?.doubleValue ?? 0,
+                               width: width,
+                               height: height)
+            )
         }.first
+    }
+
+    private func forceTerminateManagedSteamIfNeeded() async {
+        let initialSnapshot = await processSnapshot()
+        let pids = managedSteamProcessIdentifiers(snapshot: initialSnapshot)
+        guard !pids.isEmpty else { return }
+        for pid in pids {
+            logger.write("Terminating managed Wine/Steam process pid=\(pid)", level: .warning)
+            _ = kill(pid, SIGTERM)
+        }
+        try? await Task.sleep(for: .milliseconds(750))
+        let remaining = managedSteamProcessIdentifiers(snapshot: await processSnapshot())
+        for pid in remaining {
+            logger.write("Force terminating managed Wine/Steam process pid=\(pid)", level: .error)
+            _ = kill(pid, SIGKILL)
+        }
+    }
+
+    private func managedSteamProcessIdentifiers(snapshot: String) -> [pid_t] {
+        let lines = snapshot.split(whereSeparator: \.isNewline).map(String.init)
+        return lines.compactMap { line in
+            let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
+            guard let pid = fields.first.flatMap({ pid_t($0) }), fields.count >= 3 else { return nil }
+            let commandLine = String(fields[2...].joined(separator: " "))
+            guard commandLine.contains("steam.exe") || commandLine.contains("steamwebhelper") else { return nil }
+            return pid
+        }
     }
 }

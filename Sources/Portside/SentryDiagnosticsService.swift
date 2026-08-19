@@ -10,7 +10,7 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
         "runtime_name", "runtime_version", "graphics_backend", "process_type", "exit_code", "duration", "retry_count",
         "cef_strategy", "cef_failure_category", "webhelper_restart_count", "webhelper_started", "webhelper_exit_code",
         "renderer_mode", "gpu_process_status", "window_detected", "browser_ready_detected", "cache_recovery_attempted",
-        "steam_version", "host_bundle_identifier"
+        "window_visual_state", "steam_version"
     ]
     private static let allowedBreadcrumbs: Set<String> = [
         "setup_started", "requirements_checked", "runtime_download_started", "runtime_verified", "prefix_created",

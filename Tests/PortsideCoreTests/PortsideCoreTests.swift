@@ -123,6 +123,7 @@ final class PortsideCoreTests: XCTestCase {
 
     func testBootstrapUsesOnlySilentArgument() {
         XCTAssertEqual(SteamInstaller.bootstrapArguments, ["-silent"])
+        XCTAssertEqual(SteamInstaller.defaultLanguageArguments, ["-language", "english"])
         XCTAssertFalse(SteamInstaller.bootstrapArguments.contains { $0.contains("sh") || $0.contains("bash") })
         XCTAssertEqual(WineRuntimePolicy.debug, "-all")
         XCTAssertTrue(WineRuntimePolicy.dllOverrides.contains("winedbg.exe=d"))
@@ -320,30 +321,28 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
     }
 
-    func testSteamHostMetadataIsStable() {
-        XCTAssertEqual(SteamHostMetadata.displayName, "Steam")
-        XCTAssertEqual(SteamHostMetadata.bundleIdentifier, "com.portside.steam-launcher")
-        XCTAssertEqual(SteamHostMetadata.launcherDirectoryName, "Steam.app")
-        XCTAssertEqual(SteamHostMetadata.templateRelativePath, "Contents/Helpers/Steam.app")
+    func testBlackWindowPixelAnalyzerDistinguishesBlackFromRenderedContent() {
+        let black = Array(repeating: UInt8(0), count: 4 * 8 * 8)
+        XCTAssertEqual(SteamWindowPixelAnalyzer.classify(width: 8, height: 8, bytesPerRow: 32, bytesPerPixel: 4, data: black), .black)
+
+        var rendered = black
+        for y in 2..<6 {
+            for x in 2..<6 {
+                let offset = (y * 32) + (x * 4)
+                rendered[offset] = 255
+                rendered[offset + 1] = 255
+                rendered[offset + 2] = 255
+            }
+        }
+        XCTAssertEqual(SteamWindowPixelAnalyzer.classify(width: 8, height: 8, bytesPerRow: 32, bytesPerPixel: 4, data: rendered), .rendered)
     }
 
-    func testSteamHostLaunchSpecKeepsArgumentsSeparateAndScopesEnvironmentToChild() {
-        let spec = SteamHostLaunchSpec(
-            runtimePath: "/private/Runtime/bin/wine",
-            prefixPath: "/private/Prefix/Steam",
-            steamExecutablePath: "/private/Prefix/Steam/drive_c/steam.exe",
-            steamArguments: ["-cef-disable-gpu", "--flag with spaces"]
-        )
-
-        XCTAssertEqual(spec.arguments, [
-            "--runtime", "/private/Runtime/bin/wine",
-            "--prefix", "/private/Prefix/Steam",
-            "--steam", "/private/Prefix/Steam/drive_c/steam.exe",
-            "--", "-cef-disable-gpu", "--flag with spaces"
-        ])
-        XCTAssertFalse(spec.arguments.joined(separator: " ").contains("sh -c"))
-        XCTAssertEqual(spec.childEnvironment["WINEPREFIX"], "/private/Prefix/Steam")
-        XCTAssertEqual(spec.childEnvironment["WINEDEBUG"], "-all")
+    func testSteamLaunchLockAllowsOnlyOneCoordinator() {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("portside-lock-\(UUID().uuidString)")
+        let first = SteamLaunchLock.acquire(url: url)
+        XCTAssertNotNil(first)
+        XCTAssertNil(SteamLaunchLock.acquire(url: url))
+        _ = first
     }
 
     func testEnvironmentPhaseIsCodable() throws {
