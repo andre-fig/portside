@@ -25,6 +25,7 @@ The package targets macOS 13+ and builds the current architecture by default. `p
 - The Windows installer is run silently with the separate, case-sensitive `/S` argument; its output is captured internally and never shown in the Portside UI.
 - Steam bootstrap is attempted with `-silent`, validated using its installed-client marker, and followed by a normal Steam launch for login.
 - Wine crash dialogs are disabled in the private prefix and `winedbg.exe` is disabled for Portside-owned processes; failures are logged and surfaced as recoverable Portside errors.
+- Sentry starts with the app and reports handled setup and launch failures with tracing enabled.
 - Download interruptions leave a `.part` file and resume with HTTP Range requests.
 - Archive entries are preflighted for absolute paths and `..` traversal before extraction.
 - Support includes environment checks, repair guidance, diagnostic export, storage access, cache clearing, and destructive reset confirmation.

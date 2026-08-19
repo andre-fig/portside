@@ -1,10 +1,20 @@
 import SwiftUI
 import AppKit
 import PortsideCore
+import Sentry
 
 @main
 struct PortsideApp: App {
     @StateObject private var model = PortsideModel()
+
+    init() {
+        SentrySDK.start { options in
+            options.dsn = "https://5aa6a3d7a22bd8bb4b718bc2d6cfaac7@o4511935178080256.ingest.us.sentry.io/4511935182405632"
+            options.debug = false
+            options.sendDefaultPii = true
+            options.tracesSampleRate = 1.0
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -104,6 +114,7 @@ final class PortsideModel: ObservableObject {
                 logger.write("Setup completed")
             } catch {
                 if supervisor.isRunning { supervisor.requestStop() }
+                SentrySDK.capture(error: error)
                 state.phase = .failedRecoverable
                 state.lastError = error.localizedDescription
                 state.lastErrorCode = errorCode(for: error)
@@ -131,6 +142,7 @@ final class PortsideModel: ObservableObject {
                 setupStep = .checking; isWorking = false; setUp()
             } catch {
                 isWorking = false; setupStep = .failed; errorMessage = "macOS could not install Rosetta. Use Software Update, then try again."; logger.write(error.localizedDescription, level: .error)
+                SentrySDK.capture(error: error)
             }
         }
     }
@@ -156,6 +168,7 @@ final class PortsideModel: ObservableObject {
                 message = "Tudo pronto"; NSApp.hide(nil)
             } catch {
                 if supervisor.isRunning { supervisor.requestStop() }
+                SentrySDK.capture(error: error)
                 errorMessage = error.localizedDescription
                 state.phase = .failedRecoverable; state.lastError = error.localizedDescription; state.lastErrorCode = errorCode(for: error); persistState()
                 logger.write(error.localizedDescription, level: .error)
@@ -254,7 +267,10 @@ final class PortsideModel: ObservableObject {
             let url = try DiagnosticReport.create(state: state, requirements: requirements, logger: logger)
             didExportReport = true
             NSWorkspace.shared.activateFileViewerSelecting([url])
-        } catch { errorMessage = "Could not export the diagnostic report." }
+        } catch {
+            SentrySDK.capture(error: error)
+            errorMessage = "Could not export the diagnostic report."
+        }
     }
 
     func openStorage() { NSWorkspace.shared.open(PortsidePaths.root) }
@@ -264,14 +280,20 @@ final class PortsideModel: ObservableObject {
             try FileManager.default.removeItem(at: PortsidePaths.cache)
             try FileManager.default.createDirectory(at: PortsidePaths.cache, withIntermediateDirectories: true)
             message = "Download cache cleared. Installed games were preserved."
-        } catch { errorMessage = "Could not clear the download cache." }
+        } catch {
+            SentrySDK.capture(error: error)
+            errorMessage = "Could not clear the download cache."
+        }
     }
 
     func reset() {
         do {
             try FileManager.default.removeItem(at: PortsidePaths.root)
             state = EnvironmentState(); setupStep = .welcome; message = "Portside was reset. Installed Steam and game files were removed."; errorMessage = nil
-        } catch { errorMessage = "Could not reset Portside." }
+        } catch {
+            SentrySDK.capture(error: error)
+            errorMessage = "Could not reset Portside."
+        }
     }
 }
 
