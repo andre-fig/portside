@@ -664,7 +664,7 @@ private enum InstallerLayout {
     static let contentHeight: CGFloat = 276
     static let failureWidth: CGFloat = 560
     static let failureContentHeight: CGFloat = 350
-    static let headerHeight: CGFloat = 48
+    static let headerHeight: CGFloat = 56
     static let progressContentHeight = contentHeight - headerHeight - 1
     static let failureContentBodyHeight = failureContentHeight - headerHeight - 1
 }
