@@ -1,41 +1,77 @@
 # Portside architecture
 
-## Boundaries
+## Runtime boundary
 
-`PortsideCore` contains orchestration and persistence:
+PortsideCore owns the Sikarugir lifecycle:
 
-- `SystemRequirements` validates Apple silicon and free storage.
-- `EnvironmentStore` owns `~/Library/Application Support/Portside` and creates `Runtime`, `Prefix/Steam`, `Backups`, `Logs`, `Cache`, `Downloads`, and `Diagnostics`. Existing prefixes are preserved; runtime transitions use retained snapshots and do not migrate legacy directories automatically.
-- `SecureDownloader` accepts HTTPS URLs only, downloads to a private destination, and records SHA-256.
-- `SteamInstaller` owns the Valve installer URL and invokes it only through a discovered runtime, never through a shell.
-- `SteamInstaller` keeps installer arguments separate from the normal launch. `steam.exe` is launched with an empty `Process.arguments` list and no shell.
-- `FreeWineRuntimeProvider` is the concrete provider: pinned Wine 11.6_1, SHA-256 verification, resumable download, safe tar extraction, user-local GStreamer extraction, Rosetta detection, recoverable prefix snapshots, idempotent prefix initialization, and runtime record persistence.
-- `RosettaManager` validates and requests Apple’s official Rosetta installation automatically when required; any protected macOS confirmation remains owned by macOS.
-- `SteamReadinessMonitor` observes only the Portside-owned process tree and requests activation through `NSRunningApplication`; it never captures another application's pixels, so Portside does not request Screen Recording permission. It reports process handoff, not visual login success.
-- `SteamProcessLauncher` starts the Windows client directly through Wine with separated arguments and the inherited Wine environment. A POSIX launch lock prevents concurrent Portside instances from creating duplicate Steam trees, and the monitor force-terminates only Steam processes associated with the managed prefix when a strategy is replaced or setup fails.
-- `ProcessSupervisor` is retained as a generic process utility for tests and recovery. The direct Wine launcher owns the single normal launch, while readiness remains the monitor's responsibility. Shutdown first requests `wineserver -k`, then terminates only Steam processes associated with the managed prefix.
-- `WinePrefixManager` writes `ShowCrashDialog=0` to the Portside prefix and applies a `winedbg.exe=d` process policy. The shared runtime `Info.plist` is never renamed to Steam; the only visible Steam identity is the Wine-hosted process.
-- `DiagnosticsService` is the domain boundary for invisible Sentry monitoring, stable error codes, high-level breadcrumbs, and manual sanitized reports. The SDK adapter is isolated in the app target.
-- `DiagnosticReport` writes a compact sanitized report without credentials or tokens.
+- PortsidePaths keeps wrappers, prefixes, SteamLibrary, caches, logs,
+  diagnostics, profiles and manifests in separate user-local directories.
+- SikarugirOfficialCatalog pins official HTTPS release/source URLs, SHA-256
+  values, sizes and source commits for Creator provenance, Wrapper template,
+  Engines and Sikarugir winetricks.
+- SikarugirUpdateService validates the pinned catalog, caches verified
+  downloads, checks the official EngineList.txt at most once per day and
+  supports offline reuse of verified artifacts.
+- SikarugirWrapperInstaller extracts archives with direct /usr/bin/tar
+  arguments after validating every archive path, installs side-by-side, writes
+  the wrapper Info.plist, and leaves the previous wrapper in a rollback
+  location.
+- SikarugirSteamFlow exposes exactly two process specifications:
+  WSS-winetricks steam for installation and a clean wrapper launch. It never
+  invokes SteamSetup.exe, native macOS Steam, a shell, or the old login flags.
+- SteamReadinessMonitor observes managed process arguments and macOS on-screen
+  window metadata only. It never captures pixels or window content. Its
+  strongest automatic state is visibleButUnverified; manual visual
+  confirmation is required before recording uiReady.
+- GameCompatibilityService detects PE architecture/API, chooses mutually
+  exclusive official renderer profiles, and keeps a bounded fallback path for
+  unknown games.
 
-The SwiftUI target owns the single automatic progress/failure window. It has no onboarding, dashboard, settings, or consent screen. The Steam UI remains the Steam client. DXMT is not installed because its current upstream repository reports no asserted license; WineD3D, which ships with Wine, is used for Direct3D 9/10/11.
+The SwiftUI target owns only the minimal preparation window. Once a managed
+Steam window exists, Portside hides and exits. Creator and Configure are not
+opened or copied into the Portside application bundle.
 
-## Security decisions
+## Golden baseline configuration
 
-All remote downloads are HTTPS and the installer host is fixed. Process launch uses `Process` with a fixed array of arguments and a controlled environment. All diagnostic/log output is sanitized. Portside never asks for a Steam password and never writes credentials.
+~~~text
+Wrapper template  1.0.11
+Engine            WS12WineSikarugir10.0_6
+Renderer          WineD3D
+D3DMETAL         0
+DXMT             0
+DXVK             0
+WINEMSYNC        1
+WINEESYNC        1
+WINEDEBUG        -plugplay,+loaddll
+Program Flags    empty
+~~~
 
-## Lifecycle
+The engine archive and template are verified before extraction. Prefix
+creation and Steam installation stay inside the wrapper’s official
+Contents/SharedSupport/prefix. A small metadata record in Prefixes points to
+that canonical prefix; the prefix is not duplicated.
 
-1. Load persisted state and automatically choose direct launch or resumable setup.
-2. Validate machine and storage.
-3. Create the private workspace.
-4. Verify/install GStreamer locally and download Wine 11.6_1.
-5. Verify and extract the runtime atomically.
-6. Initialize the Steam prefix with `wineboot` through `Process`.
-7. Download `SteamSetup.exe`.
-8. Install Steam into the Portside Steam prefix with `/S` through the injected process runner.
-9. Verify `steam.exe` exists and is executable.
-10. Acquire the Portside launch lock and start exactly one Wine-hosted Steam process with an empty Steam argument list and the inherited environment.
-11. Observe the managed Steam/webhelper process tree for a stable handoff, activate the owning process, and close Portside. No display pixels are captured, so visual login rendering remains an interactive validation step.
+## Update and rollback
 
-No process-start event is treated as a compatibility result. Actual game classifications require a real test report. Release Sentry uses no default PII, no user object, no replay, no network breadcrumbs, and no tracing sample by default; optional dSYM upload occurs only outside the app when `SENTRY_AUTH_TOKEN` is supplied to the packaging environment.
+Updates are downloaded to Cache/Downloads, verified, extracted to a unique
+staging directory and activated atomically. The previous wrapper is retained
+under Runtime/rollback-*. A candidate must pass structure and engine
+validation before activation; a failed Steam-window smoke test keeps the
+previous active wrapper. SteamLibrary and saves are never rollback targets.
+
+## Diagnostics and security
+
+Sentry receives only the allow-listed fields documented in DiagnosticContext:
+Sikarugir/template/engine versions, renderer, App ID, architecture/API,
+attempt/fallback indexes, exit code, window state and rollback state.
+Passwords, cookies, tokens, Steam IDs, account data, window content,
+screenshots and full user paths are sanitized or omitted.
+
+Process launches use Process with fixed executable URLs and argument arrays.
+Managed termination requires the wrapper/prefix path in the process command, so
+native Steam and unrelated Wine wrappers are not killed.
+
+The Portside wrapper removes the upstream template's generic
+`NSMicrophoneUsageDescription`. Portside has no microphone capture path and
+does not request microphone permission; Steam voice input, if desired later,
+would require an explicit separate feature and permission decision.

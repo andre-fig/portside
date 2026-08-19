@@ -1,15 +1,19 @@
 # Third-party notices
 
-| Component | Version | Source | License / redistribution status |
-|---|---:|---|---|
-| Apple Swift / SwiftUI / Foundation / AppKit | Xcode 26.2 SDK | Apple SDK | Platform SDK; governed by Apple terms, not bundled as a standalone dependency |
-| Sentry Cocoa SDK | 9.26.0+ | [getsentry/sentry-cocoa](https://github.com/getsentry/sentry-cocoa) | MIT; fetched by Swift Package Manager |
-| Wine Staging macOS build | 11.6_1 | [Gcenx/macOS_Wine_builds](https://github.com/Gcenx/macOS_Wine_builds/releases/tag/11.6_1) | Wine LGPL-2.1-or-later; upstream packaging license is not declared in GitHub metadata; downloaded, not bundled |
-| WineD3D | 11.6_1 | Included in Wine build | Wine LGPL-2.1-or-later; used for Direct3D 9/10/11 |
-| GStreamer macOS runtime | 1.28.5 | [GStreamer official package](https://gstreamer.freedesktop.org/download/) | LGPL-2.1-or-later and component-specific licenses; downloaded, verified, and extracted locally |
-| Rosetta 2 | macOS-provided | Apple | Not included; detected/installed through Apple’s official mechanism |
-| Steam for Windows installer | downloaded at runtime | Valve official CDN | Not bundled; user obtains the official installer. Valve terms and trademarks apply |
-| DXMT | not installed | 3Shain/dxmt | Upstream metadata reports no asserted license; excluded from this MVP |
-| Games, including GunZ: The Duel (App ID 3139440) | none bundled | Steam | Not distributed by Portside |
+| Component | Version / revision | Source | Status |
+|---|---|---|---|
+| Swift, SwiftUI, Foundation, AppKit | macOS SDK | Apple SDK | Platform SDK; governed by Apple terms |
+| Sentry Cocoa | 9.26.0+ | [getsentry/sentry-cocoa](https://github.com/getsentry/sentry-cocoa) | MIT; fetched by Swift Package Manager |
+| Sikarugir Creator | 1.0.1 | [official release](https://github.com/Sikarugir-App/Creator/releases/tag/v1.0.1) | Provenance only; not copied into Portside |
+| Sikarugir Wrapper Template | 1.0.11 | [official release](https://github.com/Sikarugir-App/Wrapper/releases/tag/v1.0) | Downloaded and verified at setup |
+| WS12WineSikarugir10.0_6 | Engine release | [official Engines release](https://github.com/Sikarugir-App/Engines/releases/tag/v1.0) | Downloaded and verified at setup |
+| Sikarugir Wine source | shallow source snapshot recorded in UPSTREAM_VERSIONS.json | [official wine repository](https://github.com/Sikarugir-App/wine) | Source provenance; not independently rebuilt by Portside |
+| Sikarugir winetricks | commit 5a59ea0… | [official repository](https://github.com/Sikarugir-App/winetricks) | Verified script; used only through the official wrapper verb |
+| WineD3D | included by selected engine | [official Wine source](https://github.com/Sikarugir-App/wine) | LGPL-2.1-or-later and component notices |
+| Rosetta 2 | macOS-provided | Apple | Not bundled; installed only through Apple’s official mechanism |
+| Steam for Windows | installed by steam verb | Valve official distribution | Not bundled; Valve terms and trademarks apply |
+| DXMT, D3DMetal, DXVK, VKD3D | not enabled by baseline | official upstream mechanisms as selected later | Not installed during Steam baseline |
+| Games, including GunZ: The Duel | none bundled | Steam | Not distributed by Portside |
 
-This inventory must be updated with exact versions and license texts before adding a runtime or any other redistributable dependency.
+Exact URLs, checksums, sizes, source commits and local clone details are in
+UPSTREAM_VERSIONS.json.

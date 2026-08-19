@@ -8,16 +8,16 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
     private static let release = "com.portside.app@0.1.0+1"
     private static let allowedTagKeys: Set<String> = [
         "stage", "error_code", "portside_version", "portside_build", "macos_version", "architecture",
-        "runtime_name", "runtime_version", "graphics_backend", "process_type", "exit_code", "duration", "retry_count",
-        "webhelper_restart_count", "webhelper_started", "webhelper_exit_code", "window_detected", "steam_version",
-        "webhelper_process_count", "process_started", "process_handoff_complete", "interface_verification", "msync_applicable", "msync_bootstrapped", "msync_running"
+        "sikarugir_version", "template_version", "engine_version", "renderer", "app_id",
+        "executable_architecture", "graphics_api", "launch_attempt", "fallback_index", "exit_code",
+        "window_detected", "rollback_performed", "process_started", "webhelper_started",
+        "interface_verification", "msync_enabled", "esync_enabled"
     ]
     private static let allowedBreadcrumbs: Set<String> = [
         "setup_started", "requirements_checked", "runtime_download_started", "runtime_verified", "prefix_created",
         "steam_install_started", "steam_update_started", "steam_launch_requested", "process_exited", "repair_requested",
-        "steam_started", "steamwebhelper_started", "steamwebhelper_exit_code", "steamwebhelper_crash_loop",
-        "steamwebhelper_timeout", "steam_process_handoff_complete", "steam_handoff_failed",
-        "msync_bootstrapped", "msync_up_and_running"
+        "steam_started", "steamwebhelper_started", "steam_process_handoff_complete", "steam_handoff_failed",
+        "steam_window_detected", "second_open"
     ]
 
     public init() {

@@ -1,1242 +1,757 @@
 import Foundation
 import AppKit
+import CoreGraphics
 import CryptoKit
-import Darwin
 
 public enum EnvironmentPhase: String, Codable, CaseIterable, Sendable {
-    case requirementsChecking
-    case rosettaRequired
-    case runtimeDownloading
-    case runtimeVerifying
-    case runtimeInstalling
-    case prefixCreating
-    case graphicsInstalling
-    case steamDownloading
-    case steamInstalling
-    case steamUpdating
-    case steamLaunching
-    case validatingInstallation
-    case steamReady
-    case steamProcessHandoffComplete
-    case failedRecoverable
-    case failedFatal
+    case requirementsChecking, rosettaRequired, runtimeDownloading, runtimeVerifying, runtimeInstalling
+    case prefixCreating, steamInstalling, steamUpdating, steamLaunching, windowWaiting, steamReady
+    case failedRecoverable, failedFatal
 }
 
 public enum GraphicsBackend: String, Codable, CaseIterable, Sendable {
-    case wineD3D
+    case wineD3D, d3dMetal, dxmt, dxvk, vkd3d
 
-    public var displayName: String { "Built-in compatibility graphics" }
-    public var supportedAPIs: [String] { ["Direct3D 9", "Direct3D 10", "Direct3D 11"] }
-}
-
-public struct RuntimeManifest: Codable, Equatable, Sendable {
-    public let identifier: String
-    public let version: String
-    public let upstreamURL: URL
-    public let sha256: String
-    public let expectedSize: Int64
-    public let architecture: String
-    public let minimumMacOS: String
-    public let relativeExecutablePath: String
-    public let license: String
-    public let sourceURL: URL
-    public let includedComponents: [String]
-    public let validatedAt: Date
-    public let bundleDirectoryName: String
-
-    public init(identifier: String, version: String, upstreamURL: URL, sha256: String, expectedSize: Int64, architecture: String, minimumMacOS: String, relativeExecutablePath: String, license: String, sourceURL: URL, includedComponents: [String], validatedAt: Date, bundleDirectoryName: String) {
-        self.identifier = identifier; self.version = version; self.upstreamURL = upstreamURL; self.sha256 = sha256; self.expectedSize = expectedSize; self.architecture = architecture; self.minimumMacOS = minimumMacOS; self.relativeExecutablePath = relativeExecutablePath; self.license = license; self.sourceURL = sourceURL; self.includedComponents = includedComponents; self.validatedAt = validatedAt; self.bundleDirectoryName = bundleDirectoryName
+    public var displayName: String {
+        switch self {
+        case .wineD3D: return "WineD3D"
+        case .d3dMetal: return "D3DMetal"
+        case .dxmt: return "DXMT"
+        case .dxvk: return "DXVK"
+        case .vkd3d: return "VKD3D"
+        }
     }
 }
 
-public struct RuntimeComponentManifest: Codable, Equatable, Sendable {
+public struct SikarugirBaselineConfiguration: Codable, Equatable, Sendable {
+    public static let wrapperName = "PortsideBaseline.app"
+    public static let creatorVersion = "1.0.1"
+    public static let templateVersion = "1.0.11"
+    public static let engineName = "WS12WineSikarugir10.0_6"
+    public static let engineVersion = "wine sikarugir 10.0 (revision 6)"
+    public static let engineArchiveSHA256 = "9da7ee0cbf386522f3a9906943726d9c3c125dbbd9ab120e3cde80e88d6091b2"
+    public static let engineVersionSHA256 = "9af9c71ffe2ca443c35a34b7f45fa1977f864eac984c0257ba7fd0341d084586"
+    public static let templateArchiveSHA256 = "9fa15479e7ff6abd99c1d07be285fb95f41fc6991586502427152b1f7d6ccb8a"
+    public static let winetricksSHA256 = "f35c29737ca08a583569e6a3752d52fbe23333c5acfad5f16c4177d25eaf3f4b"
+    public static let windowsSteamExecutable = "/Program Files (x86)/Steam/steam.exe"
+
+    public let renderer: GraphicsBackend
+    public let d3dMetal: Bool
+    public let dxmt: Bool
+    public let dxvk: Bool
+    public let msync: Bool
+    public let esync: Bool
+    public let wineDebug: String
+    public let programFlags: String
+
+    public init(renderer: GraphicsBackend = .wineD3D, d3dMetal: Bool = false, dxmt: Bool = false, dxvk: Bool = false, msync: Bool = true, esync: Bool = true, wineDebug: String = "-plugplay,+loaddll", programFlags: String = "") throws {
+        guard renderer == .wineD3D, !d3dMetal, !dxmt, !dxvk else {
+            throw PortsideError.invalidArtifact("the golden Steam baseline only permits WineD3D")
+        }
+        self.renderer = renderer
+        self.d3dMetal = d3dMetal
+        self.dxmt = dxmt
+        self.dxvk = dxvk
+        self.msync = msync
+        self.esync = esync
+        self.wineDebug = wineDebug
+        self.programFlags = programFlags
+    }
+
+    public static let golden: SikarugirBaselineConfiguration = try! SikarugirBaselineConfiguration()
+
+    public var environment: [String: String] {
+        [
+            "WINEDEBUG": wineDebug,
+            "WINEMSYNC": msync ? "1" : "0",
+            "WINEESYNC": esync ? "1" : "0",
+            "D3DMETAL": "0",
+            "DXMT": "0",
+            "DXVK": "0"
+        ]
+    }
+}
+
+public struct SikarugirArtifact: Codable, Equatable, Hashable, Sendable {
     public let identifier: String
     public let version: String
-    public let upstreamURL: URL
+    public let url: URL
     public let sha256: String
     public let expectedSize: Int64?
+    public let sourceRepository: URL
+    public let sourceCommit: String?
     public let license: String
-    public let sourceURL: URL
-    public let installScope: String
 
-    public init(identifier: String, version: String, upstreamURL: URL, sha256: String, expectedSize: Int64?, license: String, sourceURL: URL, installScope: String) {
-        self.identifier = identifier; self.version = version; self.upstreamURL = upstreamURL; self.sha256 = sha256; self.expectedSize = expectedSize; self.license = license; self.sourceURL = sourceURL; self.installScope = installScope
-    }
-}
-
-public enum FreeRuntimeCatalog {
-    public static let wine = RuntimeManifest(
-        identifier: "wine-staging-gcenx-osx64",
-        version: "11.6_1",
-        upstreamURL: URL(string: "https://github.com/Gcenx/macOS_Wine_builds/releases/download/11.6_1/wine-staging-11.6_1-osx64.tar.xz")!,
-        sha256: "9e73898fc83b0137638fe90d4868387f30b5993e86aeaef7422d8b1655238014",
-        expectedSize: 322_511_424,
-        architecture: "x86_64 via Rosetta 2",
-        minimumMacOS: "13.0",
-        relativeExecutablePath: "Contents/Resources/wine/bin/wine",
-        license: "Wine LGPL-2.1-or-later; upstream packaging license must be reviewed before commercial bundling",
-        sourceURL: URL(string: "https://gitlab.winehq.org/wine/wine")!,
-        includedComponents: ["Wine Staging", "Wine Mono 11.0.0", "Wine Gecko 2.47.4", "WineD3D"],
-        validatedAt: ISO8601DateFormatter().date(from: "2026-08-19T00:00:00Z") ?? Date(),
-        bundleDirectoryName: "Wine Staging.app"
-    )
-
-    public static let gstreamer = RuntimeComponentManifest(
-        identifier: "gstreamer-macos-universal-runtime",
-        version: "1.28.5",
-        upstreamURL: URL(string: "https://gstreamer.freedesktop.org/data/pkg/macos/1.28.5/gstreamer-1.0-1.28.5-universal.pkg")!,
-        sha256: "0a8fc7a1cf8d7bac833ca0ebe2fd196a199c2465e810cd5b1e4b4f720c258f43",
-        expectedSize: 146_000_000,
-        license: "LGPL-2.1-or-later and component-specific permissive licenses; see GStreamer notices",
-        sourceURL: URL(string: "https://gitlab.freedesktop.org/gstreamer/gstreamer")!,
-        installScope: "private Portside Runtime/Dependencies/GStreamer.framework"
-    )
-
-    public static let graphics = GraphicsBackend.wineD3D
-}
-
-public enum WineRuntimePolicy {
-    public static let debug = "-all"
-    public static let dllOverrides = "winedbg.exe=d;mscoree,mshtml="
-}
-
-public enum WineProcessEnvironment {
-    public static let ownerMarkerKey = "PORTSIDE_WINE_PREFIX_MARKER"
-    public static let experimentalEnvironmentKeys: Set<String> = [
-        "WINEMSYNC", "WINEESYNC", "WINEFSYNC", "WINEFSYNC_FUTEX",
-        "DXVK_ASYNC", "DXVK_HUD", "DXVK_ENABLE_NVAPI", "MTL_HUD_ENABLED",
-        "WINE_D3D_CONFIG", "WINE_FULLSCREEN_FSR", "STAGING_SHARED_MEMORY",
-        "STAGING_WRITECOPY"
-    ]
-    #if DEBUG
-    public static var defaultWineDebug: String {
-        ProcessInfo.processInfo.environment["PORTSIDE_DIAGNOSTIC_WINEDEBUG"] ?? WineRuntimePolicy.debug
-    }
-    #else
-    public static let defaultWineDebug = WineRuntimePolicy.debug
-    #endif
-
-    public static func make(
-        runtimeExecutable: URL,
-        prefix: URL,
-        baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
-        wineDebug: String = WineProcessEnvironment.defaultWineDebug
-    ) -> [String: String] {
-        var environment = baseEnvironment
-        for key in Self.experimentalEnvironmentKeys {
-            environment.removeValue(forKey: key)
-        }
-        environment["WINEPREFIX"] = prefix.path
-        environment["WINEARCH"] = "win64"
-        environment["WINEDLLOVERRIDES"] = WineRuntimePolicy.dllOverrides
-        environment["WINEDEBUG"] = wineDebug
-        environment[Self.ownerMarkerKey] = Self.prefixMarker(for: prefix)
-        environment["PATH"] = prepend(runtimeExecutable.deletingLastPathComponent().path, to: baseEnvironment["PATH"])
-        environment["DYLD_FRAMEWORK_PATH"] = prepend(
-            GStreamerManager.frameworkURL.deletingLastPathComponent().path,
-            to: baseEnvironment["DYLD_FRAMEWORK_PATH"]
-        )
-        environment["GST_PLUGIN_PATH"] = prepend(
-            GStreamerManager.frameworkURL.appendingPathComponent("Versions/1.0/lib/gstreamer-1.0").path,
-            to: baseEnvironment["GST_PLUGIN_PATH"]
-        )
-        return environment
-    }
-
-    public static func prefixMarker(for prefix: URL) -> String {
-        let digest = SHA256.hash(data: Data(prefix.standardizedFileURL.path.utf8))
-        return digest.prefix(12).map { String(format: "%02x", $0) }.joined()
-    }
-
-    private static func prepend(_ value: String, to existing: String?) -> String {
-        guard let existing, !existing.isEmpty else { return value }
-        let entries = existing.split(separator: ":").map(String.init)
-        guard !entries.contains(value) else { return existing }
-        return ([value] + entries).joined(separator: ":")
-    }
-}
-
-/// Development-only environment profiles used when comparing candidate runtimes.
-/// The Sikarugir profile is intentionally not selected by the product runtime and
-/// does not ship any Sikarugir binary or wrapper.
-public enum RuntimeValidationProfile {
-    case officialWine
-    case sikarugirMSyncReference
-
-    public func environment(from base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
-        var environment = base
-        switch self {
-        case .officialWine:
-            for key in WineProcessEnvironment.experimentalEnvironmentKeys {
-                environment.removeValue(forKey: key)
-            }
-        case .sikarugirMSyncReference:
-            environment["WINEMSYNC"] = "1"
-            environment["WINEESYNC"] = "0"
-        }
-        return environment
-    }
-}
-
-public enum PrefixSnapshotStrategy: String, Codable, Sendable {
-    case copyOnWrite
-    case targeted
-}
-
-public struct PrefixSnapshotManifest: Codable, Equatable, Sendable {
-    public let version: Int
-    public let strategy: PrefixSnapshotStrategy
-    public let capturedPaths: [String]
-    public let missingPaths: [String]
-
-    public init(version: Int = 1, strategy: PrefixSnapshotStrategy, capturedPaths: [String], missingPaths: [String]) {
+    public init(identifier: String, version: String, url: URL, sha256: String, expectedSize: Int64? = nil, sourceRepository: URL, sourceCommit: String? = nil, license: String) {
+        self.identifier = identifier
         self.version = version
-        self.strategy = strategy
-        self.capturedPaths = capturedPaths
-        self.missingPaths = missingPaths
+        self.url = url
+        self.sha256 = sha256
+        self.expectedSize = expectedSize
+        self.sourceRepository = sourceRepository
+        self.sourceCommit = sourceCommit
+        self.license = license
     }
 }
 
-/// A recoverable snapshot used before changing Wine runtime state in an existing
-/// prefix. APFS clonefile is preferred. The fallback contains only Wine-managed
-/// registry/link state and deliberately excludes steamapps, games and caches.
-public enum PrefixSnapshot {
-    public static let manifestName = ".portside-snapshot.json"
-    public static let targetedRollbackPaths = ["system.reg", "user.reg", "userdef.reg", "dosdevices"]
-    private static let cloneSafetyReserve: Int64 = 128 * 1024 * 1024
-
-    public static func create(
-        prefix: URL,
-        backupsRoot: URL = PortsidePaths.backups,
-        fileManager: FileManager = .default,
-        strategy requestedStrategy: PrefixSnapshotStrategy? = nil,
-        availableStorage: Int64? = nil
-    ) throws -> URL {
-        try fileManager.createDirectory(at: backupsRoot, withIntermediateDirectories: true)
-        let strategy = requestedStrategy ?? (canClone(prefix: prefix, fileManager: fileManager) ? .copyOnWrite : .targeted)
-        try validateAvailableSpace(prefix: prefix, strategy: strategy, availableStorage: availableStorage, fileManager: fileManager)
-        let snapshot = backupsRoot.appendingPathComponent("Steam-prefix-\(UUID().uuidString)", isDirectory: true)
-        try fileManager.createDirectory(at: snapshot, withIntermediateDirectories: true)
-
-        var manifestStrategy = strategy
-        var capturedPaths: [String] = []
-        var missingPaths: [String] = []
-        if strategy == .copyOnWrite, fileManager.fileExists(atPath: prefix.path) {
-            let clonedPrefix = snapshot.appendingPathComponent("prefix", isDirectory: true)
-            if !cloneItem(from: prefix, to: clonedPrefix) {
-                manifestStrategy = .targeted
-                try captureTargetedPaths(prefix: prefix, snapshot: snapshot, fileManager: fileManager, capturedPaths: &capturedPaths, missingPaths: &missingPaths)
-            }
-        } else if strategy == .copyOnWrite {
-            try fileManager.createDirectory(at: snapshot.appendingPathComponent("prefix", isDirectory: true), withIntermediateDirectories: true)
-        } else {
-            try captureTargetedPaths(prefix: prefix, snapshot: snapshot, fileManager: fileManager, capturedPaths: &capturedPaths, missingPaths: &missingPaths)
-        }
-
-        let manifest = PrefixSnapshotManifest(strategy: manifestStrategy, capturedPaths: capturedPaths, missingPaths: missingPaths)
-        let data = try JSONEncoder.portside.encode(manifest)
-        try data.write(to: snapshot.appendingPathComponent(manifestName), options: .atomic)
-        return snapshot
-    }
-
-    public static func restore(snapshot: URL, prefix: URL, fileManager: FileManager = .default) throws {
-        let manifestURL = snapshot.appendingPathComponent(manifestName)
-        guard let data = try? Data(contentsOf: manifestURL),
-              let manifest = try? JSONDecoder.portside.decode(PrefixSnapshotManifest.self, from: data) else {
-            // Compatibility with snapshots created by the previous release. New
-            // snapshots never use this path and never copy the whole prefix.
-            try restoreClonedPrefix(snapshot: snapshot, prefix: prefix, fileManager: fileManager)
-            return
-        }
-        switch manifest.strategy {
-        case .copyOnWrite:
-            try restoreClonedPrefix(snapshot: snapshot.appendingPathComponent("prefix", isDirectory: true), prefix: prefix, fileManager: fileManager)
-        case .targeted:
-            try restoreTargeted(snapshot: snapshot, prefix: prefix, manifest: manifest, fileManager: fileManager)
-        }
-    }
-
-    public static func retainOnly(_ snapshot: URL, backupsRoot: URL = PortsidePaths.backups, fileManager: FileManager = .default) throws {
-        try fileManager.createDirectory(at: backupsRoot, withIntermediateDirectories: true)
-        let keepName = snapshot.lastPathComponent
-        let entries = try fileManager.contentsOfDirectory(at: backupsRoot, includingPropertiesForKeys: [.isDirectoryKey])
-        for entry in entries where entry.lastPathComponent.hasPrefix("Steam-prefix-") && entry.lastPathComponent != keepName {
-            try fileManager.removeItem(at: entry)
-        }
-    }
-
-    public static func validateAvailableSpace(
-        prefix: URL,
-        strategy: PrefixSnapshotStrategy,
-        availableStorage: Int64? = nil,
-        fileManager: FileManager = .default
-    ) throws {
-        let available = availableStorage ?? ((try? prefix.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage) ?? 0)
-        let required = estimatedBytes(prefix: prefix, strategy: strategy, fileManager: fileManager) + cloneSafetyReserve
-        guard available >= required else {
-            throw RuntimePipelineError.snapshotInsufficientSpace(required: required, available: available)
-        }
-    }
-
-    private static func estimatedBytes(prefix: URL, strategy: PrefixSnapshotStrategy, fileManager: FileManager) -> Int64 {
-        guard strategy == .targeted else { return 64 * 1024 * 1024 }
-        return targetedRollbackPaths.reduce(Int64(0)) { total, relativePath in
-            total + byteSize(of: prefix.appendingPathComponent(relativePath), fileManager: fileManager)
-        }
-    }
-
-    private static func byteSize(of url: URL, fileManager: FileManager) -> Int64 {
-        guard fileManager.fileExists(atPath: url.path) else { return 0 }
-        if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
-            return (fileManager.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey])?.compactMap { $0 as? URL }.reduce(Int64(0)) { total, child in
-                total + Int64((try? child.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-            }) ?? 0
-        }
-        return Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-    }
-
-    private static func canClone(prefix: URL, fileManager: FileManager) -> Bool {
-        guard fileManager.fileExists(atPath: prefix.path) else { return true }
-        let probe = fileManager.temporaryDirectory.appendingPathComponent("portside-clone-probe-\(UUID().uuidString)")
-        defer { try? fileManager.removeItem(at: probe) }
-        return cloneItem(from: prefix, to: probe)
-    }
-
-    private static func cloneItem(from source: URL, to destination: URL) -> Bool {
-        let result = source.withUnsafeFileSystemRepresentation { sourcePath in
-            destination.withUnsafeFileSystemRepresentation { destinationPath in
-                guard let sourcePath, let destinationPath else { return Int32(-1) }
-                return clonefile(sourcePath, destinationPath, 0)
-            }
-        }
-        return result == 0
-    }
-
-    private static func captureTargetedPaths(prefix: URL, snapshot: URL, fileManager: FileManager, capturedPaths: inout [String], missingPaths: inout [String]) throws {
-        let targetRoot = snapshot.appendingPathComponent("targeted", isDirectory: true)
-        for relativePath in targetedRollbackPaths {
-            let source = prefix.appendingPathComponent(relativePath)
-            guard fileManager.fileExists(atPath: source.path) else {
-                missingPaths.append(relativePath)
-                continue
-            }
-            let destination = targetRoot.appendingPathComponent(relativePath)
-            try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try fileManager.copyItem(at: source, to: destination)
-            capturedPaths.append(relativePath)
-        }
-    }
-
-    private static func restoreClonedPrefix(snapshot: URL, prefix: URL, fileManager: FileManager) throws {
-        let parent = prefix.deletingLastPathComponent()
-        try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
-        let replacement = parent.appendingPathComponent(".restore-\(UUID().uuidString)", isDirectory: true)
-        guard cloneItem(from: snapshot, to: replacement) || (try? fileManager.copyItem(at: snapshot, to: replacement)) != nil else {
-            throw RuntimePipelineError.archiveExtractionFailed("The runtime snapshot could not be restored.")
-        }
-        if fileManager.fileExists(atPath: prefix.path) {
-            let failedPrefix = parent.appendingPathComponent("Steam-prefix-failed-\(UUID().uuidString)", isDirectory: true)
-            try fileManager.moveItem(at: prefix, to: failedPrefix)
-        }
-        try fileManager.moveItem(at: replacement, to: prefix)
-    }
-
-    private static func restoreTargeted(snapshot: URL, prefix: URL, manifest: PrefixSnapshotManifest, fileManager: FileManager) throws {
-        let targetRoot = snapshot.appendingPathComponent("targeted", isDirectory: true)
-        for relativePath in Set(manifest.capturedPaths + manifest.missingPaths) {
-            let destination = prefix.appendingPathComponent(relativePath)
-            if fileManager.fileExists(atPath: destination.path) { try fileManager.removeItem(at: destination) }
-            guard manifest.capturedPaths.contains(relativePath) else { continue }
-            let source = targetRoot.appendingPathComponent(relativePath)
-            try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try fileManager.copyItem(at: source, to: destination)
-        }
-    }
+public enum SikarugirOfficialCatalog {
+    public static let creator = SikarugirArtifact(
+        identifier: "Creator",
+        version: SikarugirBaselineConfiguration.creatorVersion,
+        url: URL(string: "https://github.com/Sikarugir-App/Creator/releases/download/v1.0.1/Creator-v1.0.1.tar.xz")!,
+        sha256: "187825e4e6bf96f294cf9ccb65e53049432b3ee2925480e8ad1cbca12a96e819",
+        expectedSize: 793_320,
+        sourceRepository: URL(string: "https://github.com/Sikarugir-App/Creator")!,
+        sourceCommit: "6086e3d",
+        license: "See the official Creator distribution and notices."
+    )
+    public static let template = SikarugirArtifact(
+        identifier: "Wrapper Template",
+        version: SikarugirBaselineConfiguration.templateVersion,
+        url: URL(string: "https://github.com/Sikarugir-App/Wrapper/releases/download/v1.0/Template-1.0.11.tar.xz")!,
+        sha256: SikarugirBaselineConfiguration.templateArchiveSHA256,
+        expectedSize: 84_533_420,
+        sourceRepository: URL(string: "https://github.com/Sikarugir-App/Wrapper")!,
+        license: "See the official Wrapper distribution and notices."
+    )
+    public static let engine = SikarugirArtifact(
+        identifier: SikarugirBaselineConfiguration.engineName,
+        version: "10.0 revision 6",
+        url: URL(string: "https://github.com/Sikarugir-App/Engines/releases/download/v1.0/WS12WineSikarugir10.0_6.tar.xz")!,
+        sha256: SikarugirBaselineConfiguration.engineArchiveSHA256,
+        expectedSize: 166_304_096,
+        sourceRepository: URL(string: "https://github.com/Sikarugir-App/Engines")!,
+        sourceCommit: "9581b3a7d1e473b832c0dda2ecdf6eac1791c0dc",
+        license: "Wine and included component licenses; see RUNTIME_LICENSES.md."
+    )
+    public static let winetricks = SikarugirArtifact(
+        identifier: "Sikarugir winetricks",
+        version: "2026-08-07",
+        url: URL(string: "https://raw.githubusercontent.com/Sikarugir-App/winetricks/5a59ea07513b24093bd90fad943ecf9543cf05bc/src/winetricks")!,
+        sha256: SikarugirBaselineConfiguration.winetricksSHA256,
+        sourceRepository: URL(string: "https://github.com/Sikarugir-App/winetricks")!,
+        sourceCommit: "5a59ea07513b24093bd90fad943ecf9543cf05bc",
+        license: "LGPL-2.1-or-later"
+    )
+    public static let engineListURL = URL(string: "https://raw.githubusercontent.com/Sikarugir-App/Engines/main/EngineList.txt")!
+    public static let all: [SikarugirArtifact] = [creator, template, engine, winetricks]
 }
 
 public struct InstalledRuntimeRecord: Codable, Equatable, Sendable {
-    public let manifest: RuntimeManifest
+    public let manifest: SikarugirArtifact
     public let installedPath: URL
     public let executablePath: URL
     public let graphicsBackend: GraphicsBackend
     public let installedAt: Date
     public let gstreamerInstalled: Bool
 
-    public init(manifest: RuntimeManifest, installedPath: URL, executablePath: URL, graphicsBackend: GraphicsBackend, installedAt: Date, gstreamerInstalled: Bool) {
-        self.manifest = manifest; self.installedPath = installedPath; self.executablePath = executablePath; self.graphicsBackend = graphicsBackend; self.installedAt = installedAt; self.gstreamerInstalled = gstreamerInstalled
+    public init(manifest: SikarugirArtifact, installedPath: URL, executablePath: URL, graphicsBackend: GraphicsBackend, installedAt: Date = Date(), gstreamerInstalled: Bool = false) {
+        self.manifest = manifest
+        self.installedPath = installedPath
+        self.executablePath = executablePath
+        self.graphicsBackend = graphicsBackend
+        self.installedAt = installedAt
+        self.gstreamerInstalled = gstreamerInstalled
     }
 }
 
-public struct PrefixRuntimeMetadata: Codable, Equatable, Sendable {
-    public let runtimeIdentifier: String
-    public let runtimeVersion: String
-    public let preparedAt: Date
-
-    public init(runtimeIdentifier: String, runtimeVersion: String, preparedAt: Date = Date()) {
-        self.runtimeIdentifier = runtimeIdentifier
-        self.runtimeVersion = runtimeVersion
-        self.preparedAt = preparedAt
-    }
-
-    public static func load(prefix: URL, fileManager: FileManager = .default) -> PrefixRuntimeMetadata? {
-        let url = prefix.appendingPathComponent(".portside-runtime.json")
-        guard fileManager.fileExists(atPath: url.path), let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder.portside.decode(PrefixRuntimeMetadata.self, from: data)
-    }
-
-    public func write(to prefix: URL, fileManager: FileManager = .default) throws {
-        try fileManager.createDirectory(at: prefix, withIntermediateDirectories: true)
-        let data = try JSONEncoder.portside.encode(self)
-        try data.write(to: prefix.appendingPathComponent(".portside-runtime.json"), options: .atomic)
-    }
-}
-
-public enum RuntimePipelineError: LocalizedError, Equatable {
-    case checksumMismatch(expected: String, actual: String)
-    case unexpectedArchiveEntry(String)
-    case archiveExtractionFailed(String)
-    case runtimeStructureInvalid
-    case rosettaUnavailable
-    case gstreamerInstallFailed(Int32, String)
-    case processFailed(String, Int32)
-    case processTimedOut(String)
-    case runtimeMigrationFailed(Int32)
-    case snapshotInsufficientSpace(required: Int64, available: Int64)
-
-    public var errorDescription: String? {
-        switch self {
-        case .checksumMismatch: return "A downloaded compatibility component failed integrity verification."
-        case .unexpectedArchiveEntry: return "A compatibility archive contained an unsafe path and was rejected."
-        case .archiveExtractionFailed: return "The compatibility component could not be extracted safely."
-        case .runtimeStructureInvalid: return "The downloaded runtime did not contain the expected executable."
-        case .rosettaUnavailable: return "Rosetta is required to run this x86-64 compatibility runtime."
-        case .gstreamerInstallFailed: return "The audio/video support component could not be installed."
-        case .processFailed(let process, _): return "The \(process) process did not complete successfully."
-        case .processTimedOut(let process): return "The \(process) process timed out."
-        case .runtimeMigrationFailed: return "The existing Wine prefix could not be migrated safely to the selected runtime."
-        case .snapshotInsufficientSpace: return "There is not enough free space to create a safe runtime recovery point."
+public enum SikarugirArtifactValidator {
+    public static func validate(_ artifact: SikarugirArtifact) throws {
+        guard artifact.url.scheme == "https",
+              artifact.url.host == "github.com" || artifact.url.host == "raw.githubusercontent.com" else {
+            throw PortsideError.invalidArtifact("artifact URL is not an official HTTPS source")
         }
-    }
-}
-
-public enum IntegrityVerifier {
-    public static func sha256(of url: URL) throws -> String {
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        var hasher = SHA256()
-        while true {
-            let chunk = try handle.read(upToCount: 1024 * 1024) ?? Data()
-            if chunk.isEmpty { break }
-            hasher.update(data: chunk)
+        guard artifact.sha256.count == 64, artifact.sha256.allSatisfy(\.isHexDigit) else {
+            throw PortsideError.invalidArtifact("missing checksum")
         }
-        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
-    }
-
-    public static func verify(url: URL, expectedSHA256: String, expectedSize: Int64? = nil) throws {
-        if let expectedSize, expectedSize > 0, let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size != expectedSize { throw RuntimePipelineError.checksumMismatch(expected: expectedSHA256, actual: "size:\(size)") }
-        let actual = try sha256(of: url)
-        guard actual.lowercased() == expectedSHA256.lowercased() else { throw RuntimePipelineError.checksumMismatch(expected: expectedSHA256, actual: actual) }
-    }
-}
-
-public enum AtomicInstaller {
-    public static func installDirectory(from staged: URL, to destination: URL, fileManager: FileManager = .default) throws {
-        let parent = destination.deletingLastPathComponent()
-        try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
-        let backup = parent.appendingPathComponent(".backup-\(UUID().uuidString)", isDirectory: true)
-        let hadDestination = fileManager.fileExists(atPath: destination.path)
-        if hadDestination { try fileManager.moveItem(at: destination, to: backup) }
-        do {
-            try fileManager.moveItem(at: staged, to: destination)
-            if hadDestination { try? fileManager.removeItem(at: backup) }
-        } catch {
-            if hadDestination, fileManager.fileExists(atPath: backup.path) {
-                try? fileManager.removeItem(at: destination)
-                try? fileManager.moveItem(at: backup, to: destination)
-            }
-            throw error
-        }
-    }
-}
-
-public struct ProcessResult: Sendable, Equatable {
-    public let status: Int32
-    public let output: String
-    public let duration: TimeInterval
-}
-
-public struct ProcessLaunchSpec: Sendable, Equatable {
-    public let executable: URL
-    public let arguments: [String]
-    public let environment: [String: String]
-    public let workingDirectory: URL?
-    public let timeout: TimeInterval?
-
-    public init(executable: URL, arguments: [String] = [], environment: [String: String] = [:], workingDirectory: URL? = nil, timeout: TimeInterval? = nil) {
-        self.executable = executable
-        self.arguments = arguments
-        self.environment = environment
-        self.workingDirectory = workingDirectory
-        self.timeout = timeout
-    }
-}
-
-public protocol ProcessRunning: Sendable {
-    func run(_ specification: ProcessLaunchSpec, logger: PortsideLogger) async throws -> ProcessResult
-}
-
-public enum DirectProcess {
-    public static func run(specification: ProcessLaunchSpec, logger: PortsideLogger = PortsideLogger(), logOutput: Bool = true) async throws -> ProcessResult {
-        let task = Process()
-        task.executableURL = specification.executable
-        task.arguments = specification.arguments
-        task.environment = specification.environment
-        task.currentDirectoryURL = specification.workingDirectory
-        let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent("portside-process-\(UUID().uuidString).log")
-        FileManager.default.createFile(atPath: outputURL.path, contents: nil)
-        let outputHandle = try FileHandle(forWritingTo: outputURL)
-        task.standardOutput = outputHandle; task.standardError = outputHandle
-        let started = Date()
-        do { try task.run() } catch { throw RuntimePipelineError.processFailed(specification.executable.lastPathComponent, -1) }
-        let finished = await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
-                await withCheckedContinuation { continuation in
-                    task.terminationHandler = { _ in continuation.resume() }
-                }
-                return true
-            }
-            if let timeout = specification.timeout {
-                group.addTask {
-                    try? await Task.sleep(for: .seconds(timeout))
-                    return false
-                }
-            }
-            let result = await group.next() ?? true
-            group.cancelAll()
-            return result
-        }
-        if !finished {
-            task.terminate()
-            try? await Task.sleep(for: .milliseconds(100))
-            try? outputHandle.close()
-            let data = (try? Data(contentsOf: outputURL)) ?? Data()
-            try? FileManager.default.removeItem(at: outputURL)
-            if logOutput {
-                logger.write("\(specification.executable.lastPathComponent) timed out, output=\(String(data: data, encoding: .utf8) ?? "")", level: .error)
-            }
-            throw RuntimePipelineError.processTimedOut(specification.executable.lastPathComponent)
-        }
-        try? outputHandle.close()
-        let data = (try? Data(contentsOf: outputURL)) ?? Data()
-        try? FileManager.default.removeItem(at: outputURL)
-        let output = String(data: data, encoding: .utf8) ?? ""
-        let duration = Date().timeIntervalSince(started)
-        if logOutput {
-            logger.write("\(specification.executable.lastPathComponent) exited with \(task.terminationStatus), duration \(String(format: "%.2f", duration))s, output=\(output)")
-        }
-        return ProcessResult(status: task.terminationStatus, output: output, duration: duration)
-    }
-
-    public static func run(executable: URL, arguments: [String], environment: [String: String] = [:], logger: PortsideLogger = PortsideLogger(), logOutput: Bool = true) async throws -> ProcessResult {
-        try await run(specification: ProcessLaunchSpec(executable: executable, arguments: arguments, environment: environment), logger: logger, logOutput: logOutput)
-    }
-}
-
-public struct SystemProcessRunner: ProcessRunning, Sendable {
-    public init() {}
-    public func run(_ specification: ProcessLaunchSpec, logger: PortsideLogger = PortsideLogger()) async throws -> ProcessResult {
-        try await DirectProcess.run(specification: specification, logger: logger)
+        if let size = artifact.expectedSize, size <= 0 { throw PortsideError.invalidArtifact("invalid expected size") }
     }
 }
 
 public enum SafeArchiveExtractor {
-    public static func extractTarXZ(_ archive: URL, to directory: URL, logger: PortsideLogger = PortsideLogger()) async throws {
-        let list = try await DirectProcess.run(executable: URL(fileURLWithPath: "/usr/bin/tar"), arguments: ["-tvf", archive.path], logger: logger)
-        guard list.status == 0 else { throw RuntimePipelineError.archiveExtractionFailed(list.output) }
-        for entry in list.output.split(separator: "\n", omittingEmptySubsequences: true).map(String.init) {
-            let metadataPath = entry.split(separator: " ", maxSplits: 8, omittingEmptySubsequences: true).last.map(String.init) ?? entry
-            if entry.hasPrefix("l") || entry.hasPrefix("h") {
-                let linkParts = metadataPath.components(separatedBy: " -> ")
-                guard linkParts.count == 2,
-                      isSafeRelativePath(linkParts[0]),
-                      isSafeLinkTarget(linkParts[0], target: linkParts[1]) else {
-                    throw RuntimePipelineError.unexpectedArchiveEntry(metadataPath)
-                }
-            } else {
-                guard isSafeRelativePath(metadataPath) else { throw RuntimePipelineError.unexpectedArchiveEntry(metadataPath) }
-            }
-        }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let result = try await DirectProcess.run(executable: URL(fileURLWithPath: "/usr/bin/tar"), arguments: ["-xJf", archive.path, "-C", directory.path], logger: logger)
-        guard result.status == 0 else { throw RuntimePipelineError.archiveExtractionFailed(result.output) }
-    }
-
     public static func isSafeRelativePath(_ path: String) -> Bool {
-        guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("\0") else { return false }
-        return path.split(separator: "/").allSatisfy { $0 != ".." && !$0.isEmpty }
+        guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("\\") else { return false }
+        return !path.split(separator: "/").contains("..")
     }
 
-    private static func isSafeLinkTarget(_ path: String, target: String) -> Bool {
-        guard !target.isEmpty, !target.hasPrefix("/"), !target.contains("\0") else { return false }
-        var components = path.split(separator: "/").dropLast().map(String.init)
-        for component in target.split(separator: "/").map(String.init) {
-            if component.isEmpty || component == "." { continue }
-            if component == ".." {
-                guard !components.isEmpty else { return false }
-                components.removeLast()
-            } else {
-                components.append(component)
-            }
-        }
-        return true
-    }
-}
-
-public struct RosettaStatus: Sendable, Equatable {
-    public let installed: Bool
-    public let validationOutput: String
-    public init(installed: Bool, validationOutput: String) { self.installed = installed; self.validationOutput = validationOutput }
-}
-
-public enum RosettaManager {
-    public static func status() async -> RosettaStatus {
-        let result = try? await DirectProcess.run(executable: URL(fileURLWithPath: "/usr/bin/arch"), arguments: ["-x86_64", "/usr/bin/true"])
-        return RosettaStatus(installed: result?.status == 0, validationOutput: result?.output ?? "")
-    }
-
-    public static func install() async throws -> ProcessResult {
-        try await DirectProcess.run(executable: URL(fileURLWithPath: "/usr/sbin/softwareupdate"), arguments: ["--install-rosetta"])
-    }
-}
-
-public enum GStreamerManager {
-    public static var privateFrameworkURL: URL {
-        PortsidePaths.runtime.appendingPathComponent("Dependencies/GStreamer.framework")
-    }
-
-    public static var frameworkURL: URL {
-        FileManager.default.fileExists(atPath: privateFrameworkURL.path) ? privateFrameworkURL : URL(fileURLWithPath: "/Library/Frameworks/GStreamer.framework")
-    }
-    public static var isInstalled: Bool { FileManager.default.fileExists(atPath: privateFrameworkURL.appendingPathComponent("Versions/1.0/lib/libgstreamer-1.0.0.dylib").path) }
-
-    public static func install(using downloader: SecureDownloader = SecureDownloader(), logger: PortsideLogger = PortsideLogger()) async throws {
-        let pkgURL = PortsidePaths.downloads.appendingPathComponent("gstreamer-\(FreeRuntimeCatalog.gstreamer.version).pkg")
-        if !FileManager.default.fileExists(atPath: pkgURL.path) {
-            _ = try await downloader.download(from: FreeRuntimeCatalog.gstreamer.upstreamURL, to: pkgURL)
-        }
-        do {
-            try IntegrityVerifier.verify(url: pkgURL, expectedSHA256: FreeRuntimeCatalog.gstreamer.sha256, expectedSize: FreeRuntimeCatalog.gstreamer.expectedSize)
-        } catch {
-            try? FileManager.default.removeItem(at: pkgURL)
-            throw error
-        }
-        let temporary = PortsidePaths.runtime.appendingPathComponent(".gstreamer-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: temporary) }
-        let result = try await DirectProcess.run(executable: URL(fileURLWithPath: "/usr/sbin/pkgutil"), arguments: ["--expand-full", pkgURL.path, temporary.path], logger: logger)
-        guard result.status == 0 else { throw RuntimePipelineError.gstreamerInstallFailed(result.status, result.output) }
-        let destination = privateFrameworkURL
-        try? FileManager.default.removeItem(at: destination)
-        let versionedRoot = destination.appendingPathComponent("Versions/1.0", isDirectory: true)
-        try FileManager.default.createDirectory(at: versionedRoot, withIntermediateDirectories: true)
-        let payloads = FileManager.default.enumerator(at: temporary, includingPropertiesForKeys: [.isDirectoryKey])?.compactMap { $0 as? URL }.filter { $0.lastPathComponent == "Payload" } ?? []
-        guard !payloads.isEmpty else { throw RuntimePipelineError.gstreamerInstallFailed(-1, "GStreamer package payloads not found") }
-        for payload in payloads { try mergeContents(from: payload, to: versionedRoot) }
-        let versions = destination.appendingPathComponent("Versions", isDirectory: true)
-        try? FileManager.default.createSymbolicLink(at: versions.appendingPathComponent("Current"), withDestinationURL: URL(fileURLWithPath: "1.0"))
-        guard isInstalled else { throw RuntimePipelineError.gstreamerInstallFailed(-1, "GStreamer framework failed validation") }
-    }
-
-    private static func mergeContents(from source: URL, to destination: URL) throws {
-        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-        let children = try FileManager.default.contentsOfDirectory(at: source, includingPropertiesForKeys: [.isDirectoryKey])
-        for child in children {
-            let target = destination.appendingPathComponent(child.lastPathComponent)
-            let isDirectory = (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-            if isDirectory { try mergeContents(from: child, to: target) }
-            else if !FileManager.default.fileExists(atPath: target.path) { try FileManager.default.copyItem(at: child, to: target) }
+    public static func validateListing(_ listing: String) throws {
+        for line in listing.split(whereSeparator: \.isNewline) where !line.isEmpty {
+            guard isSafeRelativePath(String(line)) else { throw PortsideError.invalidArtifact("archive path traversal") }
         }
     }
 }
 
-public enum WinePrefixManager {
-    public static func ensureWindows10(runtimeExecutable: URL, prefix: URL, logger: PortsideLogger = PortsideLogger()) async throws -> ProcessResult {
-        let current = try await runWineCfgVersion(runtimeExecutable: runtimeExecutable, prefix: prefix, logger: logger)
-        if current.status == 0, current.output.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "win10" {
-            return current
+public struct SikarugirWrapperConfiguration: Sendable, Equatable {
+    public let baseline: SikarugirBaselineConfiguration
+    public init(baseline: SikarugirBaselineConfiguration = .golden) { self.baseline = baseline }
+
+    public func plistValues() -> [String: Any] {
+        [
+            "CFBundleName": "PortsideBaseline",
+            "CFBundleDisplayName": "Portside",
+            "Program Name and Path": SikarugirBaselineConfiguration.windowsSteamExecutable,
+            "Program Flags": baseline.programFlags,
+            "D3DMETAL": 0,
+            "DXMT": 0,
+            "DXVK": 0,
+            "MOLTENVKCX": 1,
+            "WINEMSYNC": baseline.msync ? 1 : 0,
+            "WINEESYNC": baseline.esync ? 1 : 0,
+            "WINEDEBUG": baseline.wineDebug,
+            "NSBGOnly": "1",
+            "Winetricks silent": 1,
+            "Winetricks disable logging": 1
+        ]
+    }
+
+    public func apply(to wrapper: URL, fileManager: FileManager = .default) throws {
+        let info = wrapper.appendingPathComponent("Contents/Info.plist")
+        guard let data = try? Data(contentsOf: info),
+              var plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
+            throw PortsideError.invalidArtifact("wrapper Info.plist is missing")
         }
-        let environment = runtimeEnvironment(runtimeExecutable: runtimeExecutable, prefix: prefix)
-        let configured = try await DirectProcess.run(
-            executable: runtimeExecutable,
-            arguments: ["winecfg", "-v", "win10"],
-            environment: environment,
-            logger: logger
-        )
-        guard configured.status == 0 else { return configured }
-        let validated = try await runWineCfgVersion(runtimeExecutable: runtimeExecutable, prefix: prefix, logger: logger)
-        guard validated.status == 0,
-              validated.output.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "win10" else {
-            return ProcessResult(status: 1, output: "Wine prefix Windows version validation failed", duration: validated.duration)
+        // Portside does not implement voice chat or any other microphone
+        // capture path. The upstream template contains a generic declaration;
+        // remove it so macOS does not request an unnecessary permission.
+        plist.removeValue(forKey: "NSMicrophoneUsageDescription")
+        for (key, value) in plistValues() { plist[key] = value }
+        let output = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try output.write(to: info, options: .atomic)
+        let launcher = wrapper.appendingPathComponent("Contents/MacOS/Sikarugir")
+        guard fileManager.isExecutableFile(atPath: launcher.path) else {
+            throw PortsideError.invalidArtifact("official wrapper launcher is missing")
         }
-        return validated
-    }
-
-    public static func configureSilentCrashHandling(runtimeExecutable: URL, prefix: URL, logger: PortsideLogger = PortsideLogger()) async throws -> ProcessResult {
-        let environment = runtimeEnvironment(runtimeExecutable: runtimeExecutable, prefix: prefix)
-        return try await DirectProcess.run(
-            executable: runtimeExecutable,
-            arguments: ["reg.exe", "ADD", "HKCU\\Software\\Wine\\WineDbg", "/v", "ShowCrashDialog", "/t", "REG_DWORD", "/d", "0", "/f"],
-            environment: environment,
-            logger: logger
-        )
-    }
-
-    private static func runWineCfgVersion(runtimeExecutable: URL, prefix: URL, logger: PortsideLogger) async throws -> ProcessResult {
-        try await DirectProcess.run(
-            executable: runtimeExecutable,
-            arguments: ["winecfg", "-v"],
-            environment: runtimeEnvironment(runtimeExecutable: runtimeExecutable, prefix: prefix),
-            logger: logger
-        )
-    }
-
-    private static func runtimeEnvironment(runtimeExecutable: URL, prefix: URL) -> [String: String] {
-        WineProcessEnvironment.make(runtimeExecutable: runtimeExecutable, prefix: prefix)
     }
 }
 
-public enum PrefixRuntimeMigration {
-    public static func requiresMigration(prefix: URL, manifest: RuntimeManifest, fileManager: FileManager = .default) -> Bool {
-        guard fileManager.fileExists(atPath: prefix.appendingPathComponent("system.reg").path) else { return false }
-        guard let metadata = PrefixRuntimeMetadata.load(prefix: prefix, fileManager: fileManager) else { return true }
-        return metadata.runtimeIdentifier != manifest.identifier || metadata.runtimeVersion != manifest.version
-    }
+public struct WrapperValidation: Equatable, Sendable {
+    public let wrapper: URL
+    public let prefix: URL
+    public let launcher: URL
+    public let engineVersion: String
+    public let configuration: SikarugirBaselineConfiguration
+}
 
-    public static func updateIfNeeded(
-        prefix: URL,
-        runtimeExecutable: URL,
-        manifest: RuntimeManifest,
-        runner: ProcessRunning = SystemProcessRunner(),
-        logger: PortsideLogger = PortsideLogger(),
-        fileManager: FileManager = .default
-    ) async throws -> Bool {
-        let hasPrefix = fileManager.fileExists(atPath: prefix.appendingPathComponent("system.reg").path)
-        let needsMigration = requiresMigration(prefix: prefix, manifest: manifest, fileManager: fileManager)
-        guard !needsMigration || !hasPrefix else {
-            logger.write("Migrating the existing Wine prefix with wineboot -u")
-            let wineboot = runtimeExecutable.deletingLastPathComponent().appendingPathComponent("wineboot")
-            let result = try await runner.run(
-                ProcessLaunchSpec(
-                    executable: wineboot,
-                    arguments: ["-u"],
-                    environment: WineProcessEnvironment.make(runtimeExecutable: runtimeExecutable, prefix: prefix),
-                    workingDirectory: prefix
-                ),
-                logger: logger
-            )
-            guard result.status == 0 else { throw RuntimePipelineError.runtimeMigrationFailed(result.status) }
-            return true
+public enum SikarugirWrapperValidator {
+    public static func validate(wrapper: URL, configuration: SikarugirBaselineConfiguration = .golden, fileManager: FileManager = .default) throws -> WrapperValidation {
+        let launcher = wrapper.appendingPathComponent("Contents/MacOS/Sikarugir")
+        let prefix = wrapper.appendingPathComponent("Contents/SharedSupport/prefix", isDirectory: true)
+        let versionURL = wrapper.appendingPathComponent("Contents/SharedSupport/wine/version")
+        guard fileManager.isExecutableFile(atPath: launcher.path),
+              fileManager.fileExists(atPath: prefix.path),
+              let version = try? String(contentsOf: versionURL).trimmingCharacters(in: .whitespacesAndNewlines),
+              version.lowercased().contains("sikarugir 10.0") else {
+            throw PortsideError.invalidArtifact("wrapper does not contain the requested official engine")
         }
-        if !hasPrefix {
-            logger.write("Initializing the Wine prefix with wineboot -u")
-            let wineboot = runtimeExecutable.deletingLastPathComponent().appendingPathComponent("wineboot")
-            let result = try await runner.run(
-                ProcessLaunchSpec(
-                    executable: wineboot,
-                    arguments: ["-u"],
-                    environment: WineProcessEnvironment.make(runtimeExecutable: runtimeExecutable, prefix: prefix),
-                    workingDirectory: prefix
-                ),
-                logger: logger
-            )
-            guard result.status == 0 else { throw RuntimePipelineError.runtimeMigrationFailed(result.status) }
-            return true
+        guard let info = NSDictionary(contentsOf: wrapper.appendingPathComponent("Contents/Info.plist")) as? [String: Any],
+              (info["Program Name and Path"] as? String) == SikarugirBaselineConfiguration.windowsSteamExecutable else {
+            throw PortsideError.invalidArtifact("Steam executable is not configured in the wrapper")
         }
-        return false
+        guard (info["D3DMETAL"] as? NSNumber)?.intValue == 0,
+              (info["DXMT"] as? NSNumber)?.intValue == 0,
+              (info["DXVK"] as? NSNumber)?.intValue == 0 else {
+            throw PortsideError.invalidArtifact("non-baseline renderer enabled")
+        }
+        guard info["NSMicrophoneUsageDescription"] == nil else {
+            throw PortsideError.invalidArtifact("microphone permission is not allowed for Portside")
+        }
+        return WrapperValidation(wrapper: wrapper, prefix: prefix, launcher: launcher, engineVersion: version, configuration: configuration)
     }
 }
 
-public enum RuntimeStorage {
-    /// Removes only obsolete runtime directories after a successful prefix
-    /// migration. It never touches Prefix, Steam, steamapps or Downloads.
-    public static func removeObsolete11_15(
-        runtimeRoot: URL = PortsidePaths.runtime,
-        keepingVersion: String,
-        fileManager: FileManager = .default
-    ) throws -> [URL] {
-        try fileManager.createDirectory(at: runtimeRoot, withIntermediateDirectories: true)
-        let entries = try fileManager.contentsOfDirectory(at: runtimeRoot, includingPropertiesForKeys: [.isDirectoryKey])
-        var removed: [URL] = []
-        for entry in entries where entry.lastPathComponent.hasPrefix("11.15") && entry.lastPathComponent != keepingVersion {
-            guard (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
-            try fileManager.removeItem(at: entry)
-            removed.append(entry)
-        }
-        return removed
+public struct SikarugirWrapperInstallResult: Sendable {
+    public let validation: WrapperValidation
+    public let runtimeRecord: InstalledRuntimeRecord
+    public init(validation: WrapperValidation, runtimeRecord: InstalledRuntimeRecord) {
+        self.validation = validation
+        self.runtimeRecord = runtimeRecord
     }
 }
 
-public struct RuntimeInstallResult: Sendable, Equatable {
-    public let record: InstalledRuntimeRecord
-    public let prefixURL: URL
-}
-
-public final class FreeWineRuntimeProvider: @unchecked Sendable {
-    public typealias ProgressHandler = @Sendable (Double, EnvironmentPhase) -> Void
-    private let fileManager: FileManager
+/// Installs only the official template, engine and winetricks assets. Creator is
+/// recorded in the manifest for provenance but is never copied into Portside or
+/// shown to the end user.
+public final class SikarugirWrapperInstaller: @unchecked Sendable {
+    private let runner: ProcessRunning
     private let logger: PortsideLogger
-    private let downloader: SecureDownloader
+    private let fileManager: FileManager
 
-    public init(fileManager: FileManager = .default, logger: PortsideLogger = PortsideLogger(), downloader: SecureDownloader? = nil) {
-        self.fileManager = fileManager; self.logger = logger; self.downloader = downloader ?? SecureDownloader(fileManager: fileManager, logger: logger)
+    public init(runner: ProcessRunning = SystemProcessRunner(), logger: PortsideLogger = PortsideLogger(), fileManager: FileManager = .default) {
+        self.runner = runner
+        self.logger = logger
+        self.fileManager = fileManager
     }
 
-    public func install(progress: ProgressHandler? = nil) async throws -> RuntimeInstallResult {
-        let manifest = FreeRuntimeCatalog.wine
-        let rosetta = await RosettaManager.status()
-        guard rosetta.installed else { throw RuntimePipelineError.rosettaUnavailable }
-        try fileManager.createDirectory(at: PortsidePaths.root, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: PortsidePaths.downloads, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: PortsidePaths.runtime, withIntermediateDirectories: true)
-        if !GStreamerManager.isInstalled {
-            progress?(0.03, .graphicsInstalling)
-            logger.write("GStreamer runtime is not installed; requesting the official system installer")
-            try await GStreamerManager.install(using: downloader, logger: logger)
+    public func install(artifacts: [SikarugirArtifact: URL], configuration: SikarugirBaselineConfiguration = .golden) async throws -> SikarugirWrapperInstallResult {
+        guard let templateURL = artifacts[SikarugirOfficialCatalog.template],
+              let engineURL = artifacts[SikarugirOfficialCatalog.engine],
+              let winetricksURL = artifacts[SikarugirOfficialCatalog.winetricks] else {
+            throw PortsideError.invalidArtifact("baseline artifact set is incomplete")
         }
-        progress?(0.05, .runtimeDownloading)
-        let archive = PortsidePaths.downloads.appendingPathComponent("\(manifest.identifier)-\(manifest.version).tar.xz")
-        if !fileManager.fileExists(atPath: archive.path) {
-            _ = try await downloader.download(from: manifest.upstreamURL, to: archive) { value in
-                progress?(0.05 + (value * 0.28), .runtimeDownloading)
+        let staging = PortsidePaths.cache.appendingPathComponent("wrapper-staging-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fileManager.removeItem(at: staging) }
+        try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
+
+        let templateExtract = staging.appendingPathComponent("template", isDirectory: true)
+        let engineExtract = staging.appendingPathComponent("engine", isDirectory: true)
+        try await extract(archive: templateURL, to: templateExtract)
+        try await extract(archive: engineURL, to: engineExtract)
+
+        guard let templateBundle = findBundle(in: templateExtract) else { throw PortsideError.invalidArtifact("Template.app not found in official archive") }
+        let wrapperStage = staging.appendingPathComponent(SikarugirBaselineConfiguration.wrapperName, isDirectory: true)
+        try fileManager.copyItem(at: templateBundle, to: wrapperStage)
+        guard let wine = findEngineBundle(in: engineExtract) else { throw PortsideError.invalidArtifact("engine bundle not found") }
+        let wineDestination = wrapperStage.appendingPathComponent("Contents/SharedSupport/wine", isDirectory: true)
+        if fileManager.fileExists(atPath: wineDestination.path) { try fileManager.removeItem(at: wineDestination) }
+        try fileManager.copyItem(at: wine, to: wineDestination)
+        let winetricksDestination = wrapperStage.appendingPathComponent("Contents/SharedSupport/winetricks")
+        if fileManager.fileExists(atPath: winetricksDestination.path) { try fileManager.removeItem(at: winetricksDestination) }
+        try fileManager.copyItem(at: winetricksURL, to: winetricksDestination)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: winetricksDestination.path)
+        try SikarugirWrapperConfiguration(baseline: configuration).apply(to: wrapperStage, fileManager: fileManager)
+
+        let destination = PortsidePaths.baselineWrapper
+        if fileManager.fileExists(atPath: destination.path) {
+            let previous = PortsidePaths.runtime.appendingPathComponent("rollback-\(Int(Date().timeIntervalSince1970))", isDirectory: true)
+            try fileManager.createDirectory(at: previous.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try fileManager.moveItem(at: destination, to: previous)
+        }
+        try AtomicInstaller.installDirectory(from: wrapperStage, to: destination, fileManager: fileManager)
+        let wrapperPrefix = destination.appendingPathComponent("Contents/SharedSupport/prefix", isDirectory: true)
+        let managedPrefix = PortsidePaths.prefixes.appendingPathComponent("PortsideBaseline", isDirectory: true)
+        try fileManager.createDirectory(at: PortsidePaths.prefixes, withIntermediateDirectories: true)
+        if fileManager.fileExists(atPath: managedPrefix.path) {
+            if fileManager.fileExists(atPath: wrapperPrefix.path) { try fileManager.removeItem(at: wrapperPrefix) }
+            try fileManager.createSymbolicLink(at: wrapperPrefix, withDestinationURL: managedPrefix)
+        } else {
+            if !fileManager.fileExists(atPath: wrapperPrefix.appendingPathComponent("system.reg").path) {
+                let prefixResult = try await runner.run(
+                    ProcessLaunchSpec(
+                        executable: destination.appendingPathComponent("Contents/MacOS/Sikarugir"),
+                        arguments: ["WSS-wineprefixcreate"],
+                        currentDirectory: destination,
+                        timeout: 1_800
+                    ),
+                    logger: logger
+                )
+                guard prefixResult.status == 0 else {
+                    throw PortsideError.processFailed("official Sikarugir prefix creation", prefixResult.status)
+                }
             }
-        }
-        progress?(0.35, .runtimeVerifying)
-        do {
-            try IntegrityVerifier.verify(url: archive, expectedSHA256: manifest.sha256, expectedSize: manifest.expectedSize)
-        } catch {
-            try? fileManager.removeItem(at: archive)
-            throw error
-        }
-        progress?(0.45, .runtimeInstalling)
-        let installedRoot = PortsidePaths.runtime.appendingPathComponent(manifest.version, isDirectory: true)
-        let executable = installedRoot.appendingPathComponent(manifest.relativeExecutablePath)
-        if !fileManager.isExecutableFile(atPath: executable.path) {
-            let temporary = PortsidePaths.runtime.appendingPathComponent(".install-\(UUID().uuidString)", isDirectory: true)
-            try fileManager.createDirectory(at: temporary, withIntermediateDirectories: true)
             do {
-                try await SafeArchiveExtractor.extractTarXZ(archive, to: temporary, logger: logger)
-                let extracted = temporary.appendingPathComponent(manifest.bundleDirectoryName)
-                guard fileManager.isExecutableFile(atPath: extracted.appendingPathComponent("Contents/Resources/wine/bin/wine").path) else { throw RuntimePipelineError.runtimeStructureInvalid }
-                try AtomicInstaller.installDirectory(from: extracted, to: installedRoot, fileManager: fileManager)
-                try? fileManager.removeItem(at: temporary)
+                try fileManager.moveItem(at: wrapperPrefix, to: managedPrefix)
             } catch {
-                try? fileManager.removeItem(at: temporary)
-                throw error
+                // Some APFS layouts reject moving a newly-created Wine prefix
+                // containing device symlinks. The prefix is still new and
+                // contains no Steam data, so copy it atomically then remove
+                // only that staging prefix.
+                try fileManager.copyItem(at: wrapperPrefix, to: managedPrefix)
+                try fileManager.removeItem(at: wrapperPrefix)
             }
+            try fileManager.createSymbolicLink(at: wrapperPrefix, withDestinationURL: managedPrefix)
         }
-        let finalExecutable = installedRoot.appendingPathComponent(manifest.relativeExecutablePath)
-        guard fileManager.isExecutableFile(atPath: finalExecutable.path) else { throw RuntimePipelineError.runtimeStructureInvalid }
-        progress?(0.8, .prefixCreating)
-        let prefix = PortsidePaths.steamPrefix
-        try fileManager.createDirectory(at: prefix, withIntermediateDirectories: true)
-        let hadExistingPrefix = fileManager.fileExists(atPath: prefix.appendingPathComponent("system.reg").path)
-        let snapshot = hadExistingPrefix ? try PrefixSnapshot.create(prefix: prefix, fileManager: fileManager) : nil
-        do {
-            _ = try await PrefixRuntimeMigration.updateIfNeeded(
-                prefix: prefix,
-                runtimeExecutable: finalExecutable,
-                manifest: manifest,
-                logger: logger,
-                fileManager: fileManager
-            )
-            let registryResult = try await WinePrefixManager.configureSilentCrashHandling(runtimeExecutable: finalExecutable, prefix: prefix, logger: logger)
-            guard registryResult.status == 0 else { throw RuntimePipelineError.processFailed("Wine crash-dialog configuration", registryResult.status) }
-            try PrefixRuntimeMetadata(runtimeIdentifier: manifest.identifier, runtimeVersion: manifest.version).write(to: prefix, fileManager: fileManager)
-        } catch {
-            logger.write("Runtime prefix transition failed; restoring the retained snapshot", level: .error)
-            if let snapshot {
-                try? PrefixSnapshot.restore(snapshot: snapshot, prefix: prefix, fileManager: fileManager)
+        let validation = try SikarugirWrapperValidator.validate(wrapper: destination, configuration: configuration, fileManager: fileManager)
+        let canonicalValidation = WrapperValidation(wrapper: validation.wrapper, prefix: managedPrefix, launcher: validation.launcher, engineVersion: validation.engineVersion, configuration: validation.configuration)
+        let metadata: [String: String] = ["wrapper": destination.path, "prefix": managedPrefix.path, "engine": SikarugirBaselineConfiguration.engineName]
+        let metadataData = try JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys])
+        try metadataData.write(to: PortsidePaths.prefixes.appendingPathComponent("PortsideBaseline.json"), options: .atomic)
+        let record = InstalledRuntimeRecord(manifest: SikarugirOfficialCatalog.engine, installedPath: destination, executablePath: validation.launcher, graphicsBackend: configuration.renderer)
+        logger.write("Installed official Sikarugir wrapper \(SikarugirBaselineConfiguration.templateVersion) with \(SikarugirBaselineConfiguration.engineName)")
+        return SikarugirWrapperInstallResult(validation: canonicalValidation, runtimeRecord: record)
+    }
+
+    private func extract(archive: URL, to destination: URL) async throws {
+        let listing = try await runner.run(ProcessLaunchSpec(executable: URL(fileURLWithPath: "/usr/bin/tar"), arguments: ["-tf", archive.path], timeout: 120), logger: logger)
+        guard listing.status == 0 else { throw PortsideError.processFailed("archive listing", listing.status) }
+        try SafeArchiveExtractor.validateListing(listing.output)
+        try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
+        let result = try await runner.run(ProcessLaunchSpec(executable: URL(fileURLWithPath: "/usr/bin/tar"), arguments: ["-xJf", archive.path, "-C", destination.path], timeout: 900), logger: logger)
+        guard result.status == 0 else { throw PortsideError.processFailed("archive extraction", result.status) }
+    }
+
+    private func findBundle(in root: URL) -> URL? {
+        let urls = (fileManager.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey])?.compactMap { $0 as? URL } ?? [])
+        return urls.first { $0.pathExtension == "app" }
+    }
+
+    private func findDirectory(named name: String, in root: URL) -> URL? {
+        let urls = (fileManager.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey])?.compactMap { $0 as? URL } ?? [])
+        return urls.first { $0.lastPathComponent == name && (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+    }
+
+    private func findEngineBundle(in root: URL) -> URL? {
+        if let bundle = findDirectory(named: "wswine.bundle", in: root) { return bundle }
+        let urls = (fileManager.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey])?.compactMap { $0 as? URL } ?? [])
+        return urls.first {
+            fileManager.fileExists(atPath: $0.appendingPathComponent("bin/wine").path)
+                && fileManager.fileExists(atPath: $0.appendingPathComponent("share/wine").path)
+        }
+    }
+}
+
+public final class SikarugirUpdateService: @unchecked Sendable {
+    private let downloader: SecureDownloader
+    private let logger: PortsideLogger
+    private let fileManager: FileManager
+
+    public init(downloader: SecureDownloader = SecureDownloader(), logger: PortsideLogger = PortsideLogger(), fileManager: FileManager = .default) {
+        self.downloader = downloader
+        self.logger = logger
+        self.fileManager = fileManager
+    }
+
+    public static func latestStableEngine(in engineList: String) -> String? {
+        let names = engineList.split(whereSeparator: \.isNewline).map(String.init)
+            .filter { $0.hasPrefix("WS12WineSikarugir") && !$0.contains("battle.net") }
+        return names.sorted(by: NaturalVersion.compare).last
+    }
+
+    public static func shouldCheck(lastCheck: Date?, now: Date = Date()) -> Bool {
+        guard let lastCheck else { return true }
+        return now.timeIntervalSince(lastCheck) >= 86_400
+    }
+
+    public func fetchOfficialEngineList() async throws -> String {
+        let destination = PortsidePaths.manifests.appendingPathComponent("EngineList.txt")
+        let result = try await downloader.download(from: SikarugirOfficialCatalog.engineListURL, to: destination)
+        logger.write("Fetched official EngineList.txt (\(result.bytes) bytes)")
+        return try String(contentsOf: destination)
+    }
+
+    public func validatePinnedCatalog() throws {
+        for artifact in SikarugirOfficialCatalog.all { try SikarugirArtifactValidator.validate(artifact) }
+    }
+
+    public func downloadBaselineArtifacts(progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> [SikarugirArtifact: URL] {
+        try validatePinnedCatalog()
+        try fileManager.createDirectory(at: PortsidePaths.downloads, withIntermediateDirectories: true)
+        var result: [SikarugirArtifact: URL] = [:]
+        let baselineArtifacts = [SikarugirOfficialCatalog.template, SikarugirOfficialCatalog.engine, SikarugirOfficialCatalog.winetricks]
+        for (index, artifact) in baselineArtifacts.enumerated() {
+            let file = PortsidePaths.downloads.appendingPathComponent(artifact.url.lastPathComponent)
+            if fileManager.fileExists(atPath: file.path) {
+                try IntegrityVerifier.verify(url: file, expectedSHA256: artifact.sha256, expectedSize: artifact.expectedSize)
+            } else {
+                _ = try await downloader.download(from: artifact.url, to: file, expectedSHA256: artifact.sha256, expectedSize: artifact.expectedSize)
             }
-            throw error
+            result[artifact] = file
+            progress(Double(index + 1) / Double(baselineArtifacts.count))
         }
-        if let snapshot {
-            try? PrefixSnapshot.retainOnly(snapshot, fileManager: fileManager)
-        }
-        // Cleanup is intentionally after migration metadata is committed and
-        // never removes the prefix or any Steam content.
-        _ = try? RuntimeStorage.removeObsolete11_15(runtimeRoot: PortsidePaths.runtime, keepingVersion: manifest.version, fileManager: fileManager)
-        progress?(1, .steamInstalling)
-        let record = InstalledRuntimeRecord(manifest: manifest, installedPath: installedRoot, executablePath: finalExecutable, graphicsBackend: FreeRuntimeCatalog.graphics, installedAt: Date(), gstreamerInstalled: GStreamerManager.isInstalled)
-        let recordURL = installedRoot.appendingPathComponent("portside-runtime.json")
-        try JSONEncoder.portside.encode(record).write(to: recordURL, options: .atomic)
-        return RuntimeInstallResult(record: record, prefixURL: prefix)
+        return result
     }
 }
 
-public struct RuntimeSynchronizationState: Sendable, Equatable {
-    public let bootstrapped: Bool
-    public let running: Bool
-    public let applicable: Bool
-
-    public init(bootstrapped: Bool, running: Bool, applicable: Bool = false) {
-        self.bootstrapped = bootstrapped
-        self.running = running
-        self.applicable = applicable
-    }
-}
-
-public enum RuntimeSynchronizationLog {
-    public static func state(from output: String) -> RuntimeSynchronizationState {
-        let lines = output.lowercased().split(whereSeparator: \.isNewline).map(String.init)
-        let hasSynchronizationMarkers = lines.contains { $0.contains("msync:") || $0.contains("esync:") }
-        return RuntimeSynchronizationState(
-            bootstrapped: lines.contains { $0.contains("msync: bootstrapped") },
-            running: lines.contains { $0.contains("msync: up and running") },
-            applicable: hasSynchronizationMarkers
-        )
-    }
-}
-
-public final class SteamLaunchLock: @unchecked Sendable {
-    private let fileDescriptor: Int32
-    public let url: URL
-
-    private init(fileDescriptor: Int32, url: URL) {
-        self.fileDescriptor = fileDescriptor
-        self.url = url
-    }
-
-    public static func acquire(url: URL = PortsidePaths.root.appendingPathComponent("steam-launch.lock")) -> SteamLaunchLock? {
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let descriptor = open(url.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
-        guard descriptor >= 0 else { return nil }
-        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
-            close(descriptor)
-            return nil
+private enum NaturalVersion {
+    static func compare(_ lhs: String, _ rhs: String) -> Bool {
+        func parts(_ value: String) -> [Int] {
+            value.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
         }
-        let owner = Data("pid=\(getpid())\n".utf8)
-        ftruncate(descriptor, 0)
-        owner.withUnsafeBytes { buffer in
-            _ = Darwin.write(descriptor, buffer.baseAddress, owner.count)
-        }
-        return SteamLaunchLock(fileDescriptor: descriptor, url: url)
-    }
-
-    deinit {
-        _ = flock(fileDescriptor, LOCK_UN)
-        close(fileDescriptor)
+        let left = parts(lhs)
+        let right = parts(rhs)
+        return (left + [0, 0, 0]).lexicographicallyPrecedes(right + [0, 0, 0])
     }
 }
 
-public enum SteamProcessStatus: String, Codable, Sendable {
-    case notRunning
-    case starting
-    case processHandoffComplete
-    case exitedUnexpectedly
-    case webhelperCrashLoop
+public enum SikarugirSteamFlow {
+    private static var processEnvironment: [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        environment["HOME"] = NSHomeDirectory()
+        environment["XDG_CACHE_HOME"] = PortsidePaths.cache.appendingPathComponent("XDG", isDirectory: true).path
+        return environment
+    }
+
+    public static func installationSpec(wrapper: URL) throws -> ProcessLaunchSpec {
+        let launcher = wrapper.appendingPathComponent("Contents/MacOS/Sikarugir")
+        guard FileManager.default.isExecutableFile(atPath: launcher.path) else { throw PortsideError.runtimeUnavailable }
+        return ProcessLaunchSpec(executable: launcher, arguments: ["WSS-winetricks", "steam"], environment: processEnvironment, currentDirectory: wrapper, timeout: 3_600)
+    }
+
+    public static func cleanLaunchSpec(wrapper: URL) throws -> ProcessLaunchSpec {
+        let launcher = wrapper.appendingPathComponent("Contents/MacOS/Sikarugir")
+        guard FileManager.default.isExecutableFile(atPath: launcher.path) else { throw PortsideError.runtimeUnavailable }
+        return ProcessLaunchSpec(executable: launcher, environment: processEnvironment, currentDirectory: wrapper, timeout: 60)
+    }
+
+    public static func steamExecutable(prefix: URL) -> URL {
+        prefix.appendingPathComponent("drive_c/Program Files (x86)/Steam/steam.exe")
+    }
+}
+
+public enum SteamReadinessState: String, Codable, Sendable {
+    case processStarted, webHelperStarted, windowDetected, visibleButUnverified, uiReady, processRunningWithoutWindow, failed
 }
 
 public enum SteamInterfaceVerification: String, Codable, Sendable {
-    case notVerified = "not_verified"
-    case visuallyValidated = "visually_validated"
+    case notVerified, manualConfirmed
 }
 
-public enum SteamProcessOwnership {
-    public static let prefixEvidenceKey = "PORTSIDE_PREFIX_EVIDENCE"
+public struct SteamReadinessReport: Codable, Equatable, Sendable {
+    public let state: SteamReadinessState
+    public let processStarted: Bool
+    public let webHelperStarted: Bool
+    public let windowDetected: Bool
+    public let visibleButUnverified: Bool
+    public let uiReady: Bool
+    public let processRunningWithoutWindow: Bool
+    public let interfaceVerification: SteamInterfaceVerification
+    public let webHelperProcessCount: Int
+    public let duration: TimeInterval
 
-    public static func isManaged(snapshotLine: String, prefix: URL, processName: String) -> Bool {
-        let line = snapshotLine.lowercased()
-        let name = processName.lowercased()
-        let marker = "\(WineProcessEnvironment.ownerMarkerKey.lowercased())=\(WineProcessEnvironment.prefixMarker(for: prefix).lowercased())"
-        let evidence = "\(prefixEvidenceKey.lowercased())=\(WineProcessEnvironment.prefixMarker(for: prefix).lowercased())"
-        guard line.contains(name) else { return false }
-        // A legacy Portside launch may predate the owner marker. The exact
-        // managed steam.exe path is still safe evidence for stopping it; helper
-        // processes require the marker so an unrelated helper is never adopted.
-        if name == "steam.exe" && (line.contains(prefix.standardizedFileURL.path.lowercased()) || line.contains(evidence)) { return true }
-        guard line.contains(marker) || line.contains(evidence) else { return false }
-        if name == "steamwebhelper" { return true }
-        return line.contains(prefix.standardizedFileURL.path.lowercased())
+    public init(state: SteamReadinessState, processStarted: Bool, webHelperStarted: Bool, windowDetected: Bool, visibleButUnverified: Bool = false, uiReady: Bool = false, processRunningWithoutWindow: Bool = false, interfaceVerification: SteamInterfaceVerification = .notVerified, webHelperProcessCount: Int = 0, duration: TimeInterval = 0) {
+        self.state = state
+        self.processStarted = processStarted
+        self.webHelperStarted = webHelperStarted
+        self.windowDetected = windowDetected
+        self.visibleButUnverified = visibleButUnverified
+        self.uiReady = uiReady
+        self.processRunningWithoutWindow = processRunningWithoutWindow
+        self.interfaceVerification = interfaceVerification
+        self.webHelperProcessCount = webHelperProcessCount
+        self.duration = duration
     }
 }
 
-private struct SteamProcessSnapshot {
-    let processIdentifier: pid_t
-    let commandLine: String
+public struct ManagedProcessSnapshot: Equatable, Sendable {
+    public let pid: Int32
+    public let parentPID: Int32
+    public let command: String
+    public init(pid: Int32, parentPID: Int32, command: String) {
+        self.pid = pid
+        self.parentPID = parentPID
+        self.command = command
+    }
 }
 
-public struct SteamReadinessReport: Sendable, Equatable {
-    public let status: SteamProcessStatus
-    public let processStarted: Bool
-    public let processHandoffComplete: Bool
-    public let webhelperStarted: Bool
-    public let webhelperExitCode: Int32?
-    public let webhelperRestartCount: Int
-    public let webhelperProcessCount: Int
-    public let webhelperStableDuration: TimeInterval
-    public let windowDetected: Bool
-    public let interfaceVerification: SteamInterfaceVerification
-    public let runtimeSynchronization: RuntimeSynchronizationState
+public enum SteamProcessOwnership {
+    public static func isManaged(snapshotLine: String, wrapper: URL) -> Bool { snapshotLine.contains(wrapper.path) }
+    public static func isManaged(snapshotLine: String, prefix: URL) -> Bool { snapshotLine.contains(prefix.path) }
 
-    public init(
-        status: SteamProcessStatus,
-        processStarted: Bool = false,
-        processHandoffComplete: Bool = false,
-        webhelperStarted: Bool,
-        webhelperExitCode: Int32? = nil,
-        webhelperRestartCount: Int = 0,
-        webhelperProcessCount: Int = 0,
-        webhelperStableDuration: TimeInterval = 0,
-        windowDetected: Bool = false,
-        interfaceVerification: SteamInterfaceVerification = .notVerified,
-        runtimeSynchronization: RuntimeSynchronizationState = RuntimeSynchronizationState(bootstrapped: false, running: false)
-    ) {
-        self.status = status
-        self.processStarted = processStarted
-        self.processHandoffComplete = processHandoffComplete
-        self.webhelperStarted = webhelperStarted
-        self.webhelperExitCode = webhelperExitCode
-        self.webhelperRestartCount = webhelperRestartCount
-        self.webhelperProcessCount = webhelperProcessCount
-        self.webhelperStableDuration = webhelperStableDuration
-        self.windowDetected = windowDetected
-        self.interfaceVerification = interfaceVerification
-        self.runtimeSynchronization = runtimeSynchronization
+    public static func isLikelySteamRuntime(_ command: String) -> Bool {
+        command.localizedCaseInsensitiveContains("steam.exe")
+            || command.localizedCaseInsensitiveContains("steamwebhelper")
+            || command.localizedCaseInsensitiveContains("wineserver")
+            || command.localizedCaseInsensitiveContains("/wine")
+    }
+
+    public static func managedPIDs(in snapshots: [ManagedProcessSnapshot], wrapper: URL, prefix: URL) -> Set<Int32> {
+        var managed = Set(snapshots.filter {
+            isManaged(snapshotLine: $0.command, wrapper: wrapper)
+                || isManaged(snapshotLine: $0.command, prefix: prefix)
+        }.map(\.pid))
+        var changed = true
+        while changed {
+            changed = false
+            for snapshot in snapshots where managed.contains(snapshot.parentPID) && managed.insert(snapshot.pid).inserted {
+                changed = true
+            }
+        }
+        return managed
+    }
+
+    /// Some Wine processes are reparented to launchd and expose only a Windows
+    /// command line. Their open files still identify the wrapper and prefix.
+    /// Inspect only Steam/Wine candidates so native macOS Steam is never
+    /// selected by a broad process-name match.
+    public static func fileBackedManagedPIDs(in snapshots: [ManagedProcessSnapshot], wrapper: URL, prefix: URL) -> Set<Int32> {
+        let candidates = snapshots.filter { isLikelySteamRuntime($0.command) }
+        guard !candidates.isEmpty else { return [] }
+        return Set(candidates.compactMap { snapshot in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+            process.arguments = ["-a", "-p", String(snapshot.pid), "-Fn"]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = Pipe()
+            do { try process.run() } catch { return nil }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard let output = String(data: data, encoding: .utf8),
+                  output.contains(wrapper.path) || output.contains(prefix.path) else { return nil }
+            return snapshot.pid
+        })
     }
 }
 
 public final class SteamReadinessMonitor: @unchecked Sendable {
     private let logger: PortsideLogger
-    private let processLogURL: URL
+    public init(logger: PortsideLogger = PortsideLogger(logFileName: "steam-readiness.log")) { self.logger = logger }
 
-    public init(logger: PortsideLogger = PortsideLogger(), processLogURL: URL = PortsidePaths.logs.appendingPathComponent("steam-process.log")) {
-        self.logger = logger
-        self.processLogURL = processLogURL
+    public func captureProcessSnapshot() -> [ManagedProcessSnapshot] {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-axo", "pid=,ppid=,command="]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do {
+            try process.run()
+        } catch {
+            return []
+        }
+        // Read while ps is alive so long Steam command lines cannot fill the
+        // pipe and deadlock the launch coordinator.
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let text = String(data: data, encoding: .utf8) ?? ""
+        return text.split(whereSeparator: \.isNewline).compactMap { line in
+            let pieces = line.split(maxSplits: 2, whereSeparator: { $0 == " " || $0 == "\t" })
+            guard pieces.count >= 3, let pid = Int32(pieces[0]), let ppid = Int32(pieces[1]) else { return nil }
+            return ManagedProcessSnapshot(pid: pid, parentPID: ppid, command: String(pieces[2]))
+        }
     }
 
-    public func waitForSteam(executable: URL, prefix: URL = PortsidePaths.steamPrefix, timeout: TimeInterval = 180) async -> SteamProcessStatus {
-        await waitForSteamHandoff(prefix: prefix, timeout: timeout).status
-    }
-
-    /// A permission-free handoff check. It verifies the managed process tree and
-    /// activates the owning process, but it never captures windows or display pixels.
-    public func waitForSteamHandoff(prefix: URL = PortsidePaths.steamPrefix, baselineWebhelperLines: Set<String> = [], timeout: TimeInterval = 180, requiredStableDuration: TimeInterval = 4) async -> SteamReadinessReport {
-        let deadline = Date().addingTimeInterval(timeout)
-        var steamWasRunning = false
-        var helperWasRunning = false
+    public func waitForSteamWindow(wrapper: URL, baselinePIDs: Set<Int32> = [], timeout: TimeInterval = 90, poll: TimeInterval = 0.5) async -> SteamReadinessReport {
+        let started = Date()
+        var processStarted = false
         var helperStarted = false
-        var helperRestarts = 0
-        var helperStableSince: Date?
-        var helperProcessCount = 0
-        var lastReport = RuntimeSynchronizationState(bootstrapped: false, running: false, applicable: false)
-
-        while Date() < deadline {
-            let snapshot = await processSnapshot(prefix: prefix)
-            let steam = managedProcessSnapshot(snapshot, prefix: prefix, processNames: ["steam.exe"])
-            let helpers = managedProcessLines(snapshot, prefix: prefix, processName: "steamwebhelper", baseline: baselineWebhelperLines)
-            let helperRunning = !helpers.isEmpty
-            helperProcessCount = max(helperProcessCount, helpers.count)
-            steamWasRunning = steamWasRunning || steam
-
-            if helperRunning {
-                if !helperWasRunning {
-                    helperStarted = true
-                    helperStableSince = Date()
-                    logger.write("steamwebhelper_started")
-                }
-            } else if helperWasRunning {
-                helperRestarts += 1
-                helperStableSince = nil
-                logger.write("steamwebhelper_exited", level: .warning)
+        var count = 0
+        var windowDetected = false
+        while Date().timeIntervalSince(started) < timeout {
+            let allSnapshots = captureProcessSnapshot()
+            var managedPIDs = SteamProcessOwnership.managedPIDs(in: allSnapshots, wrapper: wrapper, prefix: wrapper.appendingPathComponent("Contents/SharedSupport/prefix"))
+            // Sikarugir may reparent Wine children to launchd/PID 1 and Wine
+            // command lines may expose only the Windows path. A clean launch
+            // snapshot is the safe fallback association for newly-created
+            // Steam/Wine descendants; existing native Steam is already in the
+            // baseline set.
+            let newRuntimePIDs = allSnapshots.filter { !baselinePIDs.contains($0.pid) && SteamProcessOwnership.isLikelySteamRuntime($0.command) }.map(\.pid)
+            managedPIDs.formUnion(newRuntimePIDs)
+            let snapshot = allSnapshots.filter { managedPIDs.contains($0.pid) }
+            processStarted = snapshot.contains { $0.command.localizedCaseInsensitiveContains("steam.exe") }
+            count = snapshot.filter { $0.command.localizedCaseInsensitiveContains("steamwebhelper") }.count
+            helperStarted = count > 0
+            windowDetected = windowDetected || Self.detectManagedWindow(managedPIDs: managedPIDs)
+            if windowDetected && helperStarted {
+                let report = SteamReadinessReport(state: .visibleButUnverified, processStarted: processStarted, webHelperStarted: helperStarted, windowDetected: true, visibleButUnverified: true, webHelperProcessCount: count, duration: Date().timeIntervalSince(started))
+                logger.write("Steam window detected; visual interaction remains a manual acceptance check")
+                return report
             }
-            helperWasRunning = helperRunning
-
-            if steam, helperRunning {
-                if let process = steamProcessSnapshot(processSnapshot: snapshot, prefix: prefix) {
-                    NSRunningApplication(processIdentifier: process.processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-                }
-                let stableDuration = stableDuration(since: helperStableSince)
-                if helperStarted && stableDuration >= requiredStableDuration {
-                    logger.write("steam_process_handoff_complete")
-                    return SteamReadinessReport(
-                        status: .processHandoffComplete,
-                        processStarted: steamWasRunning,
-                        processHandoffComplete: true,
-                        webhelperStarted: true,
-                        webhelperRestartCount: helperRestarts,
-                        webhelperProcessCount: helperProcessCount,
-                        webhelperStableDuration: stableDuration,
-                        windowDetected: false,
-                        interfaceVerification: .notVerified,
-                        runtimeSynchronization: lastReport
-                    )
-                }
-            }
-
-            if helperRestarts >= 3 {
-                logger.write("steamwebhelper_crash_loop", level: .error)
-                return SteamReadinessReport(
-                    status: .webhelperCrashLoop,
-                    processStarted: steamWasRunning,
-                    webhelperStarted: helperStarted,
-                    webhelperRestartCount: helperRestarts,
-                    webhelperProcessCount: helperProcessCount,
-                    webhelperStableDuration: stableDuration(since: helperStableSince),
-                    runtimeSynchronization: lastReport
-                )
-            }
-
-            lastReport = RuntimeSynchronizationLog.state(from: (try? String(contentsOf: processLogURL, encoding: .utf8)) ?? "")
-            try? await Task.sleep(for: .milliseconds(750))
+            try? await Task.sleep(for: .milliseconds(Int(poll * 1_000)))
         }
-
-        logger.write("steam_handoff_timeout", level: .error)
-        return SteamReadinessReport(
-            status: steamWasRunning ? (helperStarted ? .exitedUnexpectedly : .starting) : .notRunning,
-            processStarted: steamWasRunning,
-            webhelperStarted: helperStarted,
-            webhelperRestartCount: helperRestarts,
-            webhelperProcessCount: helperProcessCount,
-            webhelperStableDuration: stableDuration(since: helperStableSince),
-            runtimeSynchronization: lastReport
-        )
+        let state: SteamReadinessState = windowDetected ? .visibleButUnverified : processStarted ? .processRunningWithoutWindow : .failed
+        return SteamReadinessReport(state: state, processStarted: processStarted, webHelperStarted: helperStarted, windowDetected: windowDetected, visibleButUnverified: windowDetected, processRunningWithoutWindow: processStarted && !windowDetected, webHelperProcessCount: count, duration: Date().timeIntervalSince(started))
     }
 
-    public func isSteamProcessRunning(prefix: URL = PortsidePaths.steamPrefix) async -> Bool {
-        managedProcessSnapshot(await processSnapshot(prefix: prefix), prefix: prefix, processNames: ["steam.exe", "steamwebhelper"])
-    }
-
-    public func captureWebhelperLines() async -> Set<String> {
-        Set((await processSnapshot(prefix: PortsidePaths.steamPrefix)).split(whereSeparator: \.isNewline).map(String.init).filter { $0.contains("steamwebhelper") })
-    }
-
-    public func stopSteam(runtimeExecutable: URL, prefix: URL) async {
-        let wineserver = runtimeExecutable.deletingLastPathComponent().appendingPathComponent("wineserver")
-        if FileManager.default.isExecutableFile(atPath: wineserver.path) {
-            let killServer = Process()
-            killServer.executableURL = wineserver
-            killServer.arguments = ["-k"]
-            killServer.environment = WineProcessEnvironment.make(runtimeExecutable: runtimeExecutable, prefix: prefix)
-            killServer.standardOutput = FileHandle.nullDevice
-            killServer.standardError = FileHandle.nullDevice
-            try? killServer.run()
-            try? await Task.sleep(for: .milliseconds(750))
-            if killServer.isRunning { killServer.terminate() }
+    public static func detectManagedWindow(managedPIDs: Set<Int32>) -> Bool {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return false }
+        for item in list {
+            guard let ownerPID = item[kCGWindowOwnerPID as String] as? NSNumber, managedPIDs.contains(ownerPID.int32Value) else { continue }
+            guard let bounds = item[kCGWindowBounds as String] as? [String: Any],
+                  let width = bounds["Width"] as? NSNumber,
+                  let height = bounds["Height"] as? NSNumber,
+                  width.doubleValue > 120, height.doubleValue > 80 else { continue }
+            return true
         }
-        await forceTerminateManagedSteamIfNeeded(prefix: prefix)
-        logger.write("Managed Steam process tree termination requested")
-    }
-
-    public func waitForSteamToStop(prefix: URL = PortsidePaths.steamPrefix, timeout: TimeInterval = 20) async -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if !(await isSteamProcessRunning(prefix: prefix)) {
-                logger.write("Steam process tree stopped")
-                return true
-            }
-            try? await Task.sleep(for: .milliseconds(500))
-        }
-        logger.write("Steam process tree did not stop before the timeout", level: .error)
         return false
     }
+}
 
-    public func requestSteamProcessActivation(prefix: URL = PortsidePaths.steamPrefix) async -> Bool {
-        let snapshot = await processSnapshot(prefix: prefix)
-        guard managedProcessSnapshot(snapshot, prefix: prefix, processNames: ["steam.exe", "steamwebhelper"]),
-              let steamProcess = steamProcessSnapshot(processSnapshot: snapshot, prefix: prefix) else { return false }
-        NSRunningApplication(processIdentifier: steamProcess.processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-        return true
+public struct GameCompatibilityEntry: Codable, Equatable, Sendable {
+    public let appID: String
+    public let executable: String
+    public let architecture: String
+    public let graphicsAPI: String
+    public let preferredRenderer: GraphicsBackend
+    public let engine: String
+    public let environment: [String: String]
+    public let dllOverrides: [String: String]
+    public let arguments: [String]
+    public let result: String?
+
+    public init(appID: String, executable: String, architecture: String, graphicsAPI: String, preferredRenderer: GraphicsBackend, engine: String = SikarugirBaselineConfiguration.engineName, environment: [String: String] = [:], dllOverrides: [String: String] = [:], arguments: [String] = [], result: String? = nil) {
+        self.appID = appID
+        self.executable = executable
+        self.architecture = architecture
+        self.graphicsAPI = graphicsAPI
+        self.preferredRenderer = preferredRenderer
+        self.engine = engine
+        self.environment = environment
+        self.dllOverrides = dllOverrides
+        self.arguments = arguments
+        self.result = result
+    }
+}
+
+public struct GameCompatibilityManifest: Codable, Equatable, Sendable {
+    public var schemaVersion: Int
+    public var entries: [GameCompatibilityEntry]
+    public init(schemaVersion: Int = 1, entries: [GameCompatibilityEntry] = []) {
+        self.schemaVersion = schemaVersion
+        self.entries = entries
+    }
+}
+
+public struct GameExecutableInfo: Equatable, Sendable {
+    public let architecture: String
+    public let graphicsAPI: String
+    public init(architecture: String, graphicsAPI: String) {
+        self.architecture = architecture
+        self.graphicsAPI = graphicsAPI
+    }
+}
+
+public enum GameCompatibilityService {
+    public static func detectExecutable(at url: URL) throws -> GameExecutableInfo {
+        let data = try Data(contentsOf: url)
+        guard data.count >= 0x40, data[0] == 0x4d, data[1] == 0x5a else { throw PortsideError.invalidArtifact("not a Windows PE executable") }
+        let offset = Int(data[0x3c]) | Int(data[0x3d]) << 8 | Int(data[0x3e]) << 16 | Int(data[0x3f]) << 24
+        guard offset >= 0, offset + 6 < data.count, data[offset] == 0x50, data[offset + 1] == 0x45 else { throw PortsideError.invalidArtifact("invalid PE header") }
+        let machine = UInt16(data[offset + 4]) | UInt16(data[offset + 5]) << 8
+        let architecture = machine == 0x8664 ? "x86_64" : machine == 0x14c ? "x86" : "unknown"
+        let text = String(decoding: data, as: UTF8.self).lowercased()
+        let graphicsAPI = text.contains("d3d12") ? "DirectX 12" : text.contains("d3d11") ? "DirectX 11" : text.contains("d3d10") ? "DirectX 10" : text.contains("d3d9") ? "DirectX 9" : text.contains("opengl32") ? "OpenGL" : text.contains("vulkan-1") ? "Vulkan" : "unknown"
+        return GameExecutableInfo(architecture: architecture, graphicsAPI: graphicsAPI)
     }
 
-    private func processSnapshot(prefix: URL = PortsidePaths.steamPrefix) async -> String {
-        let result = try? await DirectProcess.run(
-            executable: URL(fileURLWithPath: "/bin/ps"),
-            arguments: ["-axo", "pid=,ppid=,comm=,args="],
-            logger: logger,
-            logOutput: false
-        )
-        let rawLines = result?.output.lowercased().split(whereSeparator: \.isNewline).map(String.init) ?? []
-        let marker = WineProcessEnvironment.prefixMarker(for: prefix)
-        var enrichedLines: [String] = []
-        for line in rawLines {
-            guard line.contains("steam.exe") || line.contains("steamwebhelper") else {
-                enrichedLines.append(line)
-                continue
-            }
-            let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
-            guard let pid = fields.first.flatMap({ pid_t(String($0)) }) else {
-                enrichedLines.append(line)
-                continue
-            }
-            let files = try? await DirectProcess.run(
-                executable: URL(fileURLWithPath: "/usr/sbin/lsof"),
-                arguments: ["-p", String(pid), "-Fn"],
-                logger: logger,
-                logOutput: false
-            )
-            if files?.status == 0,
-               files?.output.lowercased().contains(prefix.standardizedFileURL.path.lowercased()) == true {
-                enrichedLines.append("\(line) \(SteamProcessOwnership.prefixEvidenceKey.lowercased())=\(marker)")
-            } else {
-                enrichedLines.append(line)
-            }
-        }
-        return enrichedLines.joined(separator: "\n")
-    }
-
-    private func managedProcessLines(_ snapshot: String, prefix: URL, processName: String, baseline _: Set<String>) -> [String] {
-        return snapshot.split(whereSeparator: \.isNewline).map(String.init).filter { line in
-            SteamProcessOwnership.isManaged(snapshotLine: line, prefix: prefix, processName: processName)
-        }
-    }
-
-    private func managedProcessSnapshot(_ snapshot: String, prefix: URL, processNames: [String]) -> Bool {
-        let lines = snapshot.split(whereSeparator: \.isNewline).map(String.init)
-        return lines.contains { line in
-            processNames.contains { SteamProcessOwnership.isManaged(snapshotLine: line, prefix: prefix, processName: $0) }
-        }
-    }
-
-    private func steamProcessSnapshot(processSnapshot: String, prefix: URL) -> SteamProcessSnapshot? {
-        for line in processSnapshot.split(whereSeparator: \.isNewline) {
-            let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
-            guard fields.count == 3, let processIdentifier = pid_t(fields[0]) else { continue }
-            let commandLine = String(fields[1...].joined(separator: " "))
-            guard !commandLine.contains("steamwebhelper"),
-                  SteamProcessOwnership.isManaged(snapshotLine: String(line), prefix: prefix, processName: "steam.exe") else { continue }
-            return SteamProcessSnapshot(processIdentifier: processIdentifier, commandLine: commandLine)
-        }
-        return nil
-    }
-
-    private func forceTerminateManagedSteamIfNeeded(prefix: URL) async {
-        let snapshot = await processSnapshot(prefix: prefix)
-        let pids = snapshot.split(whereSeparator: \.isNewline).compactMap { line -> pid_t? in
-            let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
-            guard let pid = fields.first.flatMap({ pid_t(String($0)) }), fields.count >= 3 else { return nil }
-            guard SteamProcessOwnership.isManaged(snapshotLine: String(line), prefix: prefix, processName: "steam.exe")
-                    || SteamProcessOwnership.isManaged(snapshotLine: String(line), prefix: prefix, processName: "steamwebhelper") else { return nil }
-            return pid
-        }
-        for pid in pids {
-            logger.write("Terminating managed Steam process pid=\(pid)", level: .warning)
-            _ = kill(pid, SIGTERM)
-        }
-        try? await Task.sleep(for: .milliseconds(750))
-        let remaining = await processSnapshot(prefix: prefix)
-        for pid in remaining.split(whereSeparator: \.isNewline).compactMap({ line -> pid_t? in
-            let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
-            guard let pid = fields.first.flatMap({ pid_t(String($0)) }), fields.count >= 3 else { return nil }
-            guard SteamProcessOwnership.isManaged(snapshotLine: String(line), prefix: prefix, processName: "steam.exe")
-                    || SteamProcessOwnership.isManaged(snapshotLine: String(line), prefix: prefix, processName: "steamwebhelper") else { return nil }
-            return pid
-        }) {
-            logger.write("Force terminating managed Steam process pid=\(pid)", level: .error)
-            _ = kill(pid, SIGKILL)
+    public static func renderer(for info: GameExecutableInfo) -> [GraphicsBackend] {
+        switch (info.graphicsAPI, info.architecture) {
+        case ("DirectX 8", _), ("DirectX 9", _): return [.dxvk, .wineD3D]
+        case ("DirectX 10", "x86_64"), ("DirectX 11", "x86_64"): return [.d3dMetal, .dxmt, .dxvk, .wineD3D]
+        case ("DirectX 10", _), ("DirectX 11", _): return [.dxvk, .wineD3D]
+        case ("DirectX 12", _): return [.d3dMetal, .vkd3d]
+        case ("OpenGL", _), ("Vulkan", _): return [.wineD3D]
+        default: return [.wineD3D]
         }
     }
 
-    private func stableDuration(since date: Date?) -> TimeInterval {
-        guard let date else { return 0 }
-        return max(0, Date().timeIntervalSince(date))
+    public static func mutuallyExclusive(_ renderer: GraphicsBackend, environment: [String: String]) -> Bool {
+        let enabled = [
+            environment["D3DMETAL"] == "1" ? GraphicsBackend.d3dMetal : nil,
+            environment["DXMT"] == "1" ? .dxmt : nil,
+            environment["DXVK"] == "1" ? .dxvk : nil
+        ].compactMap { $0 }
+        return enabled.count <= 1 && !enabled.contains(where: { $0 != renderer })
+    }
+}
+
+public enum RosettaManager {
+    public static func status() async -> RosettaStatus {
+        #if arch(arm64)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/arch")
+        process.arguments = ["-x86_64", "/usr/bin/true"]
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return RosettaStatus(installed: process.terminationStatus == 0, output: "probe")
+        } catch {
+            return RosettaStatus(installed: false, output: "probe failed")
+        }
+        #else
+        return RosettaStatus(installed: true, output: "native x86_64")
+        #endif
+    }
+
+    public static func install(using runner: ProcessRunning = SystemProcessRunner(), logger: PortsideLogger = PortsideLogger()) async throws -> ProcessResult {
+        try await runner.run(ProcessLaunchSpec(executable: URL(fileURLWithPath: "/usr/sbin/softwareupdate"), arguments: ["--install-rosetta", "--agree-to-license"], timeout: 1_800), logger: logger)
+    }
+}
+
+public struct RosettaStatus: Equatable, Sendable {
+    public let installed: Bool
+    public let output: String
+    public init(installed: Bool, output: String = "") {
+        self.installed = installed
+        self.output = output
     }
 }
