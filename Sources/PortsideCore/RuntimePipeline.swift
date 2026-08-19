@@ -98,6 +98,22 @@ public enum WineRuntimePolicy {
     public static let dllOverrides = "winedbg.exe=d;mscoree,mshtml="
 }
 
+public enum WineRuntimeBranding {
+    /// Gives the private runtime a useful macOS identity when Wine creates helper
+    /// windows. This only changes Portside's managed copy of the runtime.
+    public static func apply(to installedRoot: URL, fileManager: FileManager = .default) throws {
+        let plistURL = installedRoot.appendingPathComponent("Contents/Info.plist")
+        guard fileManager.fileExists(atPath: plistURL.path) else { return }
+        let data = try Data(contentsOf: plistURL)
+        guard var plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else { return }
+        plist["CFBundleName"] = "Steam"
+        plist["CFBundleDisplayName"] = "Steam"
+        plist["CFBundleIdentifier"] = "com.portside.managed-steam"
+        let output = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try output.write(to: plistURL, options: .atomic)
+    }
+}
+
 public struct InstalledRuntimeRecord: Codable, Equatable, Sendable {
     public let manifest: RuntimeManifest
     public let installedPath: URL
@@ -428,6 +444,7 @@ public final class FreeWineRuntimeProvider: @unchecked Sendable {
         }
         let finalExecutable = installedRoot.appendingPathComponent(manifest.relativeExecutablePath)
         guard fileManager.isExecutableFile(atPath: finalExecutable.path) else { throw RuntimePipelineError.runtimeStructureInvalid }
+        try WineRuntimeBranding.apply(to: installedRoot, fileManager: fileManager)
         progress?(0.8, .prefixCreating)
         let prefix = PortsidePaths.steamPrefix
         try fileManager.createDirectory(at: prefix, withIntermediateDirectories: true)
@@ -482,7 +499,7 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         return false
     }
 
-    public func waitForSteam(executable: URL, timeout: TimeInterval = 180) async -> SteamProcessStatus {
+    public func waitForSteam(executable: URL, prefix: URL = PortsidePaths.steamPrefix, timeout: TimeInterval = 180) async -> SteamProcessStatus {
         let deadline = Date().addingTimeInterval(timeout)
         var sawSteam = false
         while Date() < deadline {
@@ -497,11 +514,26 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
                 logger.write("Steam window detected and activated")
                 return .windowVisible
             }
+            if sawSteam && steamUIReady(prefix: prefix) {
+                logger.write("Steam UI readiness evidence detected")
+                return .ready
+            }
             if sawSteam { try? await Task.sleep(for: .milliseconds(750)); continue }
             if snapshot.contains(executable.lastPathComponent) { try? await Task.sleep(for: .milliseconds(750)); continue }
             try? await Task.sleep(for: .seconds(1))
         }
         return sawSteam ? .steamProcessRunning : .exitedUnexpectedly
+    }
+
+    private func steamUIReady(prefix: URL) -> Bool {
+        let logs = [
+            prefix.appendingPathComponent("drive_c/Program Files (x86)/Steam/logs/steamui_html.txt"),
+            prefix.appendingPathComponent("drive_c/Program Files/Steam/logs/steamui_html.txt")
+        ]
+        return logs.contains { logURL in
+            guard let content = try? String(contentsOf: logURL, encoding: .utf8) else { return false }
+            return content.localizedCaseInsensitiveContains("BrowserReady")
+        }
     }
 
     private func processSnapshot() async -> String {

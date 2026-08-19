@@ -179,6 +179,27 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
     }
 
+    func testManagedRuntimeBrandingUsesSteamIdentity() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-branding-\(UUID().uuidString)", isDirectory: true)
+        let contents = root.appendingPathComponent("Contents", isDirectory: true)
+        let plistURL = contents.appendingPathComponent("Info.plist")
+        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        let initial: [String: Any] = [
+            "CFBundleName": "Wine Staging",
+            "CFBundleIdentifier": "org.winehq.wine-staging.wine"
+        ]
+        try PropertyListSerialization.data(fromPropertyList: initial, format: .xml, options: 0).write(to: plistURL)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try WineRuntimeBranding.apply(to: root)
+
+        let data = try Data(contentsOf: plistURL)
+        let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any])
+        XCTAssertEqual(plist["CFBundleName"] as? String, "Steam")
+        XCTAssertEqual(plist["CFBundleDisplayName"] as? String, "Steam")
+        XCTAssertEqual(plist["CFBundleIdentifier"] as? String, "com.portside.managed-steam")
+    }
+
     func testEnvironmentPhaseIsCodable() throws {
         var state = EnvironmentState(); state.phase = .prefixCreating
         let data = try JSONEncoder.portside.encode(state)
@@ -206,7 +227,7 @@ final class PortsideCoreTests: XCTestCase {
         try supervisor.launchSteam(state: state)
         let timeout = TimeInterval(ProcessInfo.processInfo.environment["PORTSIDE_REAL_TIMEOUT"] ?? "180") ?? 180
         let status = await monitor.waitForSteam(executable: steam, timeout: timeout)
-        XCTAssertEqual(status, .windowVisible, "Steam did not present a real window; status=\(status.rawValue)")
+        XCTAssertTrue(status == .windowVisible || status == .ready, "Steam did not become ready; status=\(status.rawValue)")
     }
 
     func testSteamHasNoAppIDCompatibilityAllowlist() {
