@@ -4,6 +4,7 @@ import Sentry
 
 /// The only Portside type allowed to depend on the Sentry SDK.
 public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Sendable {
+    private static let dsn = "https://5aa6a3d7a22bd8bb4b718bc2d6cfaac7@o4511935178080256.ingest.us.sentry.io/4511935182405632"
     private static let release = "com.portside.app@0.1.0+1"
     private static let allowedTagKeys: Set<String> = [
         "stage", "error_code", "portside_version", "portside_build", "macos_version", "architecture",
@@ -24,15 +25,17 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
 
     public init() {
         SentrySDK.start { options in
+            // Keep diagnostics enabled in Debug as well. The app is often validated
+            // directly from Xcode, and a nil DSN there made setup failures disappear.
+            options.dsn = Self.dsn
             #if DEBUG
-            options.dsn = nil
             options.environment = "debug"
+            options.debug = true
             #else
-            options.dsn = "https://5aa6a3d7a22bd8bb4b718bc2d6cfaac7@o4511935178080256.ingest.us.sentry.io/4511935182405632"
             options.environment = "production"
+            options.debug = false
             #endif
             options.releaseName = Self.release
-            options.debug = false
             options.sendDefaultPii = false
             options.tracesSampleRate = 0
             options.enableAppHangTracking = true
@@ -76,6 +79,9 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
             }
         }
         SentrySDK.capture(error: safeError)
+        // Setup failures leave the app open, but flushing here also protects the
+        // report when the user immediately quits or retries from the failure view.
+        SentrySDK.flush(timeout: 2)
     }
 
 }
