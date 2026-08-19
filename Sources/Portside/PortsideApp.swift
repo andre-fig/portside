@@ -528,10 +528,10 @@ struct ReadyView: View {
 }
 
 private enum InstallerLayout {
-    static let width: CGFloat = 520
-    static let contentHeight: CGFloat = 306
-    static let failureWidth: CGFloat = 620
-    static let failureContentHeight: CGFloat = 386
+    static let width: CGFloat = 460
+    static let contentHeight: CGFloat = 276
+    static let failureWidth: CGFloat = 560
+    static let failureContentHeight: CGFloat = 350
 }
 
 struct InstallerHeader: View {
@@ -550,7 +550,7 @@ struct InstallerHeader: View {
             Spacer()
         }
         .padding(.horizontal, 22)
-        .frame(height: 54)
+        .frame(height: 48)
     }
 }
 
@@ -567,7 +567,7 @@ struct WindowConfigurator: NSViewRepresentable {
     final class ConfiguringView: NSView {
         private var lastSize: CGSize?
         private var lastVisibility: Bool?
-        private var desiredSize = CGSize(width: 520, height: 300)
+        private var desiredSize = CGSize(width: InstallerLayout.width, height: InstallerLayout.contentHeight)
         private var desiredVisibility = true
 
         override func viewDidMoveToWindow() {
@@ -581,6 +581,8 @@ struct WindowConfigurator: NSViewRepresentable {
             guard let window else { return }
             guard lastSize != contentSize || lastVisibility != isVisible else { return }
             let wasVisible = window.isVisible
+            let sizeChanged = lastSize != contentSize
+            let visibilityChanged = lastVisibility != isVisible
             lastSize = contentSize
             lastVisibility = isVisible
             window.title = "Portside"
@@ -598,11 +600,32 @@ struct WindowConfigurator: NSViewRepresentable {
             window.minSize = frameSize
             window.maxSize = frameSize
             if isVisible {
+                if sizeChanged || visibilityChanged || !wasVisible {
+                    center(window)
+                }
                 if wasVisible { window.orderFront(nil) }
                 else { window.makeKeyAndOrderFront(nil) }
+                if sizeChanged || visibilityChanged || !wasVisible {
+                    DispatchQueue.main.async { [weak self, weak window] in
+                        guard let self, let window, window.isVisible else { return }
+                        self.center(window)
+                    }
+                }
             } else {
                 window.orderOut(nil)
             }
+        }
+
+        private func center(_ window: NSWindow) {
+            let screen = window.screen ?? NSScreen.main ?? NSScreen.screens.first
+            guard let screen else { return }
+            let visibleFrame = screen.visibleFrame
+            let frame = window.frame
+            let origin = NSPoint(
+                x: visibleFrame.midX - (frame.width / 2),
+                y: visibleFrame.midY - (frame.height / 2)
+            )
+            window.setFrameOrigin(origin)
         }
     }
 }
@@ -616,7 +639,7 @@ struct SetupProgressView: View {
             if model.progressIsIndeterminate { ProgressView().frame(width: 360) }
             else { ProgressView(value: model.progress).frame(width: 360) }
             Spacer()
-        }.padding(28).frame(width: InstallerLayout.width, height: 251)
+        }.padding(22).frame(width: InstallerLayout.width, height: 227)
     }
 }
 
@@ -631,7 +654,7 @@ struct FailureView: View {
                 Button("Try Again") { model.repair() }.buttonStyle(.borderedProminent)
             }.disabled(model.isWorking)
             Spacer()
-        }.padding(28).frame(width: InstallerLayout.failureWidth, height: 331)
+        }.padding(22).frame(width: InstallerLayout.failureWidth, height: 301)
     }
 }
 
