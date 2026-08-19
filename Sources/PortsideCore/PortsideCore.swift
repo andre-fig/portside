@@ -300,8 +300,8 @@ public enum SteamInstaller {
             environment: [
                 "WINEPREFIX": prefixURL.path,
                 "WINEARCH": "win64",
-                "WINEDLLOVERRIDES": "mscoree,mshtml=",
-                "WINEDEBUG": "-all",
+                "WINEDLLOVERRIDES": WineRuntimePolicy.dllOverrides,
+                "WINEDEBUG": WineRuntimePolicy.debug,
                 "PATH": runtimeURL.deletingLastPathComponent().path,
                 "DYLD_FRAMEWORK_PATH": GStreamerManager.frameworkURL.deletingLastPathComponent().path,
                 "GST_PLUGIN_PATH": GStreamerManager.frameworkURL.appendingPathComponent("Versions/1.0/lib/gstreamer-1.0").path
@@ -354,6 +354,8 @@ public struct RuntimeLocator: RuntimeLocating {
 public final class ProcessSupervisor: @unchecked Sendable {
     public private(set) var process: Process?
     private let logger: PortsideLogger
+    private var runtimeExecutablePath: URL?
+    private var prefixURL: URL?
 
     public init(logger: PortsideLogger = PortsideLogger()) { self.logger = logger }
 
@@ -371,13 +373,15 @@ public final class ProcessSupervisor: @unchecked Sendable {
         }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: runtimePath)
+        runtimeExecutablePath = URL(fileURLWithPath: runtimePath)
+        prefixURL = PortsidePaths.steamPrefix
         // Fixed argument list: no shell and no remote metadata is interpolated here.
         task.arguments = [steamExecutable.path] + arguments
         task.environment = [
             "WINEPREFIX": PortsidePaths.steamPrefix.path,
             "WINEARCH": "win64",
-            "WINEDLLOVERRIDES": "mscoree,mshtml=",
-            "WINEDEBUG": "-all",
+            "WINEDLLOVERRIDES": WineRuntimePolicy.dllOverrides,
+            "WINEDEBUG": WineRuntimePolicy.debug,
             "PATH": URL(fileURLWithPath: runtimePath).deletingLastPathComponent().path,
             "DYLD_FRAMEWORK_PATH": GStreamerManager.frameworkURL.deletingLastPathComponent().path,
             "GST_PLUGIN_PATH": GStreamerManager.frameworkURL.appendingPathComponent("Versions/1.0/lib/gstreamer-1.0").path
@@ -389,9 +393,21 @@ public final class ProcessSupervisor: @unchecked Sendable {
     }
 
     public func requestStop() {
-        guard let process, process.isRunning else { return }
-        process.terminate()
-        logger.write("Steam process termination requested")
+        if let process, process.isRunning {
+            process.terminate()
+            logger.write("Steam process termination requested")
+        }
+        guard let runtimeExecutablePath, let prefixURL else { return }
+        let wineserver = runtimeExecutablePath.deletingLastPathComponent().appendingPathComponent("wineserver")
+        guard FileManager.default.isExecutableFile(atPath: wineserver.path) else { return }
+        let task = Process()
+        task.executableURL = wineserver
+        task.arguments = ["-k"]
+        task.environment = ["WINEPREFIX": prefixURL.path, "WINEDEBUG": WineRuntimePolicy.debug]
+        task.standardOutput = FileHandle.nullDevice
+        task.standardError = FileHandle.nullDevice
+        try? task.run()
+        logger.write("Portside Wine process tree termination requested")
     }
 }
 

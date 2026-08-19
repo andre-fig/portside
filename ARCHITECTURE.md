@@ -12,6 +12,7 @@
 - `RosettaManager` validates and, only after an explicit user action, requests Apple’s official Rosetta installation.
 - `SteamReadinessMonitor` combines process snapshots with public CoreGraphics window inspection; a started process is not treated as a ready Steam session.
 - `ProcessSupervisor` owns the Steam process lifecycle.
+- `WinePrefixManager` writes `ShowCrashDialog=0` to the Portside prefix and applies a `winedbg.exe=d` process policy. Supervisor shutdown targets only the Portside prefix through its exact `wineserver` path.
 - `DiagnosticReport` writes a sanitized report without credentials or tokens.
 
 The SwiftUI target owns onboarding, progress, dashboard, and Support. The Steam UI remains the Steam client. DXMT is not installed because its current upstream repository reports no asserted license; WineD3D, which ships with Wine, is used for Direct3D 9/10/11.

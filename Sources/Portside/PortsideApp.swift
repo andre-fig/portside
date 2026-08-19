@@ -218,6 +218,11 @@ final class PortsideModel: ObservableObject {
     private func openSteamAndWait(executable: URL) async throws {
         state.lastProcessType = "steam-launch"
         state.phase = .steamLaunching; persistState()
+        guard let runtimePath = state.runtimeRecord?.executablePath ?? state.runtime?.executablePath.map(URL.init(fileURLWithPath:)) else {
+            throw PortsideError.runtimeUnavailable
+        }
+        let policyResult = try await WinePrefixManager.configureSilentCrashHandling(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix, logger: logger)
+        guard policyResult.status == 0 else { throw RuntimePipelineError.processFailed("Wine crash-dialog configuration", policyResult.status) }
         try supervisor.launchSteam(state: state)
         let status = await steamMonitor.waitForSteam(executable: executable)
         state.lastSteamStatus = status

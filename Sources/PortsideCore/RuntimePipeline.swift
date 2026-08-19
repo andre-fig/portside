@@ -93,6 +93,11 @@ public enum FreeRuntimeCatalog {
     public static let graphics = GraphicsBackend.wineD3D
 }
 
+public enum WineRuntimePolicy {
+    public static let debug = "-all"
+    public static let dllOverrides = "winedbg.exe=d;mscoree,mshtml="
+}
+
 public struct InstalledRuntimeRecord: Codable, Equatable, Sendable {
     public let manifest: RuntimeManifest
     public let installedPath: URL
@@ -337,6 +342,27 @@ public enum GStreamerManager {
     }
 }
 
+public enum WinePrefixManager {
+    public static func configureSilentCrashHandling(runtimeExecutable: URL, prefix: URL, logger: PortsideLogger = PortsideLogger()) async throws -> ProcessResult {
+        let gstreamerRoot = GStreamerManager.frameworkURL.deletingLastPathComponent()
+        let environment = [
+            "WINEPREFIX": prefix.path,
+            "WINEARCH": "win64",
+            "WINEDLLOVERRIDES": WineRuntimePolicy.dllOverrides,
+            "WINEDEBUG": WineRuntimePolicy.debug,
+            "PATH": runtimeExecutable.deletingLastPathComponent().path,
+            "DYLD_FRAMEWORK_PATH": gstreamerRoot.path,
+            "GST_PLUGIN_PATH": GStreamerManager.frameworkURL.appendingPathComponent("Versions/1.0/lib/gstreamer-1.0").path
+        ]
+        return try await DirectProcess.run(
+            executable: runtimeExecutable,
+            arguments: ["reg.exe", "ADD", "HKCU\\Software\\Wine\\WineDbg", "/v", "ShowCrashDialog", "/t", "REG_DWORD", "/d", "0", "/f"],
+            environment: environment,
+            logger: logger
+        )
+    }
+}
+
 public struct RuntimeInstallResult: Sendable, Equatable {
     public let record: InstalledRuntimeRecord
     public let prefixURL: URL
@@ -401,12 +427,14 @@ public final class FreeWineRuntimeProvider: @unchecked Sendable {
         let prefix = PortsidePaths.steamPrefix
         try fileManager.createDirectory(at: prefix, withIntermediateDirectories: true)
         let gstreamerRoot = GStreamerManager.frameworkURL.deletingLastPathComponent()
-        let environment = ["WINEPREFIX": prefix.path, "WINEARCH": "win64", "WINEDLLOVERRIDES": "mscoree,mshtml=", "WINEDEBUG": "-all", "PATH": finalExecutable.deletingLastPathComponent().path, "DYLD_FRAMEWORK_PATH": gstreamerRoot.path, "GST_PLUGIN_PATH": GStreamerManager.frameworkURL.appendingPathComponent("Versions/1.0/lib/gstreamer-1.0").path]
+        let environment = ["WINEPREFIX": prefix.path, "WINEARCH": "win64", "WINEDLLOVERRIDES": WineRuntimePolicy.dllOverrides, "WINEDEBUG": WineRuntimePolicy.debug, "PATH": finalExecutable.deletingLastPathComponent().path, "DYLD_FRAMEWORK_PATH": gstreamerRoot.path, "GST_PLUGIN_PATH": GStreamerManager.frameworkURL.appendingPathComponent("Versions/1.0/lib/gstreamer-1.0").path]
         let wineboot = installedRoot.appendingPathComponent("Contents/Resources/wine/bin/wineboot")
         if !fileManager.fileExists(atPath: prefix.appendingPathComponent("system.reg").path) {
             let result = try await DirectProcess.run(executable: wineboot, arguments: ["-u"], environment: environment, logger: logger)
             guard result.status == 0 else { throw RuntimePipelineError.processFailed("prefix initialization", result.status) }
         }
+        let registryResult = try await WinePrefixManager.configureSilentCrashHandling(runtimeExecutable: finalExecutable, prefix: prefix, logger: logger)
+        guard registryResult.status == 0 else { throw RuntimePipelineError.processFailed("Wine crash-dialog configuration", registryResult.status) }
         progress?(1, .steamInstalling)
         let record = InstalledRuntimeRecord(manifest: manifest, installedPath: installedRoot, executablePath: finalExecutable, graphicsBackend: FreeRuntimeCatalog.graphics, installedAt: Date(), gstreamerInstalled: GStreamerManager.isInstalled)
         let recordURL = installedRoot.appendingPathComponent("portside-runtime.json")
@@ -435,6 +463,10 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             let snapshot = await processSnapshot()
+            if snapshot.contains("winedbg") {
+                logger.write("Wine debugger detected during Steam bootstrap", level: .error)
+                return false
+            }
             let markerExists = FileManager.default.fileExists(atPath: marker.path) || FileManager.default.fileExists(atPath: alternateMarker.path)
             if markerExists && (snapshot.contains("steam.exe") || snapshot.contains("steamwebhelper")) {
                 logger.write("Steam bootstrap marker detected")
@@ -450,6 +482,10 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         var sawSteam = false
         while Date() < deadline {
             let snapshot = await processSnapshot()
+            if snapshot.contains("winedbg") {
+                logger.write("Wine debugger detected while waiting for Steam", level: .error)
+                return .exitedUnexpectedly
+            }
             if snapshot.contains("steam.exe") || snapshot.contains("steamwebhelper") { sawSteam = true }
             if sawSteam, let processIdentifier = visibleSteamWindowProcessIdentifier() {
                 NSRunningApplication(processIdentifier: processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])

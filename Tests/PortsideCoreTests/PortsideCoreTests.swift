@@ -76,6 +76,8 @@ final class PortsideCoreTests: XCTestCase {
     func testBootstrapUsesOnlySilentArgument() {
         XCTAssertEqual(SteamInstaller.bootstrapArguments, ["-silent"])
         XCTAssertFalse(SteamInstaller.bootstrapArguments.contains { $0.contains("sh") || $0.contains("bash") })
+        XCTAssertEqual(WineRuntimePolicy.debug, "-all")
+        XCTAssertTrue(WineRuntimePolicy.dllOverrides.contains("winedbg.exe=d"))
     }
 
     func testDownloadProgressIsByteBasedAndClamped() {

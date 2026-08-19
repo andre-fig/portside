@@ -20,6 +20,10 @@ The app invokes Wine through `Process` with an argument array equivalent to:
 
 `/S` is a separate, case-sensitive argument. The process receives `WINEPREFIX`, `WINEARCH=win64`, `WINEDEBUG=-all`, and the private GStreamer paths. No shell, Terminal, AppleScript, or user-visible installer process is used. Afterward, the app validates an executable `steam.exe`, runs the bootstrap equivalent of `steam.exe -silent`, waits for the client marker, and launches `steam.exe` normally.
 
+## Wine crash-window handling
+
+The Wine prefix is configured with `HKCU\\Software\\Wine\\WineDbg\\ShowCrashDialog=0`, and Portside-owned Wine processes receive `WINEDLLOVERRIDES=winedbg.exe=d` plus `WINEDEBUG=-all`. If a debugger process is nevertheless detected, readiness fails quickly, the failure is logged, and the supervisor requests shutdown of only the Portside prefix. This prevents an unresponsive Wine Debugger or generic Wine crash dialog from being left open by setup. The current prefix was updated with this registry value successfully.
+
 ## Real setup evidence
 
 - Wine 11.15 downloaded and verified at `~/Library/Application Support/Portside/Downloads/wine-staging-gcenx-osx64-11.15.tar.xz`; SHA-256 matched the manifest.
