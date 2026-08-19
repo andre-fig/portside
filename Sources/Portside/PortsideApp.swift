@@ -674,7 +674,7 @@ struct InstallerHeader: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            PortsideLogoView(size: 30)
+            PortsideLogoView(size: 34)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Portside")
                     .font(.headline)
