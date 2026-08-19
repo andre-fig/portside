@@ -1,19 +1,33 @@
-# Licensing and commercial distribution
+# Licensing and authorization
 
-## Portside code
+## Portside
 
-The repository currently has no third-party Swift package dependencies. Portside-owned code is not granted a commercial distribution license by this document; add the project’s chosen license before shipping.
+Portside-owned code remains in this public repository. Its final distribution
+license must be chosen by the project owner before a commercial release.
 
-## Runtime status
+## Sikarugir and included components
 
-The app does not bundle Wine, CrossOver, Game Porting Toolkit, D3DMetal, Rosetta, GStreamer, DXMT, or game binaries. It downloads Wine Staging 11.6_1 from the pinned Gcenx release and GStreamer 1.28.5 from the official GStreamer site at setup time, verifies both, and stores them under the user’s Portside directory. Wine source is LGPL-2.1-or-later; GStreamer is LGPL-2.1-or-later plus component-specific licenses. Gcenx’s packaging repository does not expose an SPDX license in its GitHub metadata, so commercial redistribution of that packaged artifact still requires upstream confirmation. Portside currently downloads rather than redistributes it.
+Portside downloads official Sikarugir artifacts at runtime instead of
+embedding Creator, Configure, Launcher or an engine in Portside.app. The
+selected Wine sources are LGPL-2.1-or-later; the complete obligations for
+Wine, winetricks and bundled libraries must be reviewed from the installed
+artifact notices before redistribution.
 
-DXMT is intentionally not installed: its current GitHub metadata reports `NOASSERTION` for the license. Direct3D 9/10/11 use WineD3D shipped with the Wine build.
+The exact artifact provenance is recorded in UPSTREAM_VERSIONS.json, and the
+user-visible authorization statement is kept separately in
+SIKARUGIR_AUTHORIZATION.md. That statement records the information supplied in
+the project request; it does not invent a contract, grant, trademark
+permission or license text that was not provided.
 
-## Steam
+## Steam and games
 
-Portside does not include Steam. It downloads the Windows installer at setup time from Valve’s official CDN and does not modify the Steam client. Valve/Steam trademarks remain the property of Valve Corporation. Portside is independent and is not affiliated with or endorsed by Valve Corporation.
+Portside does not include Steam or games and is not affiliated with or
+endorsed by Valve Corporation. Steam is installed by the official Sikarugir
+winetricks verb inside the user’s isolated wrapper. Portside never requests,
+copies or reports account credentials, cookies, tokens or Steam IDs.
 
-## Release gates
+## Release gate
 
-Before any commercial release, obtain legal review for the selected runtime package, its GStreamer contents, graphics layer, code signing/update mechanism, Valve distribution terms, macOS privacy disclosures, and final notices. Runtime download-at-install does not eliminate license obligations.
+Before redistribution, obtain legal review for the selected Sikarugir
+artifacts, source notices, update mechanism, code signing, Valve terms,
+macOS privacy disclosures and the final Portside license.

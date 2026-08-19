@@ -2,28 +2,63 @@
 
 **Your Steam library, now on Mac.**
 
-Portside is a native SwiftUI macOS app that prepares a private Wine workspace and launches the official Windows Steam client. It does not replace Steam’s library UI, collect Steam credentials, distribute games, or bypass DRM/anti-cheat.
+Portside is a native SwiftUI macOS app that prepares one private, user-local
+Sikarugir wrapper and opens the official Windows Steam client. It preserves the
+Portside identity, Sentry boundary, sanitized diagnostics and rotating logs.
+It does not distribute games, copy a native Steam session, bypass DRM or
+anti-cheat, or expose Sikarugir Creator to the end user.
 
 ## Build and test
 
-```sh
+~~~sh
 swift test
 swift build
 ./scripts/package_app.sh
 open build/Portside.app
-```
+~~~
 
-The package targets macOS 13+ on Apple silicon. The app does not bundle Wine or Steam binaries; setup downloads the pinned runtime and the official Steam installer over HTTPS and verifies the runtime checksum before installation.
+After the first setup, Portside stays ready and opens Steam only when you
+choose `Open Steam`; closing Steam does not launch it again.
 
-## Runtime and launch behavior
+The package targets macOS 13+ on Apple silicon. Rosetta 2 is detected and
+installed only when missing through Apple’s official softwareupdate mechanism.
+Runtime assets are downloaded to the Portside Application Support directory
+and never embedded in Portside.app.
 
-- Release uses one runtime: Gcenx Wine Staging 11.6_1, with the pinned metadata in [`docs/runtime-manifest.json`](docs/runtime-manifest.json).
-- WineD3D is the graphics layer for Direct3D 9/10/11. D3DMetal, GPTK, Sikarugir Launcher and Sikarugir Creator are not bundled.
-- The existing Portside prefix is preserved. A recovery point is created before a runtime transition using an APFS clone when available, or targeted Wine registry/link files otherwise; `steamapps`, saves, caches and user data are not copied or deleted.
-- SteamSetup.exe is run silently with the separate `/S` argument. Later, `steam.exe` is launched directly through Wine with the ordered CEF 32-bit login arguments `-udpforce`, `-noreactlogin`, `-allosarches`, and `-cef-force-32bit`. No shell, native macOS Steam installation, native-login migration or GPU fallback cascade is used.
-- The app records process start, webhelper start and process handoff separately. It never reports a window or rendered UI without manual visual validation, prevents concurrent Portside launches from creating duplicate managed Steam processes, and closes itself after a stable process handoff.
-- Wine crash dialogs are disabled for the private prefix and failures are logged locally and sent to Sentry as sanitized technical events. Screen Recording permission is never requested.
+## Official Sikarugir baseline
 
-Sikarugir remains a development-only comparison reference. It is not selected by Release because an official, checksum-pinned `WS12WineSikarugir10.0_6` artifact and redistributable runtime package could not be verified.
+The first wrapper is isolated as PortsideBaseline.app and uses the values
+validated against the original Sikarugir flow:
 
-The real interactive Steam login and library rendering still require validation on a display. See [`docs/VALIDATION.md`](docs/VALIDATION.md).
+~~~text
+Creator provenance: 1.0.1
+Wrapper template: 1.0.11
+Engine: WS12WineSikarugir10.0_6
+Renderer: WineD3D
+D3DMetal/DXMT/DXVK: disabled
+MSYNC/ESYNC: enabled
+WINEDEBUG: -plugplay,+loaddll
+Program: /Program Files (x86)/Steam/steam.exe
+Steam install: official WSS-winetricks steam verb
+~~~
+
+The first install waits for the official winetricks process and its Steam
+updater to finish. A second clean wrapper opening then waits for a real
+on-screen window. A process, Dock icon or steamwebhelper without a window is
+not considered UI success.
+
+Managed state is separated into Runtime, Wrappers, Prefixes, SteamLibrary,
+Cache, Logs, Diagnostics, Profiles and Manifests. Steam games remain outside
+versioned wrapper assets; Portside never copies a whole steamapps tree during
+runtime changes.
+
+## Compatibility
+
+GameCompatibilityService stores a versioned manifest indexed by Steam App ID
+and executable. It detects PE architecture and common graphics APIs and
+orders the official renderer fallbacks described in ARCHITECTURE.md. Unknown
+games use a bounded, observable fallback sequence and record only a
+functional result. No anti-cheat bypass is attempted.
+
+See docs/runtime-manifest.json, docs/VALIDATION.md, THIRD_PARTY_NOTICES.md and
+SIKARUGIR_AUTHORIZATION.md.

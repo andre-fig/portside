@@ -1,37 +1,38 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "runtime": {
-    "identifier": "wine-staging-gcenx-osx64",
-    "version": "11.6_1",
-    "url": "https://github.com/Gcenx/macOS_Wine_builds/releases/download/11.6_1/wine-staging-11.6_1-osx64.tar.xz",
-    "sha256": "9e73898fc83b0137638fe90d4868387f30b5993e86aeaef7422d8b1655238014",
-    "expectedSize": 322511424,
+    "identifier": "WS12WineSikarugir10.0_6",
+    "version": "wine sikarugir 10.0 (revision 6)",
+    "url": "https://github.com/Sikarugir-App/Engines/releases/download/v1.0/WS12WineSikarugir10.0_6.tar.xz",
+    "sha256": "9da7ee0cbf386522f3a9906943726d9c3c125dbbd9ab120e3cde80e88d6091b2",
+    "expectedSize": 166304096,
     "architecture": "x86_64 via Rosetta 2",
-    "minimumMacOS": "13.0",
-    "executable": "Contents/Resources/wine/bin/wine",
-    "bundleDirectory": "Wine Staging.app",
-    "license": "Wine LGPL-2.1-or-later; upstream packaging license requires review",
-    "source": "https://gitlab.winehq.org/wine/wine",
-    "components": ["Wine Staging", "Wine Mono 11.0.0", "Wine Gecko 2.47.4", "WineD3D"],
-    "validatedAt": "2026-08-19T00:00:00Z"
+    "engineVersionSha256": "9af9c71ffe2ca443c35a34b7f45fa1977f864eac984c0257ba7fd0341d084586",
+    "license": "Wine LGPL-2.1-or-later plus included component notices",
+    "source": "https://github.com/Sikarugir-App/wine",
+    "sourceCommit": "2df1ee28039cf84776eb1421ed90bd154cebb65f"
   },
-  "components": [
-    {
-      "identifier": "gstreamer-macos-universal-runtime",
-      "version": "1.28.5",
-      "url": "https://gstreamer.freedesktop.org/data/pkg/macos/1.28.5/gstreamer-1.0-1.28.5-universal.pkg",
-      "sha256": "0a8fc7a1cf8d7bac833ca0ebe2fd196a199c2465e810cd5b1e4b4f720c258f43",
-      "expectedSize": 146000000,
-      "license": "LGPL-2.1-or-later and component-specific licenses",
-      "source": "https://gitlab.freedesktop.org/gstreamer/gstreamer",
-      "installScope": "Portside private runtime directory"
-    }
-  ],
-  "graphics": {
-    "default": "wineD3D",
-    "direct3D9": "WineD3D",
-    "direct3D10": "WineD3D",
-    "direct3D11": "WineD3D",
-    "direct3D12": "not implemented"
+  "wrapper": {
+    "identifier": "Sikarugir Wrapper Template",
+    "version": "1.0.11",
+    "url": "https://github.com/Sikarugir-App/Wrapper/releases/download/v1.0/Template-1.0.11.tar.xz",
+    "sha256": "9fa15479e7ff6abd99c1d07be285fb95f41fc6991586502427152b1f7d6ccb8a",
+    "expectedSize": 84533420
+  },
+  "winetricks": {
+    "identifier": "Sikarugir winetricks",
+    "commit": "5a59ea07513b24093bd90fad943ecf9543cf05bc",
+    "url": "https://raw.githubusercontent.com/Sikarugir-App/winetricks/5a59ea07513b24093bd90fad943ecf9543cf05bc/src/winetricks",
+    "sha256": "f35c29737ca08a583569e6a3752d52fbe23333c5acfad5f16c4177d25eaf3f4b"
+  },
+  "baseline": {
+    "renderer": "wineD3D",
+    "D3DMETAL": 0,
+    "DXMT": 0,
+    "DXVK": 0,
+    "WINEMSYNC": 1,
+    "WINEESYNC": 1,
+    "WINEDEBUG": "-plugplay,+loaddll",
+    "program": "/Program Files (x86)/Steam/steam.exe"
   }
 }

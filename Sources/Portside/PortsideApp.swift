@@ -7,8 +7,7 @@ struct PortsideApp: App {
     @StateObject private var model: PortsideModel
 
     init() {
-        let diagnostics = SentryDiagnosticsService()
-        let model = PortsideModel(diagnostics: diagnostics)
+        let model = PortsideModel(diagnostics: SentryDiagnosticsService())
         _model = StateObject(wrappedValue: model)
         Task { @MainActor in model.startAutomatically() }
     }
@@ -16,14 +15,13 @@ struct PortsideApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(model: model)
-                .frame(width: model.setupStep == .failed ? InstallerLayout.failureWidth : InstallerLayout.width,
-                       height: model.setupStep == .failed ? InstallerLayout.failureContentHeight : InstallerLayout.contentHeight)
+                .frame(width: 460, height: model.setupStep == .failed ? 320 : 260)
         }
-        .defaultSize(width: InstallerLayout.width, height: InstallerLayout.contentHeight)
+        .defaultSize(width: 460, height: 260)
         .windowResizability(.contentSize)
         .windowStyle(.hiddenTitleBar)
         .commands {
-            CommandGroup(replacing: .appInfo) { AboutPortsideButton() }
+            CommandGroup(replacing: .appInfo) { Button("About Portside") { NSApp.orderFrontStandardAboutPanel(nil) } }
         }
     }
 }
@@ -31,504 +29,261 @@ struct PortsideApp: App {
 @MainActor
 final class PortsideModel: ObservableObject {
     @Published var state: EnvironmentState
-    @Published var requirements: SystemRequirements
+    @Published var requirements = SystemRequirements()
     @Published var setupStep: SetupStep = .checking
-    @Published var progress: Double = 0
+    @Published var progress = 0.0
     @Published var progressIsIndeterminate = false
-    @Published var message = ""
+    @Published var message = "Preparing Portside…"
     @Published var errorMessage: String?
     @Published var isWorking = false
-    @Published var didExportReport = false
     @Published var showsInstaller = true
+    @Published var didExportReport = false
 
-    let store = EnvironmentStore()
-    let logger = PortsideLogger()
-    let runtimeProvider = FreeWineRuntimeProvider()
-    let steamMonitor = SteamReadinessMonitor()
-    let steamProcessLauncher = SteamProcessLauncher()
-    let diagnostics: DiagnosticsService
-    private var didStartAutomatically = false
-    private var handoffExitScheduled = false
-    private var steamLaunchLock: SteamLaunchLock?
-    private var lastReadinessReport: SteamReadinessReport?
+    enum SetupStep { case checking, rosettaRequired, downloading, installing, opening, ready, failed }
 
-    enum SetupStep: String { case checking, rosettaRequired, preparing, downloading, installing, ready, failed }
+    private let store = EnvironmentStore()
+    private let logger = PortsideLogger()
+    private let updateService: SikarugirUpdateService
+    private let wrapperInstaller: SikarugirWrapperInstaller
+    private let steamLauncher: SteamProcessLauncher
+    private let readinessMonitor: SteamReadinessMonitor
+    private let diagnostics: DiagnosticsService
+    private var startedAutomatically = false
 
     init(diagnostics: DiagnosticsService = NoopDiagnosticsService()) {
         self.diagnostics = diagnostics
+        self.updateService = SikarugirUpdateService(logger: PortsideLogger(logFileName: "sikarugir-update.log"))
+        self.wrapperInstaller = SikarugirWrapperInstaller(logger: PortsideLogger(logFileName: "sikarugir-install.log"))
+        self.steamLauncher = SteamProcessLauncher()
+        self.readinessMonitor = SteamReadinessMonitor()
         try? store.prepareDirectories()
-        state = store.load()
-        requirements = SystemRequirements()
-        showsInstaller = !(state.setupCompleted && state.steamInstalled && hasValidInstalledEnvironment)
+        self.state = store.load()
     }
 
     func startAutomatically() {
-        guard !didStartAutomatically else { return }
-        didStartAutomatically = true
-        if state.setupCompleted && state.steamInstalled && hasValidInstalledEnvironment {
+        guard !startedAutomatically else { return }
+        startedAutomatically = true
+        if let wrapperPath = state.wrapperPath.map(URL.init(fileURLWithPath:)),
+           isValidWrapper(wrapperPath),
+           state.setupCompleted {
             showsInstaller = false
-            launchSteam()
+            message = "Steam is ready to play"
         } else {
-            showsInstaller = true
             setUp()
         }
     }
 
-    private var hasValidInstalledEnvironment: Bool {
-        let runtimeRecord = state.runtimeRecord
-        let runtimePath = runtimeRecord?.executablePath.path ?? state.runtime?.executablePath ?? ""
-        return runtimeRecord?.manifest.identifier == FreeRuntimeCatalog.wine.identifier
-            && runtimeRecord?.manifest.version == FreeRuntimeCatalog.wine.version
-            && FileManager.default.isExecutableFile(atPath: runtimePath)
-            && FileManager.default.fileExists(atPath: PortsidePaths.steamPrefix.appendingPathComponent("system.reg").path)
-            && PrefixRuntimeMetadata.load(prefix: PortsidePaths.steamPrefix)?.runtimeIdentifier == FreeRuntimeCatalog.wine.identifier
-            && PrefixRuntimeMetadata.load(prefix: PortsidePaths.steamPrefix)?.runtimeVersion == FreeRuntimeCatalog.wine.version
-            && SteamInstaller.locateInstalledExecutable() != nil
-    }
-
     func setUp() {
         guard !isWorking else { return }
-        showsInstaller = true
         isWorking = true
-        errorMessage = nil
-        progress = 0
-        progressIsIndeterminate = false
+        showsInstaller = true
         setupStep = .checking
-        message = "Checking your Mac…"
-        lastReadinessReport = nil
+        progress = 0
+        errorMessage = nil
         let started = Date()
-        if state.phase == .failedRecoverable { state.retryCount += 1 }
-        state.lastError = nil
-        state.lastErrorCode = nil
-        state.lastProcessType = nil
-        state.lastExitCode = nil
-
-        Task {
+        Task { @MainActor in
             do {
-                diagnostics.breadcrumb("setup_started", context: diagnosticContext(stage: "checking_requirements"))
-                logger.write("Starting Portside setup")
-                updateProgress(0, phase: .requirementsChecking)
                 try requirements.validate()
-                diagnostics.breadcrumb("requirements_checked", context: diagnosticContext(stage: "checking_requirements"))
-
+                diagnostics.breadcrumb("requirements_checked", context: context(stage: "requirements"))
+                if let oldWrapper = state.wrapperPath, let oldPrefix = state.prefixPath {
+                    steamLauncher.stopManagedProcesses(wrapper: URL(fileURLWithPath: oldWrapper), prefix: URL(fileURLWithPath: oldPrefix))
+                }
                 if !(await RosettaManager.status()).installed {
-                    state.phase = .rosettaRequired
-                    persistState()
                     setupStep = .rosettaRequired
-                    message = "Preparing Rosetta…"
+                    message = "Preparing your gaming environment…"
                     progressIsIndeterminate = true
-                    let result = try await RosettaManager.install()
-                    guard result.status == 0, (await RosettaManager.status()).installed else {
-                        throw RuntimePipelineError.rosettaUnavailable
-                    }
+                    let result = try await RosettaManager.install(logger: logger)
+                    guard result.status == 0, (await RosettaManager.status()).installed else { throw PortsideError.rosettaUnavailable }
                 }
 
-                setupStep = .preparing
-                updateProgress(0.08, phase: .graphicsInstalling)
-                try store.prepareDirectories()
-                await stopManagedSteamIfNeeded()
-                diagnostics.breadcrumb("runtime_download_started", context: diagnosticContext(stage: "runtime"))
-                let result = try await runtimeProvider.install { [weak self] value, phase in
-                    Task { @MainActor in self?.updateProgress(value, phase: phase) }
+                setupStep = .downloading
+                message = "Getting Portside ready for you…"
+                progressIsIndeterminate = false
+                let artifacts = try await updateService.downloadBaselineArtifacts { [weak self] value in
+                    Task { @MainActor in self?.progress = 0.45 * value }
                 }
-                state.runtimeRecord = result.record
+
+                setupStep = .installing
+                message = "Setting up your private Steam experience…"
+                progress = 0.5
+                let installed = try await wrapperInstaller.install(artifacts: artifacts)
+                state.wrapperPath = installed.validation.wrapper.path
+                state.prefixPath = installed.validation.prefix.path
+                state.runtimeRecord = installed.runtimeRecord
                 state.runtime = RuntimeDescriptor(
-                    name: result.record.manifest.identifier,
-                    version: result.record.manifest.version,
-                    executablePath: result.record.executablePath.path,
-                    redistributable: false,
-                    licenseNote: result.record.manifest.license
+                    name: SikarugirBaselineConfiguration.engineName,
+                    version: SikarugirBaselineConfiguration.engineVersion,
+                    executablePath: installed.validation.launcher.path,
+                    redistributable: true,
+                    licenseNote: installed.runtimeRecord.manifest.license
                 )
-                diagnostics.breadcrumb("runtime_verified", context: diagnosticContext(stage: "runtime", runtimeVersion: result.record.manifest.version))
-                diagnostics.breadcrumb("prefix_created", context: diagnosticContext(stage: "prefix", runtimeVersion: result.record.manifest.version))
+                state.phase = .prefixCreating
+                persist()
 
-                if SteamInstaller.locateInstalledExecutable() == nil {
-                    setupStep = .downloading
-                    diagnostics.breadcrumb("steam_install_started", context: diagnosticContext(stage: "steam_download"))
-                    _ = try await SteamInstaller.download { [weak self] value in
-                        Task { @MainActor in self?.updateProgress(0.72 + (value * 0.08), phase: .steamDownloading) }
-                    }
-                    setupStep = .installing
-                    state.lastProcessType = "steam-installer"
-                    updateProgress(0.84, phase: .steamInstalling)
-                    try await SteamInstaller.install(using: state.runtime!, logger: logger)
+                let steamExecutable = SikarugirSteamFlow.steamExecutable(prefix: installed.validation.prefix)
+                if !FileManager.default.fileExists(atPath: steamExecutable.path) {
+                    message = "Installing Steam securely…"
+                    diagnostics.breadcrumb("steam_install_started", context: context(stage: "steam_install"))
+                    let result = try await steamLauncher.installSteam(using: installed.validation.wrapper)
+                    guard result.status == 0 else { throw PortsideError.processFailed("official winetricks steam", result.status) }
                 }
-
-                guard let steamExecutable = SteamInstaller.locateInstalledExecutable() else {
-                    throw PortsideError.processLaunchFailed("Steam installer finished without creating steam.exe.")
-                }
+                // The Windows PE file does not need a macOS executable bit;
+                // its existence is the authoritative post-winetricks check.
+                state.steamInstalled = FileManager.default.fileExists(atPath: steamExecutable.path)
                 state.steamExecutablePath = steamExecutable.path
-                state.steamInstalled = true
-                state.setupCompleted = false
-                guard let runtimePath = state.runtimeRecord?.executablePath ?? state.runtime?.executablePath.map(URL.init(fileURLWithPath:)) else {
-                    throw PortsideError.runtimeUnavailable
+                guard state.steamInstalled else { throw PortsideError.invalidArtifact("steam.exe was not created by the official winetricks flow") }
+
+                // The official first run must be over before the clean second
+                // opening. Only this wrapper/prefix may be terminated.
+                steamLauncher.stopManagedProcesses(wrapper: installed.validation.wrapper, prefix: installed.validation.prefix)
+                for _ in 0..<20 {
+                    let snapshots = readinessMonitor.captureProcessSnapshot()
+                    var managedPIDs = SteamProcessOwnership.managedPIDs(in: snapshots, wrapper: installed.validation.wrapper, prefix: installed.validation.prefix)
+                    managedPIDs.formUnion(SteamProcessOwnership.fileBackedManagedPIDs(in: snapshots, wrapper: installed.validation.wrapper, prefix: installed.validation.prefix))
+                    let managed = snapshots.filter { managedPIDs.contains($0.pid) }
+                    if managed.isEmpty { break }
+                    try? await Task.sleep(for: .milliseconds(250))
                 }
-                let windows10Result = try await WinePrefixManager.ensureWindows10(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix, logger: logger)
-                guard windows10Result.status == 0 else {
-                    throw RuntimePipelineError.processFailed("Windows 10 prefix configuration", windows10Result.status)
+
+                setupStep = .opening
+                message = "Starting Steam…"
+                state.phase = .steamLaunching
+                persist()
+                let baselinePIDs = Set(readinessMonitor.captureProcessSnapshot().map(\.pid))
+                _ = try await steamLauncher.launch(wrapper: installed.validation.wrapper)
+                let report = await readinessMonitor.waitForSteamWindow(wrapper: installed.validation.wrapper, baselinePIDs: baselinePIDs)
+                state.lastReadiness = report
+                guard report.windowDetected && report.webHelperStarted else {
+                    throw PortsideError.processLaunchFailed("Steam processes started without a managed graphical window.")
                 }
-                updateProgress(0.96, phase: .validatingInstallation)
-                let launchOutcome = try await openSteamAndWait(executable: steamExecutable)
-                if launchOutcome == .alreadyCoordinated {
-                    isWorking = false
-                    showsInstaller = false
-                    terminateAfterHandOff()
-                    return
-                }
+                state.setupCompleted = true
+                state.phase = .steamReady
+                state.lastError = nil
+                state.lastErrorCode = nil
                 state.lastSetupDuration = Date().timeIntervalSince(started)
+                persist()
+                diagnostics.event("steam_window_detected", context: context(stage: "window_detected", report: report))
+                progress = 1
                 setupStep = .ready
-                updateProgress(1, phase: .steamProcessHandoffComplete)
-                logger.write("Setup completed")
-                terminateAfterHandOff()
+                showsInstaller = false
+                hideAfterSteamWindow()
             } catch {
-                await stopManagedSteamIfNeeded()
                 state.phase = .failedRecoverable
                 state.lastError = PortsideLogger.sanitize(error.localizedDescription)
-                state.lastErrorCode = errorCode(for: error)
-                if let pipelineError = error as? RuntimePipelineError, case .processFailed(_, let exitCode) = pipelineError {
-                    state.lastExitCode = exitCode
-                }
+                state.lastErrorCode = errorCode(error)
                 state.lastSetupDuration = Date().timeIntervalSince(started)
-                persistState()
+                persist()
+                errorMessage = "We couldn't finish setting up Portside."
+                message = "We couldn't finish setting up Portside."
                 setupStep = .failed
-                errorMessage = "Could not complete setup."
-                message = "Could not complete setup."
+                diagnostics.capture(error: error, context: context(stage: "failed", errorCode: errorCode(error)))
                 logger.write(error.localizedDescription, level: .error)
-                diagnostics.capture(error: error, context: diagnosticContext(
-                    stage: "failed",
-                    errorCode: errorCode(for: error),
-                    duration: Date().timeIntervalSince(started),
-                    report: lastReadinessReport
-                ))
             }
             isWorking = false
         }
     }
 
-    func installRosetta() {
-        guard !isWorking else { return }
-        isWorking = true
-        message = "Preparing Rosetta…"
-        Task {
-            do {
-                let result = try await RosettaManager.install()
-                guard result.status == 0, (await RosettaManager.status()).installed else {
-                    throw RuntimePipelineError.rosettaUnavailable
-                }
-                setupStep = .checking
-                isWorking = false
-                setUp()
-            } catch {
-                isWorking = false
-                setupStep = .failed
-                errorMessage = "Could not complete setup."
-                logger.write(error.localizedDescription, level: .error)
-                diagnostics.capture(error: error, context: diagnosticContext(stage: "rosetta", errorCode: errorCode(for: error)))
-            }
-        }
-    }
+    func installRosetta() { setUp() }
 
     func launchSteam() {
-        guard !isWorking else { return }
+        guard !isWorking, let path = state.wrapperPath else { return }
+        let wrapper = URL(fileURLWithPath: path)
+        guard isValidWrapper(wrapper) else { setUp(); return }
         isWorking = true
-        errorMessage = nil
-        message = "Preparing Portside…"
-        lastReadinessReport = nil
-        let started = Date()
-
-        Task {
+        message = "Starting Steam…"
+        Task { @MainActor in
             do {
-                try requirements.validate()
-                guard (await RosettaManager.status()).installed else { throw RuntimePipelineError.rosettaUnavailable }
-                let storedSteamExecutable = state.steamExecutablePath.map(URL.init(fileURLWithPath:))
-                guard let steamExecutable = (storedSteamExecutable.flatMap { FileManager.default.isExecutableFile(atPath: $0.path) ? $0 : nil }) ?? SteamInstaller.locateInstalledExecutable() else {
-                    throw PortsideError.processLaunchFailed("Steam is not installed yet.")
-                }
-                guard hasValidInstalledEnvironment,
-                      let runtimePath = state.runtimeRecord?.executablePath else {
-                    throw PortsideError.runtimeUnavailable
-                }
-                state.steamExecutablePath = steamExecutable.path
-                state.phase = .steamLaunching
-                persistState()
-                message = "Opening Steam…"
-                let launchOutcome = try await openSteamAndWait(executable: steamExecutable, runtimePath: runtimePath)
-                if launchOutcome == .alreadyCoordinated {
-                    isWorking = false
-                    showsInstaller = false
-                    terminateAfterHandOff()
-                    return
-                }
-                state.lastSetupDuration = Date().timeIntervalSince(started)
+                let baselinePIDs = Set(readinessMonitor.captureProcessSnapshot().map(\.pid))
+                _ = try await steamLauncher.launch(wrapper: wrapper)
+                let report = await readinessMonitor.waitForSteamWindow(wrapper: wrapper, baselinePIDs: baselinePIDs)
+                state.lastReadiness = report
+                guard report.windowDetected && report.webHelperStarted else { throw PortsideError.processLaunchFailed("Steam opened without a managed graphical window.") }
+                state.setupCompleted = true
+                state.phase = .steamReady
+                state.lastError = nil
+                state.lastErrorCode = nil
+                persist()
                 showsInstaller = false
-                message = "Ready"
-                terminateAfterHandOff()
+                hideAfterSteamWindow()
             } catch {
-                state.setupCompleted = false
-                state.lastSetupDuration = Date().timeIntervalSince(started)
-                errorMessage = "Could not complete setup."
+                errorMessage = "Steam couldn't be opened. Please try again."
                 setupStep = .failed
-                state.phase = .failedRecoverable
-                state.lastError = PortsideLogger.sanitize(error.localizedDescription)
-                state.lastErrorCode = errorCode(for: error)
-                persistState()
-                logger.write(error.localizedDescription, level: .error)
-                diagnostics.capture(error: error, context: diagnosticContext(
-                    stage: "launch",
-                    errorCode: errorCode(for: error),
-                    duration: Date().timeIntervalSince(started),
-                    report: lastReadinessReport
-                ))
                 showsInstaller = true
-                NSApp.unhide(nil)
+                diagnostics.capture(error: error, context: context(stage: "second_open", errorCode: errorCode(error)))
             }
             isWorking = false
         }
-    }
-
-    private func friendlyMessage(for phase: EnvironmentPhase) -> String {
-        switch phase {
-        case .requirementsChecking: return "Checking your Mac…"
-        case .rosettaRequired: return "Preparing Rosetta…"
-        case .runtimeDownloading, .runtimeVerifying: return "Downloading required components…"
-        case .runtimeInstalling, .prefixCreating, .graphicsInstalling: return "Preparing the game environment…"
-        case .steamDownloading, .steamInstalling: return "Installing Steam…"
-        case .steamUpdating: return "Updating Steam…"
-        case .steamLaunching: return "Opening Steam…"
-        case .validatingInstallation: return "Finishing…"
-        case .steamReady: return "Ready"
-        case .steamProcessHandoffComplete: return "Steam process handoff complete"
-        case .failedRecoverable, .failedFatal: return "Could not complete setup."
-        }
-    }
-
-    private func updateProgress(_ value: Double, phase: EnvironmentPhase) {
-        if let currentPhase = state.phase, phaseRank(phase) < phaseRank(currentPhase), value < progress { return }
-        state.phase = phase
-        progress = max(progress, min(1, value))
-        progressIsIndeterminate = false
-        message = friendlyMessage(for: phase)
-        persistState()
-    }
-
-    private func phaseRank(_ phase: EnvironmentPhase) -> Int {
-        switch phase {
-        case .requirementsChecking: return 0
-        case .rosettaRequired: return 1
-        case .graphicsInstalling: return 2
-        case .runtimeDownloading: return 3
-        case .runtimeVerifying: return 4
-        case .runtimeInstalling: return 5
-        case .prefixCreating: return 6
-        case .steamDownloading: return 7
-        case .steamInstalling: return 8
-        case .steamUpdating: return 9
-        case .steamLaunching: return 10
-        case .validatingInstallation: return 11
-        case .steamReady: return 12
-        case .steamProcessHandoffComplete: return 13
-        case .failedRecoverable, .failedFatal: return 99
-        }
-    }
-
-    private func errorCode(for error: Error) -> String {
-        if let pipelineError = error as? RuntimePipelineError {
-            switch pipelineError {
-            case .checksumMismatch: return "runtime_checksum_failed"
-            case .unexpectedArchiveEntry, .archiveExtractionFailed, .runtimeStructureInvalid: return "runtime_extraction_failed"
-            case .rosettaUnavailable: return "rosetta_unavailable"
-            case .gstreamerInstallFailed: return "gstreamer_setup_failed"
-            case .processTimedOut: return "setup_timeout"
-            case .runtimeMigrationFailed: return "runtime_migration_failed"
-            case .snapshotInsufficientSpace: return "runtime_snapshot_space_failed"
-            case .processFailed(let process, _):
-                let normalized = process.lowercased()
-                if normalized.contains("steam installer") { return "steam_install_failed" }
-                if normalized.contains("prefix") { return "prefix_creation_failed" }
-                if normalized.contains("steam") { return "steam_update_failed" }
-                return "child_process_exited"
-            }
-        }
-        if let portsideError = error as? PortsideError {
-            switch portsideError {
-            case .unsupportedArchitecture, .unsupportedOperatingSystem, .insufficientStorage: return "requirements_check_failed"
-            case .runtimeUnavailable: return "runtime_download_failed"
-            case .steamInstallerUnavailable: return "steam_download_failed"
-            case .processLaunchFailed(let reason):
-                let normalized = reason.lowercased()
-                if normalized.contains("window") || normalized.contains("handoff") { return "steam_window_failed" }
-                return "steam_launch_failed"
-            case .invalidPath: return "permission_denied"
-            }
-        }
-        return "portside_error"
-    }
-
-    private func diagnosticContext(stage: String? = nil, errorCode: String? = nil, runtimeVersion: String? = nil, duration: TimeInterval? = nil, report: SteamReadinessReport? = nil) -> DiagnosticContext {
-        DiagnosticContext(
-            stage: stage,
-            errorCode: errorCode,
-            macOSVersion: requirements.macOSVersion,
-            architecture: requirements.architecture,
-            runtimeName: state.runtime?.name,
-            runtimeVersion: runtimeVersion ?? state.runtime?.version,
-            graphicsBackend: state.runtimeRecord?.graphicsBackend.rawValue,
-            processType: state.lastProcessType,
-            exitCode: state.lastExitCode,
-            duration: duration ?? state.lastSetupDuration,
-            retryCount: state.retryCount,
-            webhelperRestartCount: report?.webhelperRestartCount,
-            webhelperStarted: report?.webhelperStarted,
-            webhelperExitCode: report?.webhelperExitCode,
-            windowDetected: report?.windowDetected,
-            webhelperProcessCount: report?.webhelperProcessCount,
-            processStarted: report?.processStarted,
-            processHandoffComplete: report?.processHandoffComplete,
-            interfaceVerification: report?.interfaceVerification.rawValue,
-            msyncApplicable: report?.runtimeSynchronization.applicable,
-            msyncBootstrapped: report?.runtimeSynchronization.bootstrapped,
-            msyncRunning: report?.runtimeSynchronization.running
-        )
-    }
-
-    private enum SteamOpenOutcome: Equatable {
-        case ready
-        case alreadyCoordinated
-    }
-
-    private func openSteamAndWait(executable: URL, runtimePath: URL? = nil) async throws -> SteamOpenOutcome {
-        let runtimePath = runtimePath ?? state.runtimeRecord?.executablePath
-        guard let runtimePath else { throw PortsideError.runtimeUnavailable }
-        guard steamLaunchLock == nil else {
-            logger.write("Steam launch is already being coordinated by this Portside instance")
-            return .alreadyCoordinated
-        }
-        guard let launchLock = SteamLaunchLock.acquire() else {
-            logger.write("Another Portside instance is already launching Steam; no duplicate Wine process will be created", level: .warning)
-            return .alreadyCoordinated
-        }
-        steamLaunchLock = launchLock
-        defer { steamLaunchLock = nil }
-
-        state.lastProcessType = "steam-launch"
-        state.phase = .steamLaunching
-        message = friendlyMessage(for: .steamLaunching)
-        persistState()
-        diagnostics.breadcrumb("steam_launch_requested", context: diagnosticContext(stage: "launching_steam"))
-        progressIsIndeterminate = true
-
-        await stopManagedSteamIfNeeded()
-        guard await steamProcessLauncher.waitForExit(timeout: 10) else {
-            throw PortsideError.processLaunchFailed("The previous managed Steam launcher could not be closed safely.")
-        }
-
-        let existingWebhelperLines = await steamMonitor.captureWebhelperLines()
-        logger.write("Launching steam.exe with cef_32bit_legacy_login arguments")
-        _ = try await steamProcessLauncher.launch(
-            runtimePath: runtimePath,
-            prefix: PortsidePaths.steamPrefix,
-            steamExecutable: executable,
-            arguments: SteamInstaller.launchArguments
-        )
-        diagnostics.breadcrumb("steam_started", context: diagnosticContext(stage: "steam_process_started"))
-
-        let report = await steamMonitor.waitForSteamHandoff(prefix: PortsidePaths.steamPrefix, baselineWebhelperLines: existingWebhelperLines)
-        lastReadinessReport = report
-        logger.write("steamwebhelper_process_count=\(report.webhelperProcessCount)")
-        guard report.status == .processHandoffComplete else {
-            diagnostics.event("steam_handoff_failed", context: diagnosticContext(stage: "steam_handoff", errorCode: "steam_\(report.status.rawValue)", report: report))
-            throw PortsideError.processLaunchFailed("Steam process handoff could not be completed.")
-        }
-        diagnostics.event("steam_process_handoff_complete", context: diagnosticContext(stage: "steam_handoff", report: report))
-        state.phase = .steamProcessHandoffComplete
-        state.setupCompleted = true
-        state.lastSteamStatus = .processHandoffComplete
-        state.lastError = nil
-        persistState()
-        showsInstaller = false
-        return .ready
-    }
-
-    private func stopManagedSteamIfNeeded() async {
-        guard let runtimePath = state.runtimeRecord?.executablePath ?? state.runtime?.executablePath.map(URL.init(fileURLWithPath:)),
-              FileManager.default.isExecutableFile(atPath: runtimePath.path) else { return }
-        if await steamMonitor.isSteamProcessRunning(prefix: PortsidePaths.steamPrefix) {
-            logger.write("Stopping the existing Portside Steam process before continuing")
-            await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
-            _ = await steamMonitor.waitForSteamToStop(prefix: PortsidePaths.steamPrefix, timeout: 20)
-        }
-        _ = await steamProcessLauncher.waitForExit(timeout: 10)
-    }
-
-    private func terminateAfterHandOff() {
-        guard !handoffExitScheduled else { return }
-        handoffExitScheduled = true
-        logger.write("Steam handoff completed; closing Portside")
-        NSApp.hide(nil)
-        DispatchQueue.main.async {
-            NSApp.terminate(nil)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                if NSApp.isRunning { NSApp.terminate(nil) }
-            }
-        }
-    }
-
-    private func persistState() {
-        state.lastUpdated = Date()
-        try? store.save(state)
     }
 
     func stopSteam() {
-        Task {
-            guard let runtimePath = state.runtimeRecord?.executablePath else { return }
-            await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
-            message = "Steam was asked to close safely."
-        }
+        guard let wrapper = state.wrapperPath, let prefix = state.prefixPath else { return }
+        steamLauncher.stopManagedProcesses(wrapper: URL(fileURLWithPath: wrapper), prefix: URL(fileURLWithPath: prefix))
+        message = "Steam is closing…"
     }
 
-    func repair() {
-        diagnostics.breadcrumb("repair_requested", context: diagnosticContext(stage: "repair"))
-        state.setupCompleted = false
-        state.steamInstalled = SteamInstaller.locateInstalledExecutable() != nil
-        showsInstaller = true
-        setupStep = .checking
-        setUp()
-    }
+    func repair() { state.setupCompleted = false; setUp() }
 
     func exportReport() {
         do {
-            let url = try DiagnosticReport.create(state: state, requirements: requirements, logger: logger)
+            let report = try DiagnosticReport.create(state: state, requirements: requirements, logger: logger)
             didExportReport = true
-            NSWorkspace.shared.activateFileViewerSelecting([url])
-        } catch {
-            errorMessage = "Could not export the diagnostic report."
-            diagnostics.capture(error: error, context: diagnosticContext(stage: "diagnostic_report", errorCode: "diagnostic_report_failed"))
-        }
+            NSWorkspace.shared.activateFileViewerSelecting([report])
+        } catch { errorMessage = "We couldn't create the support report." }
     }
 
     func openStorage() { NSWorkspace.shared.open(PortsidePaths.root) }
 
     func clearCache() {
-        do {
-            try FileManager.default.removeItem(at: PortsidePaths.cache)
-            try FileManager.default.createDirectory(at: PortsidePaths.cache, withIntermediateDirectories: true)
-            message = "Download cache cleared. Installed games were preserved."
-        } catch {
-            errorMessage = "Could not clear the download cache."
-            diagnostics.capture(error: error, context: diagnosticContext(stage: "cache", errorCode: "permission_denied"))
+        try? FileManager.default.removeItem(at: PortsidePaths.cache)
+        try? FileManager.default.createDirectory(at: PortsidePaths.cache, withIntermediateDirectories: true)
+        message = "Temporary setup files were removed. Your games and Steam data are safe."
+    }
+
+    private func context(stage: String, errorCode: String? = nil, report: SteamReadinessReport? = nil) -> DiagnosticContext {
+        DiagnosticContext(
+            stage: stage,
+            errorCode: errorCode,
+            macOSVersion: requirements.macOSVersion,
+            architecture: requirements.architecture,
+            sikarugirVersion: SikarugirBaselineConfiguration.creatorVersion,
+            templateVersion: SikarugirBaselineConfiguration.templateVersion,
+            engineVersion: SikarugirBaselineConfiguration.engineVersion,
+            renderer: SikarugirBaselineConfiguration.golden.renderer.rawValue,
+            exitCode: state.lastExitCode,
+            windowDetected: report?.windowDetected,
+            processStarted: report?.processStarted,
+            webHelperStarted: report?.webHelperStarted,
+            interfaceVerification: report?.interfaceVerification.rawValue,
+            msyncEnabled: true,
+            esyncEnabled: true
+        )
+    }
+
+    private func errorCode(_ error: Error) -> String {
+        switch error {
+        case PortsideError.rosettaUnavailable: return "rosetta_unavailable"
+        case PortsideError.runtimeUnavailable: return "sikarugir_runtime_unavailable"
+        case PortsideError.checksumMismatch: return "official_artifact_checksum_failed"
+        case PortsideError.processTimedOut: return "official_process_timeout"
+        case PortsideError.processFailed: return "official_process_failed"
+        case PortsideError.processLaunchFailed: return "steam_window_failed"
+        default: return "sikarugir_setup_failed"
         }
     }
 
-    func reset() {
-        do {
-            try FileManager.default.removeItem(at: PortsidePaths.root)
-            state = EnvironmentState()
-            setupStep = .checking
-            message = "Portside was reset."
-            errorMessage = nil
-        } catch {
-            errorMessage = "Could not reset Portside."
-            diagnostics.capture(error: error, context: diagnosticContext(stage: "reset", errorCode: "permission_denied"))
+    private func persist() {
+        state.lastUpdated = Date()
+        try? store.save(state)
+    }
+
+    private func isValidWrapper(_ wrapper: URL) -> Bool {
+        (try? SikarugirWrapperValidator.validate(wrapper: wrapper)) != nil
+    }
+
+    private func hideAfterSteamWindow() {
+        NSApp.hide(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            if NSApp.isRunning { NSApp.terminate(nil) }
         }
     }
 }
@@ -538,198 +293,57 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            Color(nsColor: .windowBackgroundColor)
-                .ignoresSafeArea()
+            Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
             if model.showsInstaller {
                 VStack(spacing: 0) {
-                    InstallerHeader(model: model)
+                    HStack {
+                        PortsideLogoView(size: 34)
+                        VStack(alignment: .leading) {
+                            Text("Portside").font(.headline)
+                            Text("Your private gaming environment").font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 22)
+                    .frame(height: 58)
                     Divider()
-                    if model.setupStep == .failed { FailureView(model: model) }
-                    else { SetupProgressView(model: model) }
-                }
-                .ignoresSafeArea(.container, edges: .top)
-            } else {
-                ReadyView()
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay {
-            WindowConfigurator(
-                contentSize: model.setupStep == .failed
-                    ? CGSize(width: InstallerLayout.failureWidth, height: InstallerLayout.failureContentHeight)
-                    : CGSize(width: InstallerLayout.width, height: InstallerLayout.contentHeight),
-                isVisible: true
-            )
-                .frame(width: 0, height: 0)
-        }
-    }
-}
-
-struct ReadyView: View {
-    var body: some View {
-        VStack(spacing: 12) {
-            PortsideLogoView(size: 54)
-            Text("Portside")
-                .font(.title2.weight(.semibold))
-            Text("Steam is ready")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .frame(width: InstallerLayout.width, height: InstallerLayout.contentHeight)
-    }
-}
-
-private enum InstallerLayout {
-    static let width: CGFloat = 460
-    static let contentHeight: CGFloat = 276
-    static let failureWidth: CGFloat = 560
-    static let failureContentHeight: CGFloat = 350
-    static let headerHeight: CGFloat = 56
-    static let progressContentHeight = contentHeight - headerHeight - 1
-    static let failureContentBodyHeight = failureContentHeight - headerHeight - 1
-}
-
-struct InstallerHeader: View {
-    @ObservedObject var model: PortsideModel
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            PortsideLogoView(size: 34)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Portside")
-                    .font(.headline)
-                Text(model.state.setupCompleted && model.setupStep == .failed ? "Steam could not be opened" : "Preparing Steam for your Mac")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 22)
-        .frame(height: InstallerLayout.headerHeight, alignment: .center)
-        .frame(maxWidth: .infinity, alignment: .center)
-    }
-}
-
-struct WindowConfigurator: NSViewRepresentable {
-    let contentSize: CGSize
-    let isVisible: Bool
-
-    func makeNSView(context: Context) -> ConfiguringView { ConfiguringView() }
-
-    func updateNSView(_ nsView: ConfiguringView, context: Context) {
-        nsView.apply(contentSize: contentSize, isVisible: isVisible)
-    }
-
-    final class ConfiguringView: NSView {
-        private var lastSize: CGSize?
-        private var lastVisibility: Bool?
-        private var desiredSize = CGSize(width: InstallerLayout.width, height: InstallerLayout.contentHeight)
-        private var desiredVisibility = true
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            apply(contentSize: desiredSize, isVisible: desiredVisibility)
-        }
-
-        func apply(contentSize: CGSize, isVisible: Bool) {
-            desiredSize = contentSize
-            desiredVisibility = isVisible
-            guard let window else { return }
-            guard lastSize != contentSize || lastVisibility != isVisible else { return }
-            let wasVisible = window.isVisible
-            let sizeChanged = lastSize != contentSize
-            let visibilityChanged = lastVisibility != isVisible
-            lastSize = contentSize
-            lastVisibility = isVisible
-            window.title = "Portside"
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.isMovableByWindowBackground = true
-            window.styleMask.remove(.resizable)
-            window.styleMask.remove(.miniaturizable)
-            window.styleMask.remove(.closable)
-            window.standardWindowButton(.closeButton)?.isHidden = true
-            window.standardWindowButton(.miniaturizeButton)?.isHidden = true
-            window.standardWindowButton(.zoomButton)?.isHidden = true
-            window.setContentSize(contentSize)
-            let frameSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: contentSize)).size
-            window.minSize = frameSize
-            window.maxSize = frameSize
-            if isVisible {
-                if sizeChanged || visibilityChanged || !wasVisible {
-                    center(window)
-                }
-                if wasVisible { window.orderFront(nil) }
-                else { window.makeKeyAndOrderFront(nil) }
-                if sizeChanged || visibilityChanged || !wasVisible {
-                    DispatchQueue.main.async { [weak self, weak window] in
-                        guard let self, let window, window.isVisible else { return }
-                        self.center(window)
+                    if model.setupStep == .failed {
+                        VStack(spacing: 16) {
+                            Spacer()
+                            Text(model.message).font(.title3.weight(.medium))
+                            Button("Try Again") { model.repair() }.buttonStyle(.borderedProminent).disabled(model.isWorking)
+                            Spacer()
+                        }
+                    } else {
+                        VStack(spacing: 20) {
+                            Spacer()
+                            Text(model.message).font(.title3.weight(.medium))
+                            if model.progressIsIndeterminate { ProgressView().frame(width: 350) }
+                            else { ProgressView(value: model.progress).frame(width: 350) }
+                            Spacer()
+                        }
                     }
                 }
             } else {
-                window.orderOut(nil)
+                VStack(spacing: 10) {
+                    PortsideLogoView(size: 54)
+                    Text("Portside").font(.title2.weight(.semibold))
+                    Text("Steam is ready to play").font(.subheadline).foregroundStyle(.secondary)
+                    Button("Open Steam") { model.launchSteam() }
+                        .buttonStyle(.borderedProminent)
+                }
             }
         }
-
-        private func center(_ window: NSWindow) {
-            let screen = window.screen ?? NSScreen.main ?? NSScreen.screens.first
-            guard let screen else { return }
-            let visibleFrame = screen.visibleFrame
-            let frame = window.frame
-            let origin = NSPoint(
-                x: visibleFrame.midX - (frame.width / 2),
-                y: visibleFrame.midY - (frame.height / 2)
-            )
-            window.setFrameOrigin(origin)
-        }
-    }
-}
-
-struct SetupProgressView: View {
-    @ObservedObject var model: PortsideModel
-    var body: some View {
-        VStack(spacing: 22) {
-            Spacer()
-            Text(model.message.isEmpty ? "Preparing Portside…" : model.message).font(.title3.weight(.medium))
-            if model.progressIsIndeterminate { ProgressView().frame(width: 360) }
-            else { ProgressView(value: model.progress).frame(width: 360) }
-            Spacer()
-        }.padding(22).frame(width: InstallerLayout.width, height: InstallerLayout.progressContentHeight)
-    }
-}
-
-struct FailureView: View {
-    @ObservedObject var model: PortsideModel
-
-    var body: some View {
-        VStack(spacing: 18) {
-            Spacer()
-            Text("Could not complete setup.").font(.title3.weight(.medium))
-            HStack(spacing: 12) {
-                Button("Try Again") { model.repair() }.buttonStyle(.borderedProminent)
-            }.disabled(model.isWorking)
-            Spacer()
-        }.padding(22).frame(width: InstallerLayout.failureWidth, height: InstallerLayout.failureContentBodyHeight)
     }
 }
 
 struct PortsideLogoView: View {
-    var size: CGFloat = 96
-
+    let size: CGFloat
     var body: some View {
-        Group {
-            if let url = Bundle.main.url(forResource: "PortsideLogo", withExtension: "png"), let image = NSImage(contentsOf: url) {
-                Image(nsImage: image).resizable().scaledToFit()
-            } else {
-                Image(systemName: "shippingbox.and.arrow.backward.fill").resizable().scaledToFit().padding(18)
-            }
+        if let url = Bundle.main.url(forResource: "PortsideLogo", withExtension: "png"), let image = NSImage(contentsOf: url) {
+            Image(nsImage: image).resizable().scaledToFit().frame(width: size, height: size)
+        } else {
+            Image(systemName: "shippingbox.and.arrow.backward.fill").resizable().scaledToFit().padding(8).frame(width: size, height: size)
         }
-        .frame(width: size, height: size)
-        .accessibilityLabel("Portside")
     }
-}
-
-struct AboutPortsideButton: View {
-    var body: some View { Button("About Portside") { NSApp.orderFrontStandardAboutPanel(nil) } }
 }
