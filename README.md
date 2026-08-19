@@ -17,6 +17,10 @@ swift build --package-path apps/desktop
 open build/Portside.app
 ~~~
 
+The `Build Desktop` GitHub Actions workflow runs after a successful `CI` run
+on `main` (or manually) and publishes the unsigned validation build as
+`Portside.app.zip`, `Portside.dmg`, its checksum file and debug symbols.
+
 ## Monorepo layout
 
 The repository keeps the two deployable products isolated:
