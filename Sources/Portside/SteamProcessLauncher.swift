@@ -12,7 +12,7 @@ final class SteamProcessLauncher {
     private var process: Process?
     private var outputPipe: Pipe?
 
-    func launch(runtimePath: URL, prefix: URL, steamExecutable: URL, arguments: [String]) async throws -> Process {
+    func launch(runtimePath: URL, prefix: URL, steamExecutable: URL, arguments: [String], esyncEnabled: Bool = true) async throws -> Process {
         guard process?.isRunning != true else {
             throw PortsideError.processLaunchFailed("A managed Wine Steam process is already running.")
         }
@@ -22,7 +22,7 @@ final class SteamProcessLauncher {
         let process = Process()
         process.executableURL = runtimePath
         process.arguments = [steamExecutable.path] + arguments
-        process.environment = WineProcessEnvironment.make(runtimeExecutable: runtimePath, prefix: prefix)
+        process.environment = WineProcessEnvironment.make(runtimeExecutable: runtimePath, prefix: prefix, esyncEnabled: esyncEnabled)
         process.currentDirectoryURL = prefix
 
         let outputPipe = Pipe()
@@ -52,7 +52,7 @@ final class SteamProcessLauncher {
         }
         self.process = process
         self.outputPipe = outputPipe
-        logger.write("Wine Steam process started directly")
+        logger.write("Wine Steam process started directly (WINEESYNC=\(esyncEnabled ? "1" : "0"))")
         return process
     }
 

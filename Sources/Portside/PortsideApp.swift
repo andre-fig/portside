@@ -510,7 +510,8 @@ final class PortsideModel: ObservableObject {
                 runtimePath: runtimePath,
                 prefix: PortsidePaths.steamPrefix,
                 steamExecutable: executable,
-                arguments: launchArguments
+                arguments: launchArguments,
+                esyncEnabled: strategy.esyncEnabled
             )
             steamLaunchArgumentsApplied = true
             logSteamLaunchProfile()
@@ -562,7 +563,7 @@ final class PortsideModel: ObservableObject {
                 let launchStartedAt = Date()
                 let logBaseline = SteamCEFLogAnalyzer.captureBaseline(prefix: PortsidePaths.steamPrefix)
                 let launchArguments = SteamInstaller.loginLaunchArguments(for: strategy)
-                _ = try await steamProcessLauncher.launch(runtimePath: runtimePath, prefix: PortsidePaths.steamPrefix, steamExecutable: executable, arguments: launchArguments)
+                _ = try await steamProcessLauncher.launch(runtimePath: runtimePath, prefix: PortsidePaths.steamPrefix, steamExecutable: executable, arguments: launchArguments, esyncEnabled: strategy.esyncEnabled)
                 steamLaunchArgumentsApplied = true
                 logSteamLaunchProfile()
                 diagnostics.event("steam_launch_profile_applied", context: diagnosticContext(stage: "cef_cache_recovery"))

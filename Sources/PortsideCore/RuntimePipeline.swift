@@ -113,13 +113,15 @@ public enum WineProcessEnvironment {
         runtimeExecutable: URL,
         prefix: URL,
         baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
-        wineDebug: String = WineProcessEnvironment.defaultWineDebug
+        wineDebug: String = WineProcessEnvironment.defaultWineDebug,
+        esyncEnabled: Bool = true
     ) -> [String: String] {
         var environment = baseEnvironment
         environment["WINEPREFIX"] = prefix.path
         environment["WINEARCH"] = "win64"
         environment["WINEDLLOVERRIDES"] = WineRuntimePolicy.dllOverrides
         environment["WINEDEBUG"] = wineDebug
+        environment["WINEESYNC"] = esyncEnabled ? "1" : "0"
         environment["PATH"] = prepend(runtimeExecutable.deletingLastPathComponent().path, to: baseEnvironment["PATH"])
         environment["DYLD_FRAMEWORK_PATH"] = prepend(
             GStreamerManager.frameworkURL.deletingLastPathComponent().path,

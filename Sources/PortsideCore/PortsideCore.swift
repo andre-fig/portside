@@ -404,7 +404,7 @@ public enum SteamInstaller {
     public static let defaultLanguageArguments = ["-language", "english"]
     public static let uiArguments = SteamLaunchConfiguration.normal.arguments
     public static let fallbackUIArguments = SteamLaunchConfiguration.fallback.arguments
-    public static let uiLaunchConfigurations = [SteamLaunchConfiguration.normal, SteamLaunchConfiguration.disableGPU, SteamLaunchConfiguration.fallback]
+    public static let uiLaunchConfigurations = [SteamLaunchConfiguration.normal, SteamLaunchConfiguration.noESync, SteamLaunchConfiguration.disableGPU, SteamLaunchConfiguration.fallback]
     public static var localURL: URL { PortsidePaths.downloads.appendingPathComponent("SteamSetup.exe") }
 
     public static func loginLaunchArguments(for configuration: SteamLaunchConfiguration) -> [String] {
@@ -618,11 +618,13 @@ public struct SteamLaunchConfiguration: Equatable, Sendable {
     public let disableCEFGPU: Bool
     public let disableCEFGPUCompositing: Bool
     public let additionalArguments: [String]
+    public let esyncEnabled: Bool
 
-    public init(disableCEFGPU: Bool, disableCEFGPUCompositing: Bool = false, additionalArguments: [String] = []) {
+    public init(disableCEFGPU: Bool, disableCEFGPUCompositing: Bool = false, additionalArguments: [String] = [], esyncEnabled: Bool = true) {
         self.disableCEFGPU = disableCEFGPU
         self.disableCEFGPUCompositing = disableCEFGPUCompositing
         self.additionalArguments = additionalArguments
+        self.esyncEnabled = esyncEnabled
     }
 
     public var arguments: [String] {
@@ -633,10 +635,13 @@ public struct SteamLaunchConfiguration: Equatable, Sendable {
     }
 
     public var identifier: String {
-        arguments.isEmpty ? "default" : arguments.joined(separator: " ")
+        var components = arguments
+        if !esyncEnabled { components.append("WINEESYNC=0") }
+        return components.isEmpty ? "default" : components.joined(separator: " ")
     }
 
     public static let normal = SteamLaunchConfiguration(disableCEFGPU: false)
+    public static let noESync = SteamLaunchConfiguration(disableCEFGPU: false, esyncEnabled: false)
     public static let primary = normal
     public static let disableGPU = SteamLaunchConfiguration(disableCEFGPU: true)
     public static let fallback = SteamLaunchConfiguration(disableCEFGPU: true, disableCEFGPUCompositing: true)

@@ -106,10 +106,19 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertEqual(environment["LC_ALL"], "en_US.UTF-8")
         XCTAssertEqual(environment["WINEPREFIX"], "/private/Prefix/Steam")
         XCTAssertEqual(environment["WINEARCH"], "win64")
+        XCTAssertEqual(environment["WINEESYNC"], "1")
         XCTAssertEqual(environment["PATH"]?.split(separator: ":").first.map(String.init), "/private/Runtime/bin")
         XCTAssertTrue(environment["PATH"]?.contains("/usr/bin") == true)
         XCTAssertFalse(environment["DYLD_FRAMEWORK_PATH"]?.isEmpty ?? true)
         XCTAssertTrue(environment["GST_PLUGIN_PATH"]?.contains("gstreamer-1.0") == true)
+
+        let noESyncEnvironment = WineProcessEnvironment.make(
+            runtimeExecutable: URL(fileURLWithPath: "/private/Runtime/bin/wine"),
+            prefix: URL(fileURLWithPath: "/private/Prefix/Steam"),
+            baseEnvironment: [:],
+            esyncEnabled: false
+        )
+        XCTAssertEqual(noESyncEnvironment["WINEESYNC"], "0")
     }
 
     func testDownloaderRejectsUnapprovedHostBeforeNetworkAccess() async {
@@ -230,8 +239,10 @@ final class PortsideCoreTests: XCTestCase {
     func testSteamCEFStrategiesAreSeparateLimitedAndSecure() {
         XCTAssertEqual(SteamInstaller.uiArguments, [])
         XCTAssertEqual(SteamInstaller.fallbackUIArguments, ["-cef-disable-gpu", "-cef-disable-gpu-compositing"])
-        XCTAssertEqual(SteamInstaller.uiLaunchConfigurations.count, 3)
-        XCTAssertEqual(SteamInstaller.uiLaunchConfigurations.map(\.arguments), [[], ["-cef-disable-gpu"], ["-cef-disable-gpu", "-cef-disable-gpu-compositing"]])
+        XCTAssertEqual(SteamInstaller.uiLaunchConfigurations.count, 4)
+        XCTAssertEqual(SteamInstaller.uiLaunchConfigurations.map(\.arguments), [[], [], ["-cef-disable-gpu"], ["-cef-disable-gpu", "-cef-disable-gpu-compositing"]])
+        XCTAssertEqual(SteamInstaller.uiLaunchConfigurations[1].identifier, "WINEESYNC=0")
+        XCTAssertFalse(SteamInstaller.uiLaunchConfigurations[1].esyncEnabled)
         XCTAssertFalse(SteamInstaller.uiLaunchConfigurations.flatMap(\.arguments).contains("-no-cef-sandbox"))
         XCTAssertFalse(SteamInstaller.uiLaunchConfigurations.flatMap(\.arguments).contains { $0.contains("steamapps") })
     }
