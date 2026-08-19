@@ -21,7 +21,8 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
         "steamwebhelper_timeout", "steam_login_ui_unverified", "steam_html_cache_recovery_attempted",
         "steam_cef_initialization_failed", "steam_window_detected", "steam_cef_strategy_attempted",
         "cef_ui_unverified", "cef_failure_detected", "steam_ui_ready", "steam_launch_profile_applied",
-        "steam_native_login_migration_started", "steam_native_login_migration_completed", "steam_native_login_migration_failed"
+        "steam_native_login_migration_started", "steam_native_login_migration_completed", "steam_native_login_migration_failed",
+        "steam_native_login_required"
     ]
 
     public init() {

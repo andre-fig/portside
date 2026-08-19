@@ -148,14 +148,23 @@ final class PortsideCoreTests: XCTestCase {
         try Data("userdata".utf8).write(to: source.appendingPathComponent("userdata/76561198000000000/localconfig.vdf"))
         try FileManager.default.createDirectory(at: destination.appendingPathComponent("config", isDirectory: true), withIntermediateDirectories: true)
         try Data("old".utf8).write(to: destination.appendingPathComponent("config/old-file"))
+        try Data("old registry".utf8).write(to: destination.appendingPathComponent("registry.vdf"))
+        try FileManager.default.createDirectory(at: destination.appendingPathComponent("userdata/old-account", isDirectory: true), withIntermediateDirectories: true)
+        try Data("old userdata".utf8).write(to: destination.appendingPathComponent("userdata/old-account/localconfig.vdf"))
+        let marker = root.appendingPathComponent("native-steam-login.marker")
         defer { try? FileManager.default.removeItem(at: root) }
 
-        XCTAssertEqual(try SteamNativeLoginMigration.copyLoginData(from: source, to: destination), SteamNativeLoginMigration.requiredItems)
+        XCTAssertFalse(SteamNativeLoginMigration.isComplete(at: destination, markerURL: marker))
+        XCTAssertEqual(try SteamNativeLoginMigration.copyLoginData(from: source, to: destination, completionMarkerURL: marker), SteamNativeLoginMigration.requiredItems)
         XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("config/loginusers.vdf")), "login data")
         XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("registry.vdf")), "registry")
         XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("userdata/76561198000000000/localconfig.vdf")), "userdata")
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.appendingPathComponent("config/old-file").path))
-        XCTAssertTrue(SteamNativeLoginMigration.isComplete(at: destination))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.appendingPathComponent("userdata/old-account").path))
+        XCTAssertTrue(SteamNativeLoginMigration.validateCopiedData(from: source, to: destination))
+        XCTAssertTrue(SteamNativeLoginMigration.isComplete(at: destination, markerURL: marker))
+        SteamNativeLoginMigration.invalidate(markerURL: marker)
+        XCTAssertFalse(SteamNativeLoginMigration.isComplete(at: destination, markerURL: marker))
         let remaining = try FileManager.default.contentsOfDirectory(at: destination.deletingLastPathComponent(), includingPropertiesForKeys: nil).map(\.lastPathComponent)
         XCTAssertFalse(remaining.contains { $0.hasPrefix(".native-steam-login-") })
     }
@@ -259,6 +268,7 @@ final class PortsideCoreTests: XCTestCase {
             "webhelper_gpu.txt": "ANGLE renderer selected\n",
             "cef_log.txt": "GPU process crashed\n",
             "steamui_html.txt": "BrowserReady\nCreateResponse\nGetDesiredSteamUIWindows\n",
+            "steamui_login.txt": "WaitingForCredentials\nSetLoginState None\n",
             "webhelper.txt": "renderer process exited\nC:\\Program Files (x86)\\Steam\\bin\\cef\\cef.win64\\steamwebhelper.exe\n",
             "bootstrap_log.txt": "missing dll: d3dcompiler_47.dll\n",
             "console_log.txt": "ERR_CONNECTION_RESET\n",
@@ -277,6 +287,7 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertTrue(analysis.failureCategories.contains("cef_network_failure"))
         XCTAssertTrue(analysis.failureCategories.contains("cef_certificate_failure"))
         XCTAssertEqual(analysis.effectiveCEFArchitecture, "64bit")
+        XCTAssertTrue(analysis.loginScreenDetected)
         XCTAssertFalse(analysis.failureCategories.contains("gpu"))
         XCTAssertFalse(analysis.hasStrongUIEvidence == true)
     }

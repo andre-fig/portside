@@ -479,7 +479,7 @@ public enum SteamNativeLoginMigrationError: LocalizedError, Equatable, Sendable 
     public var errorDescription: String? {
         switch self {
         case .missingSourceItem(let item): return "Native Steam login data is missing: \(item)."
-        case .loginNotDetected: return "Native Steam login was not detected before the timeout."
+        case .loginNotDetected: return "Native Steam login was not detected."
         case .copyFailed: return "Native Steam login data could not be copied."
         case .nativeSteamInstallationFailed: return "The native Steam app could not be installed."
         case .nativeSteamApplicationUnavailable: return "The native Steam app could not be opened."
@@ -489,6 +489,10 @@ public enum SteamNativeLoginMigrationError: LocalizedError, Equatable, Sendable 
 
 public enum SteamNativeLoginMigration {
     public static let requiredItems = ["config", "registry.vdf", "userdata"]
+    private static let completionMarkerContents = Data("Portside native Steam login migration v1\n".utf8)
+    public static var completionMarkerURL: URL {
+        PortsidePaths.root.appendingPathComponent("native-steam-login-migration.marker")
+    }
 
     public static var nativeSteamSupportDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -499,8 +503,23 @@ public enum SteamNativeLoginMigration {
         PortsidePaths.steamPrefix.appendingPathComponent("drive_c/Program Files (x86)/Steam", isDirectory: true)
     }
 
-    public static func isComplete(at destinationRoot: URL = managedSteamDirectory, fileManager: FileManager = .default) -> Bool {
-        requiredItems.allSatisfy { fileManager.fileExists(atPath: destinationRoot.appendingPathComponent($0).path) }
+    public static func isComplete(at destinationRoot: URL = managedSteamDirectory, markerURL: URL = completionMarkerURL, fileManager: FileManager = .default) -> Bool {
+        guard let marker = try? Data(contentsOf: markerURL), marker == completionMarkerContents else { return false }
+        return requiredItems.allSatisfy { fileManager.fileExists(atPath: destinationRoot.appendingPathComponent($0).path) }
+    }
+
+    public static func invalidate(markerURL: URL = completionMarkerURL, fileManager: FileManager = .default) {
+        try? fileManager.removeItem(at: markerURL)
+    }
+
+    public static func validateCopiedData(from sourceRoot: URL, to destinationRoot: URL, fileManager: FileManager = .default) -> Bool {
+        requiredItems.allSatisfy { item in
+            itemsMatch(
+                source: sourceRoot.appendingPathComponent(item),
+                destination: destinationRoot.appendingPathComponent(item),
+                fileManager: fileManager
+            )
+        }
     }
 
     public static func loginState(at sourceRoot: URL = nativeSteamSupportDirectory, fileManager: FileManager = .default) -> SteamNativeLoginState {
@@ -518,7 +537,7 @@ public enum SteamNativeLoginMigration {
     }
 
     @discardableResult
-    public static func copyLoginData(from sourceRoot: URL = nativeSteamSupportDirectory, to destinationRoot: URL = managedSteamDirectory, fileManager: FileManager = .default) throws -> [String] {
+    public static func copyLoginData(from sourceRoot: URL = nativeSteamSupportDirectory, to destinationRoot: URL = managedSteamDirectory, completionMarkerURL: URL? = nil, fileManager: FileManager = .default) throws -> [String] {
         for item in requiredItems where !fileManager.fileExists(atPath: sourceRoot.appendingPathComponent(item).path) {
             throw SteamNativeLoginMigrationError.missingSourceItem(item)
         }
@@ -541,13 +560,39 @@ public enum SteamNativeLoginMigration {
                 }
                 try fileManager.moveItem(at: stagingRoot.appendingPathComponent(item), to: destination)
             }
+            guard validateCopiedData(from: sourceRoot, to: destinationRoot, fileManager: fileManager) else {
+                throw SteamNativeLoginMigrationError.copyFailed
+            }
+            if let completionMarkerURL {
+                try fileManager.createDirectory(at: completionMarkerURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try completionMarkerContents.write(to: completionMarkerURL, options: .atomic)
+            }
             try? fileManager.removeItem(at: stagingRoot)
             return requiredItems
         } catch {
             try? fileManager.removeItem(at: stagingRoot)
+            if let completionMarkerURL { invalidate(markerURL: completionMarkerURL, fileManager: fileManager) }
             if error is SteamNativeLoginMigrationError { throw error }
             throw SteamNativeLoginMigrationError.copyFailed
         }
+    }
+
+    private static func itemsMatch(source: URL, destination: URL, fileManager: FileManager) -> Bool {
+        guard fileManager.fileExists(atPath: source.path), fileManager.fileExists(atPath: destination.path) else { return false }
+        let sourceIsDirectory = (try? source.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+        let destinationIsDirectory = (try? destination.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+        guard sourceIsDirectory == destinationIsDirectory else { return false }
+        if sourceIsDirectory {
+            guard let sourceChildren = try? fileManager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil),
+                  let destinationChildren = try? fileManager.contentsOfDirectory(at: destination, includingPropertiesForKeys: nil) else { return false }
+            let sourceNames = Set(sourceChildren.map(\.lastPathComponent))
+            let destinationNames = Set(destinationChildren.map(\.lastPathComponent))
+            guard sourceNames == destinationNames else { return false }
+            return sourceNames.allSatisfy { name in
+                itemsMatch(source: source.appendingPathComponent(name), destination: destination.appendingPathComponent(name), fileManager: fileManager)
+            }
+        }
+        return fileManager.contentsEqual(atPath: source.path, andPath: destination.path)
     }
 }
 

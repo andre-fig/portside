@@ -65,6 +65,7 @@ final class SteamNativeLoginCoordinator {
             _ = try SteamNativeLoginMigration.copyLoginData(
                 from: sourceRoot,
                 to: SteamNativeLoginMigration.managedSteamDirectory,
+                completionMarkerURL: SteamNativeLoginMigration.completionMarkerURL,
                 fileManager: fileManager
             )
             logger.write("Native Steam login migration copied the required data")
@@ -153,7 +154,7 @@ final class SteamNativeLoginCoordinator {
                 throw SteamNativeLoginMigrationError.nativeSteamInstallationFailed
             }
 
-            let mountPoint = fileManager.temporaryDirectory.appendingPathComponent("Portside-Steam-Mount-(UUID().uuidString)", isDirectory: true)
+            let mountPoint = fileManager.temporaryDirectory.appendingPathComponent("Portside-Steam-Mount-\(UUID().uuidString)", isDirectory: true)
             try fileManager.createDirectory(at: mountPoint, withIntermediateDirectories: true)
             let attach = try await DirectProcess.run(
                 executable: URL(fileURLWithPath: "/usr/bin/hdiutil"),

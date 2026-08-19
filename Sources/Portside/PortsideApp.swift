@@ -143,17 +143,6 @@ final class PortsideModel: ObservableObject {
                 let windows10Result = try await WinePrefixManager.ensureWindows10(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix, logger: logger)
                 guard windows10Result.status == 0 else { throw RuntimePipelineError.processFailed("Windows 10 prefix configuration", windows10Result.status) }
                 try await migrateNativeSteamLoginIfNeeded(runtimePath: runtimePath)
-                updateProgress(0.92, phase: .validatingInstallation)
-                updateProgress(0.88, phase: .steamUpdating)
-                diagnostics.breadcrumb("steam_update_started", context: diagnosticContext(stage: "steam_update"))
-                if !steamMonitor.bootstrapComplete(prefix: PortsidePaths.steamPrefix) {
-                    state.lastProcessType = "steam-bootstrap"
-                    try supervisor.launchSteam(state: state, arguments: SteamInstaller.bootstrapArguments)
-                    guard await steamMonitor.waitForBootstrap(prefix: PortsidePaths.steamPrefix) else {
-                        throw PortsideError.processLaunchFailed("Steam bootstrap did not complete before the timeout.")
-                    }
-                    supervisor.requestStop()
-                }
                 updateProgress(0.96, phase: .validatingInstallation)
                 let launchOutcome = try await openSteamAndWait(executable: steamExecutable)
                 if launchOutcome == .alreadyCoordinated {
@@ -356,7 +345,7 @@ final class PortsideModel: ObservableObject {
         if let migrationError = error as? SteamNativeLoginMigrationError {
             switch migrationError {
             case .missingSourceItem, .copyFailed: return "steam_native_login_copy_failed"
-            case .loginNotDetected: return "steam_native_login_timeout"
+            case .loginNotDetected: return "steam_native_login_not_detected"
             case .nativeSteamInstallationFailed: return "native_steam_install_failed"
             case .nativeSteamApplicationUnavailable: return "native_steam_launch_failed"
             }
@@ -419,20 +408,37 @@ final class PortsideModel: ObservableObject {
     private func migrateNativeSteamLoginIfNeeded(runtimePath: URL) async throws {
         guard !SteamNativeLoginMigration.isComplete(fileManager: .default) else { return }
 
-        state.lastProcessType = "native-steam-login-migration"
-        state.phase = .steamNativeLogin
-        message = friendlyMessage(for: .steamNativeLogin)
+        state.lastProcessType = "steam-bootstrap"
+        state.phase = .steamUpdating
+        message = friendlyMessage(for: .steamUpdating)
         progressIsIndeterminate = true
         persistState()
-        diagnostics.breadcrumb("steam_native_login_migration_started", context: diagnosticContext(stage: "native_steam_login_migration"))
+        diagnostics.breadcrumb("steam_update_started", context: diagnosticContext(stage: "steam_update"))
+
+        if !steamMonitor.bootstrapComplete(prefix: PortsidePaths.steamPrefix) {
+            try supervisor.launchSteam(state: state, arguments: SteamInstaller.bootstrapArguments)
+            guard await steamMonitor.waitForBootstrap(prefix: PortsidePaths.steamPrefix) else {
+                throw PortsideError.processLaunchFailed("Steam bootstrap did not complete before the timeout.")
+            }
+            supervisor.requestStop()
+            guard await supervisor.waitForStop(timeout: 10) else {
+                throw PortsideError.processLaunchFailed("Steam bootstrap could not be closed before login migration.")
+            }
+        }
 
         await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
-        guard await steamMonitor.waitForSteamToStop(timeout: 10) else {
+        guard await steamMonitor.waitForSteamToStop(timeout: 20) else {
             throw PortsideError.processLaunchFailed("The Windows Steam process could not be closed before login migration.")
         }
         guard await steamProcessLauncher.waitForExit(timeout: 10) else {
             throw PortsideError.processLaunchFailed("The Windows Steam launcher could not be closed before login migration.")
         }
+
+        state.lastProcessType = "native-steam-login-migration"
+        state.phase = .steamNativeLogin
+        message = friendlyMessage(for: .steamNativeLogin)
+        persistState()
+        diagnostics.breadcrumb("steam_native_login_migration_started", context: diagnosticContext(stage: "native_steam_login_migration"))
 
         do {
             _ = try await steamNativeLoginCoordinator.migrateIfNeeded()
@@ -523,7 +529,12 @@ final class PortsideModel: ObservableObject {
             }
             if report.webhelperRestartCount >= 3 { diagnostics.event("steamwebhelper_crash_loop", context: reportContext) }
             if report.windowDetected { diagnostics.event("steam_window_detected", context: reportContext) }
-            if report.status == .ready {
+            if report.logAnalysis.loginScreenDetected {
+                SteamNativeLoginMigration.invalidate(fileManager: .default)
+                logger.write("Steam login screen detected; native login migration marker invalidated", level: .warning)
+                diagnostics.event("steam_native_login_required", context: reportContext)
+            }
+            if report.status == .ready && !report.logAnalysis.loginScreenDetected {
                 state.phase = .steamReady; state.setupCompleted = true; state.lastError = nil; persistState()
                 showsInstaller = false
                 return .ready
@@ -560,8 +571,13 @@ final class PortsideModel: ObservableObject {
                 logSteamReadiness(recoveryReport)
                 state.lastSteamStatus = recoveryReport.status
                 let recoveryContext = diagnosticContext(stage: "cef_cache_recovery", cefStrategy: strategy.identifier, cefFailureCategory: recoveryReport.logAnalysis.failureCategories.first, webhelperRestartCount: recoveryReport.webhelperRestartCount, webhelperStarted: recoveryReport.webhelperStarted, webhelperExitCode: recoveryReport.webhelperExitCode, rendererMode: recoveryReport.rendererMode, gpuProcessStatus: recoveryReport.gpuProcessStatus, windowDetected: recoveryReport.windowDetected, browserReadyDetected: recoveryReport.browserReadyDetected, windowVisualState: recoveryReport.windowVisualState.rawValue, cacheRecoveryAttempted: true, steamVersion: recoveryReport.logAnalysis.steamVersion)
+                if recoveryReport.logAnalysis.loginScreenDetected {
+                    SteamNativeLoginMigration.invalidate(fileManager: .default)
+                    logger.write("Steam login screen detected during CEF recovery; native login migration marker invalidated", level: .warning)
+                    diagnostics.event("steam_native_login_required", context: recoveryContext)
+                }
                 diagnostics.event(recoveryReport.status == .ready ? "steam_ui_ready" : "cef_ui_unverified", context: recoveryContext)
-                if recoveryReport.status == .ready {
+                if recoveryReport.status == .ready && !recoveryReport.logAnalysis.loginScreenDetected {
                     state.phase = .steamReady; state.setupCompleted = true; state.lastError = nil; persistState()
                     showsInstaller = false
                     return .ready

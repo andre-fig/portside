@@ -547,6 +547,7 @@ public struct SteamCEFLogAnalysis: Sendable, Equatable {
     public let cacheCorruptionLikely: Bool
     public let browserReadyDetected: Bool
     public let contentWindowEvidence: Bool
+    public let loginScreenDetected: Bool
     public let rendererMode: String?
     public let gpuProcessStatus: String?
     public let steamVersion: String?
@@ -561,6 +562,7 @@ public struct SteamCEFLogAnalysis: Sendable, Equatable {
         cacheCorruptionLikely: Bool,
         browserReadyDetected: Bool = false,
         contentWindowEvidence: Bool = false,
+        loginScreenDetected: Bool = false,
         rendererMode: String? = nil,
         gpuProcessStatus: String? = nil,
         steamVersion: String? = nil,
@@ -569,7 +571,7 @@ public struct SteamCEFLogAnalysis: Sendable, Equatable {
         self.filesRead = filesRead; self.findings = findings; self.failureCategories = failureCategories
         self.webhelperRestartCount = webhelperRestartCount; self.webhelperExitCode = webhelperExitCode
         self.cacheCorruptionLikely = cacheCorruptionLikely; self.browserReadyDetected = browserReadyDetected
-        self.contentWindowEvidence = contentWindowEvidence; self.rendererMode = rendererMode
+        self.contentWindowEvidence = contentWindowEvidence; self.loginScreenDetected = loginScreenDetected; self.rendererMode = rendererMode
         self.gpuProcessStatus = gpuProcessStatus; self.steamVersion = steamVersion
         self.effectiveCEFArchitecture = effectiveCEFArchitecture
     }
@@ -587,7 +589,7 @@ public struct SteamCEFLogAnalysis: Sendable, Equatable {
 
 public enum SteamCEFLogAnalyzer {
     public static let logFilenames = [
-        "webhelper_gpu.txt", "cef_log.txt", "steamui_html.txt", "webhelper.txt",
+        "webhelper_gpu.txt", "cef_log.txt", "steamui_html.txt", "steamui_login.txt", "webhelper.txt",
         "bootstrap_log.txt", "console_log.txt", "connection_log.txt"
     ]
 
@@ -622,6 +624,7 @@ public enum SteamCEFLogAnalyzer {
         var browserReadyDetected = false
         var contentWindowSignals = Set<String>()
         var contentWindowEvidence = false
+        var loginScreenDetected = false
         var rendererMode: String?
         var gpuProcessStatus: String?
         var steamVersion: String?
@@ -645,6 +648,11 @@ public enum SteamCEFLogAnalyzer {
                         webhelperExitCode = candidate ?? webhelperExitCode
                     }
                     if lowercased.contains("browserready") { browserReadyDetected = true }
+                    if lowercased.contains("waitingforcredentials")
+                        || lowercased.contains("waiting for credentials")
+                        || (lowercased.contains("setloginstate") && lowercased.contains("none")) {
+                        loginScreenDetected = true
+                    }
                     if let signal = ["createresponse", "getdesiredsteamuiwindows", "popuphtmlwindow", "created browser window", "created window"].first(where: lowercased.contains) {
                         contentWindowSignals.insert(signal)
                     }
@@ -738,7 +746,7 @@ public enum SteamCEFLogAnalyzer {
             filesRead: Array(Set(filesRead)).sorted(), findings: findings,
             failureCategories: failureCategories.sorted(), webhelperRestartCount: restartCount,
             webhelperExitCode: webhelperExitCode, cacheCorruptionLikely: cacheCorruptionLikely,
-            browserReadyDetected: browserReadyDetected, contentWindowEvidence: contentWindowEvidence,
+            browserReadyDetected: browserReadyDetected, contentWindowEvidence: contentWindowEvidence, loginScreenDetected: loginScreenDetected,
             rendererMode: rendererMode, gpuProcessStatus: gpuProcessStatus, steamVersion: steamVersion,
             effectiveCEFArchitecture: effectiveCEFArchitecture
         )
