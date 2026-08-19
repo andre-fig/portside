@@ -16,10 +16,12 @@ struct PortsideApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(model: model)
-                .frame(width: 520, height: 300)
+                .frame(width: model.setupStep == .failed ? 620 : 520,
+                       height: model.setupStep == .failed ? 400 : 320)
         }
-        .defaultSize(width: 520, height: 300)
+        .defaultSize(width: 520, height: 320)
         .windowResizability(.contentSize)
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .appInfo) { AboutPortsideButton() }
         }
@@ -384,16 +386,38 @@ struct RootView: View {
     @ObservedObject var model: PortsideModel
 
     var body: some View {
-        ZStack {
-            Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
+        VStack(spacing: 0) {
+            InstallerHeader(model: model)
+            Divider()
             if model.setupStep == .failed { FailureView(model: model) }
             else { SetupProgressView(model: model) }
         }
+        .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
-            WindowConfigurator(contentSize: model.setupStep == .failed ? CGSize(width: 620, height: 360) : CGSize(width: 520, height: 300))
+            WindowConfigurator(contentSize: model.setupStep == .failed ? CGSize(width: 620, height: 400) : CGSize(width: 520, height: 320))
                 .frame(width: 0, height: 0)
         }
+    }
+}
+
+struct InstallerHeader: View {
+    @ObservedObject var model: PortsideModel
+
+    var body: some View {
+        HStack(spacing: 12) {
+            PortsideLogoView(size: 42)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Portside Installer")
+                    .font(.headline)
+                Text(model.setupStep == .failed ? "Setup could not be completed" : "Preparing Steam for your Mac")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 22)
+        .frame(height: 68)
     }
 }
 
@@ -419,6 +443,16 @@ struct WindowConfigurator: NSViewRepresentable {
             desiredSize = contentSize
             guard let window, lastSize != contentSize else { return }
             lastSize = contentSize
+            window.title = "Portside Installer"
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.isMovableByWindowBackground = true
+            window.styleMask.remove(.resizable)
+            window.styleMask.remove(.miniaturizable)
+            window.styleMask.remove(.closable)
+            window.standardWindowButton(.closeButton)?.isHidden = true
+            window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+            window.standardWindowButton(.zoomButton)?.isHidden = true
             window.setContentSize(contentSize)
             window.minSize = contentSize
             window.maxSize = contentSize
@@ -431,12 +465,11 @@ struct SetupProgressView: View {
     var body: some View {
         VStack(spacing: 22) {
             Spacer()
-            PortsideLogoView()
             Text(model.message.isEmpty ? "Preparing Portside…" : model.message).font(.title3.weight(.medium))
             if model.progressIsIndeterminate { ProgressView().frame(width: 360) }
             else { ProgressView(value: model.progress).frame(width: 360) }
             Spacer()
-        }.padding(28).frame(width: 520, height: 300)
+        }.padding(28).frame(width: 520, height: 251)
     }
 }
 
@@ -448,7 +481,6 @@ struct FailureView: View {
     var body: some View {
         VStack(spacing: 18) {
             Spacer()
-            PortsideLogoView()
             Text("Could not complete setup.").font(.title3.weight(.medium))
             HStack(spacing: 12) {
                 Button("Try Again") { model.setUp() }.buttonStyle(.borderedProminent)
@@ -458,7 +490,7 @@ struct FailureView: View {
             }.disabled(model.isWorking)
             if showDetails { Text(model.state.lastError ?? "No details available.").font(.caption).foregroundStyle(.secondary).textSelection(.enabled).frame(maxWidth: 520) }
             Spacer()
-        }.padding(28).frame(width: 620, height: 360)
+        }.padding(28).frame(width: 620, height: 331)
         .confirmationDialog("Send diagnostics?", isPresented: $showDiagnosticConfirmation, titleVisibility: .visible) {
             Button("Send Technical Data") { model.sendDiagnostic() }
             Button("Cancel", role: .cancel) {}
@@ -467,6 +499,8 @@ struct FailureView: View {
 }
 
 struct PortsideLogoView: View {
+    var size: CGFloat = 96
+
     var body: some View {
         Group {
             if let url = Bundle.main.url(forResource: "PortsideLogo", withExtension: "png"), let image = NSImage(contentsOf: url) {
@@ -475,7 +509,7 @@ struct PortsideLogoView: View {
                 Image(systemName: "shippingbox.and.arrow.backward.fill").resizable().scaledToFit().padding(18)
             }
         }
-        .frame(width: 96, height: 96)
+        .frame(width: size, height: size)
         .accessibilityLabel("Portside")
     }
 }
