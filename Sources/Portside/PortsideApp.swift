@@ -47,6 +47,7 @@ final class PortsideModel: ObservableObject {
     let supervisor = ProcessSupervisor()
     let steamMonitor = SteamReadinessMonitor()
     let steamProcessLauncher = SteamProcessLauncher()
+    let steamNativeLoginCoordinator = SteamNativeLoginCoordinator()
     let diagnostics: DiagnosticsService
     private var didStartAutomatically = false
     private var handoffExitScheduled = false
@@ -130,7 +131,6 @@ final class PortsideModel: ObservableObject {
                     updateProgress(0.84, phase: .steamInstalling)
                     try await SteamInstaller.install(using: state.runtime!, logger: logger)
                 }
-                updateProgress(0.92, phase: .validatingInstallation)
                 guard let steamExecutable = SteamInstaller.locateInstalledExecutable() else {
                     throw PortsideError.processLaunchFailed("Steam installer finished without creating steam.exe.")
                 }
@@ -142,6 +142,8 @@ final class PortsideModel: ObservableObject {
                 }
                 let windows10Result = try await WinePrefixManager.ensureWindows10(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix, logger: logger)
                 guard windows10Result.status == 0 else { throw RuntimePipelineError.processFailed("Windows 10 prefix configuration", windows10Result.status) }
+                try await migrateNativeSteamLoginIfNeeded(runtimePath: runtimePath)
+                updateProgress(0.92, phase: .validatingInstallation)
                 updateProgress(0.88, phase: .steamUpdating)
                 diagnostics.breadcrumb("steam_update_started", context: diagnosticContext(stage: "steam_update"))
                 if !steamMonitor.bootstrapComplete(prefix: PortsidePaths.steamPrefix) {
@@ -224,6 +226,10 @@ final class PortsideModel: ObservableObject {
                       FileManager.default.fileExists(atPath: PortsidePaths.steamPrefix.appendingPathComponent("system.reg").path) else {
                     throw PortsideError.runtimeUnavailable
                 }
+                guard let runtimePath = state.runtimeRecord?.executablePath ?? state.runtime?.executablePath.map(URL.init(fileURLWithPath:)) else {
+                    throw PortsideError.runtimeUnavailable
+                }
+                try await migrateNativeSteamLoginIfNeeded(runtimePath: runtimePath)
                 state.steamExecutablePath = steamExecutable.path
                 state.phase = .steamLaunching; persistState(); message = "Opening Steam…"
                 let launchOutcome = try await openSteamAndWait(executable: steamExecutable)
@@ -275,6 +281,7 @@ final class PortsideModel: ObservableObject {
         case .runtimeDownloading, .runtimeVerifying: return "Downloading required components…"
         case .runtimeInstalling, .prefixCreating, .graphicsInstalling: return "Preparing the game environment…"
         case .steamDownloading, .steamInstalling: return "Installing Steam…"
+        case .steamNativeLogin: return "Preparing your Steam account…"
         case .steamUpdating: return "Updating Steam…"
         case .steamLaunching: return "Opening Steam…"
         case .validatingInstallation: return "Finishing…"
@@ -307,10 +314,11 @@ final class PortsideModel: ObservableObject {
         case .prefixCreating: return 6
         case .steamDownloading: return 7
         case .steamInstalling: return 8
-        case .steamUpdating: return 9
-        case .steamLaunching: return 10
-        case .validatingInstallation: return 11
-        case .steamReady: return 12
+        case .steamNativeLogin: return 9
+        case .steamUpdating: return 10
+        case .steamLaunching: return 11
+        case .validatingInstallation: return 12
+        case .steamReady: return 13
         case .failedRecoverable, .failedFatal: return 99
         }
     }
@@ -343,6 +351,14 @@ final class PortsideModel: ObservableObject {
                 if normalized.contains("interface") || normalized.contains("window") { return "steam_window_failed" }
                 return "steam_launch_failed"
             case .invalidPath: return "permission_denied"
+            }
+        }
+        if let migrationError = error as? SteamNativeLoginMigrationError {
+            switch migrationError {
+            case .missingSourceItem, .copyFailed: return "steam_native_login_copy_failed"
+            case .loginNotDetected: return "steam_native_login_timeout"
+            case .nativeSteamInstallationFailed: return "native_steam_install_failed"
+            case .nativeSteamApplicationUnavailable: return "native_steam_launch_failed"
             }
         }
         return "portside_error"
@@ -397,6 +413,35 @@ final class PortsideModel: ObservableObject {
         if let effectiveArchitecture = report.logAnalysis.effectiveCEFArchitecture {
             let legacyFlagIgnored = effectiveArchitecture == String("64bit")
             logger.write("requested_cef_architecture=\(SteamInstaller.loginLaunchProfile.requestedCEFArchitecture) effective_cef_architecture=\(effectiveArchitecture) legacy_login_flag_ignored=\(legacyFlagIgnored)")
+        }
+    }
+
+    private func migrateNativeSteamLoginIfNeeded(runtimePath: URL) async throws {
+        guard !SteamNativeLoginMigration.isComplete(fileManager: .default) else { return }
+
+        state.lastProcessType = "native-steam-login-migration"
+        state.phase = .steamNativeLogin
+        message = friendlyMessage(for: .steamNativeLogin)
+        progressIsIndeterminate = true
+        persistState()
+        diagnostics.breadcrumb("steam_native_login_migration_started", context: diagnosticContext(stage: "native_steam_login_migration"))
+
+        await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
+        guard await steamMonitor.waitForSteamToStop(timeout: 10) else {
+            throw PortsideError.processLaunchFailed("The Windows Steam process could not be closed before login migration.")
+        }
+        guard await steamProcessLauncher.waitForExit(timeout: 10) else {
+            throw PortsideError.processLaunchFailed("The Windows Steam launcher could not be closed before login migration.")
+        }
+
+        do {
+            _ = try await steamNativeLoginCoordinator.migrateIfNeeded()
+            progressIsIndeterminate = false
+            diagnostics.event("steam_native_login_migration_completed", context: diagnosticContext(stage: "native_steam_login_migration"))
+        } catch {
+            progressIsIndeterminate = false
+            diagnostics.event("steam_native_login_migration_failed", context: diagnosticContext(stage: "native_steam_login_migration", errorCode: errorCode(for: error)))
+            throw error
         }
     }
 

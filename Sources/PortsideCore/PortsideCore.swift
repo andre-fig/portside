@@ -463,6 +463,91 @@ public enum SteamInstaller {
     }
 }
 
+public enum SteamNativeLoginState: String, Equatable, Sendable {
+    case loggedIn
+    case notLoggedIn
+    case unavailable
+}
+
+public enum SteamNativeLoginMigrationError: LocalizedError, Equatable, Sendable {
+    case missingSourceItem(String)
+    case loginNotDetected
+    case copyFailed
+    case nativeSteamInstallationFailed
+    case nativeSteamApplicationUnavailable
+
+    public var errorDescription: String? {
+        switch self {
+        case .missingSourceItem(let item): return "Native Steam login data is missing: \(item)."
+        case .loginNotDetected: return "Native Steam login was not detected before the timeout."
+        case .copyFailed: return "Native Steam login data could not be copied."
+        case .nativeSteamInstallationFailed: return "The native Steam app could not be installed."
+        case .nativeSteamApplicationUnavailable: return "The native Steam app could not be opened."
+        }
+    }
+}
+
+public enum SteamNativeLoginMigration {
+    public static let requiredItems = ["config", "registry.vdf", "userdata"]
+
+    public static var nativeSteamSupportDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Steam", isDirectory: true)
+    }
+
+    public static var managedSteamDirectory: URL {
+        PortsidePaths.steamPrefix.appendingPathComponent("drive_c/Program Files (x86)/Steam", isDirectory: true)
+    }
+
+    public static func isComplete(at destinationRoot: URL = managedSteamDirectory, fileManager: FileManager = .default) -> Bool {
+        requiredItems.allSatisfy { fileManager.fileExists(atPath: destinationRoot.appendingPathComponent($0).path) }
+    }
+
+    public static func loginState(at sourceRoot: URL = nativeSteamSupportDirectory, fileManager: FileManager = .default) -> SteamNativeLoginState {
+        guard requiredItems.allSatisfy({ fileManager.fileExists(atPath: sourceRoot.appendingPathComponent($0).path) }) else {
+            return .unavailable
+        }
+        let loginUsersURL = sourceRoot.appendingPathComponent("config/loginusers.vdf")
+        guard let contents = try? String(contentsOf: loginUsersURL, encoding: .utf8) else { return .notLoggedIn }
+        let hasRecentAccount = contents.range(of: #"(?m)\"MostRecent\"\s+\"1\""#, options: .regularExpression) != nil
+        let hasSavedLogin = contents.range(of: #"(?m)\"(AllowAutoLogin|RememberPassword)\"\s+\"1\""#, options: .regularExpression) != nil
+        return hasRecentAccount && hasSavedLogin ? .loggedIn : .notLoggedIn
+    }
+
+    @discardableResult
+    public static func copyLoginData(from sourceRoot: URL = nativeSteamSupportDirectory, to destinationRoot: URL = managedSteamDirectory, fileManager: FileManager = .default) throws -> [String] {
+        for item in requiredItems where !fileManager.fileExists(atPath: sourceRoot.appendingPathComponent(item).path) {
+            throw SteamNativeLoginMigrationError.missingSourceItem(item)
+        }
+
+        let stagingRoot = destinationRoot.deletingLastPathComponent()
+            .appendingPathComponent(".native-steam-login-\(UUID().uuidString)", isDirectory: true)
+        do {
+            try fileManager.createDirectory(at: stagingRoot, withIntermediateDirectories: true)
+            for item in requiredItems {
+                try fileManager.copyItem(
+                    at: sourceRoot.appendingPathComponent(item),
+                    to: stagingRoot.appendingPathComponent(item)
+                )
+            }
+            try fileManager.createDirectory(at: destinationRoot, withIntermediateDirectories: true)
+            for item in requiredItems {
+                let destination = destinationRoot.appendingPathComponent(item)
+                if fileManager.fileExists(atPath: destination.path) {
+                    try fileManager.removeItem(at: destination)
+                }
+                try fileManager.moveItem(at: stagingRoot.appendingPathComponent(item), to: destination)
+            }
+            try? fileManager.removeItem(at: stagingRoot)
+            return requiredItems
+        } catch {
+            try? fileManager.removeItem(at: stagingRoot)
+            if error is SteamNativeLoginMigrationError { throw error }
+            throw SteamNativeLoginMigrationError.copyFailed
+        }
+    }
+}
+
 public struct SteamLaunchProfile: Equatable, Sendable {
     public let identifier: String
     public let arguments: [String]

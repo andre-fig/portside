@@ -137,6 +137,61 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertEqual(specification.environment["WINEDEBUG"], "-all")
     }
 
+    func testNativeSteamLoginMigrationCopiesOnlyRequiredItemsAndHandlesSpaces() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-native-steam migration-\(UUID().uuidString)", isDirectory: true)
+        let source = root.appendingPathComponent("Application Support/Steam", isDirectory: true)
+        let destination = root.appendingPathComponent("Prefix/Steam/drive_c/Program Files (x86)/Steam", isDirectory: true)
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("config", isDirectory: true), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("userdata/76561198000000000", isDirectory: true), withIntermediateDirectories: true)
+        try "login data".write(to: source.appendingPathComponent("config/loginusers.vdf"), atomically: true, encoding: .utf8)
+        try Data("registry".utf8).write(to: source.appendingPathComponent("registry.vdf"))
+        try Data("userdata".utf8).write(to: source.appendingPathComponent("userdata/76561198000000000/localconfig.vdf"))
+        try FileManager.default.createDirectory(at: destination.appendingPathComponent("config", isDirectory: true), withIntermediateDirectories: true)
+        try Data("old".utf8).write(to: destination.appendingPathComponent("config/old-file"))
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        XCTAssertEqual(try SteamNativeLoginMigration.copyLoginData(from: source, to: destination), SteamNativeLoginMigration.requiredItems)
+        XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("config/loginusers.vdf")), "login data")
+        XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("registry.vdf")), "registry")
+        XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("userdata/76561198000000000/localconfig.vdf")), "userdata")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.appendingPathComponent("config/old-file").path))
+        XCTAssertTrue(SteamNativeLoginMigration.isComplete(at: destination))
+        let remaining = try FileManager.default.contentsOfDirectory(at: destination.deletingLastPathComponent(), includingPropertiesForKeys: nil).map(\.lastPathComponent)
+        XCTAssertFalse(remaining.contains { $0.hasPrefix(".native-steam-login-") })
+    }
+
+    func testNativeSteamLoginStateRequiresRecentSavedAccount() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-native-steam-state-\(UUID().uuidString)", isDirectory: true)
+        let source = root.appendingPathComponent("Steam", isDirectory: true)
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("config", isDirectory: true), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("userdata", isDirectory: true), withIntermediateDirectories: true)
+        try Data().write(to: source.appendingPathComponent("registry.vdf"))
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try "\"MostRecent\" \"1\"\n\"AllowAutoLogin\" \"1\"".write(to: source.appendingPathComponent("config/loginusers.vdf"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(SteamNativeLoginMigration.loginState(at: source), .loggedIn)
+
+        try "\"MostRecent\" \"1\"\n\"AllowAutoLogin\" \"0\"\n\"RememberPassword\" \"0\"".write(to: source.appendingPathComponent("config/loginusers.vdf"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(SteamNativeLoginMigration.loginState(at: source), .notLoggedIn)
+
+        try FileManager.default.removeItem(at: source.appendingPathComponent("userdata"))
+        XCTAssertEqual(SteamNativeLoginMigration.loginState(at: source), .unavailable)
+    }
+
+    func testNativeSteamLoginMigrationRejectsMissingItemWithoutCreatingDestination() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-native-steam-missing-\(UUID().uuidString)", isDirectory: true)
+        let source = root.appendingPathComponent("Steam", isDirectory: true)
+        let destination = root.appendingPathComponent("Prefix/Steam/drive_c/Program Files (x86)/Steam", isDirectory: true)
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("config", isDirectory: true), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("userdata", isDirectory: true), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        XCTAssertThrowsError(try SteamNativeLoginMigration.copyLoginData(from: source, to: destination)) { error in
+            XCTAssertEqual(error as? SteamNativeLoginMigrationError, .missingSourceItem("registry.vdf"))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
     func testInstallerTimeoutCanBeSimulatedWithoutLaunchingWine() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-installer-timeout-\(UUID().uuidString)", isDirectory: true)
         let installer = root.appendingPathComponent("SteamSetup.exe")

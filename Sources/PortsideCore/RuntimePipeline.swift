@@ -13,6 +13,7 @@ public enum EnvironmentPhase: String, Codable, CaseIterable, Sendable {
     case graphicsInstalling
     case steamDownloading
     case steamInstalling
+    case steamNativeLogin
     case steamUpdating
     case steamLaunching
     case validatingInstallation
