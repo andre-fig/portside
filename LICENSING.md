@@ -31,3 +31,6 @@ copies or reports account credentials, cookies, tokens or Steam IDs.
 Before redistribution, obtain legal review for the selected Sikarugir
 artifacts, source notices, update mechanism, code signing, Valve terms,
 macOS privacy disclosures and the final Portside license.
+
+The commercial licensing checklist is maintained in docs/LICENSING.md and
+must be completed separately for each production runtime promotion.

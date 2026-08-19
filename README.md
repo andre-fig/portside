@@ -62,3 +62,13 @@ functional result. No anti-cheat bypass is attempted.
 
 See docs/runtime-manifest.json, docs/VALIDATION.md, THIRD_PARTY_NOTICES.md and
 SIKARUGIR_AUTHORIZATION.md.
+
+## Commercial infrastructure
+
+The commercial control plane is scaffolded separately in `backend/`. It uses
+NestJS, PostgreSQL/Prisma, private object storage, signed runtime manifests,
+Sparkle 2 app updates and one-Mac license activation. Start with
+`docs/COMMERCIALIZATION.md`, `docs/BACKEND.md` and
+`docs/RAILWAY_DEPLOYMENT.md`. No Railway deployment, Developer ID signature or
+notarization is present in this repository until the owner's credentials and
+external approvals are supplied.

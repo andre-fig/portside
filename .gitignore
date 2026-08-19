@@ -4,6 +4,20 @@ build/
 *.xcuserstate
 DerivedData/
 
+# Commercial backend and release credentials/artifacts
+backend/node_modules/
+backend/dist/
+backend/.env
+backend/.env.*
+!backend/.env.example
+backend/prisma/*.db
+backend/test-results/
+release-secrets/
+build/releases/
+*.p8
+*.pem
+*.key
+
 # Local Portside runtime and user data
 PortsideRuntime/
 *.dmg

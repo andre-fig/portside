@@ -4,6 +4,7 @@
 |---|---|---|---|
 | Swift, SwiftUI, Foundation, AppKit | macOS SDK | Apple SDK | Platform SDK; governed by Apple terms |
 | Sentry Cocoa | 9.26.0+ | [getsentry/sentry-cocoa](https://github.com/getsentry/sentry-cocoa) | MIT; fetched by Swift Package Manager |
+| Sparkle | 2.9.x | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle) | Sparkle license and embedded notices; fetched by Swift Package Manager |
 | Sikarugir Creator | 1.0.1 | [official release](https://github.com/Sikarugir-App/Creator/releases/tag/v1.0.1) | Provenance only; not copied into Portside |
 | Sikarugir Wrapper Template | 1.0.11 | [official release](https://github.com/Sikarugir-App/Wrapper/releases/tag/v1.0) | Downloaded and verified at setup |
 | WS12WineSikarugir10.0_6 | Engine release | [official Engines release](https://github.com/Sikarugir-App/Engines/releases/tag/v1.0) | Downloaded and verified at setup |
