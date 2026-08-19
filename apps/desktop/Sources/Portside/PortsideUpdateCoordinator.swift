@@ -1,5 +1,6 @@
 import Foundation
 import Sparkle
+import PortsideCore
 
 /// Sparkle is optional in local development until a Portside feed and public
 /// EdDSA key are provisioned. Commercial bundles receive both at packaging
@@ -11,15 +12,22 @@ final class PortsideUpdateCoordinator: NSObject {
     override init() {
         let feed = (Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let publicKey = (Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if feed.isEmpty || publicKey.isEmpty || feed.contains("example.invalid") {
+        if !PortsideAppUpdateConfiguration.isConfigured(feed: feed, publicKey: publicKey) {
             controller = nil
         } else {
             controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
         }
         super.init()
+        // Sparkle schedules regular checks from Info.plist. This one launch-time
+        // check is intentionally limited to the moment immediately after the
+        // updater starts, as required by Sparkle's programmatic setup guidance.
+        if let updater = controller?.updater, updater.automaticallyChecksForUpdates {
+            updater.checkForUpdatesInBackground()
+        }
     }
 
     func checkForUpdates() {
         controller?.checkForUpdates(nil)
     }
+
 }

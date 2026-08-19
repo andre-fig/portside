@@ -19,6 +19,9 @@ public enum PortsidePaths {
     public static var diagnostics: URL { root.appendingPathComponent("Diagnostics", isDirectory: true) }
     public static var profiles: URL { root.appendingPathComponent("Profiles", isDirectory: true) }
     public static var manifests: URL { root.appendingPathComponent("Manifests", isDirectory: true) }
+    public static var runtimeManifest: URL { manifests.appendingPathComponent("runtime-manifest.json") }
+    public static var runtimeManifestETag: URL { manifests.appendingPathComponent("runtime-manifest.etag") }
+    public static var runtimeStaging: URL { runtime.appendingPathComponent("Staging", isDirectory: true) }
 
     // Compatibility aliases for callers from the previous release.
     public static var downloads: URL { cache.appendingPathComponent("Downloads", isDirectory: true) }
@@ -29,7 +32,7 @@ public enum PortsidePaths {
     public static var baselineWrapper: URL { wrappers.appendingPathComponent("PortsideBaseline.app", isDirectory: true) }
 
     public static var allDirectories: [URL] {
-        [root, runtime, wrappers, prefixes, steamLibrary, cache, downloads, logs, diagnostics, profiles, manifests]
+        [root, runtime, runtimeStaging, wrappers, prefixes, steamLibrary, cache, downloads, logs, diagnostics, profiles, manifests]
     }
 }
 
@@ -119,6 +122,7 @@ public struct EnvironmentState: Codable, Equatable, Sendable {
     public var steamInstalled = false
     public var runtime: RuntimeDescriptor?
     public var runtimeRecord: InstalledRuntimeRecord?
+    public var runtimeManifestVersion: String?
     public var phase: EnvironmentPhase?
     public var wrapperPath: String?
     public var prefixPath: String?

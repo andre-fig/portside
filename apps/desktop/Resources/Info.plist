@@ -18,7 +18,10 @@
 <key>SUPublicEDKey</key><string></string>
 <key>SUEnableAutomaticChecks</key><true/>
 <key>SUAutomaticallyUpdate</key><true/>
-<key>SURequireSignedFeed</key><true/>
+<key>SUScheduledCheckInterval</key><real>86400</real>
+<key>SUScheduledImpatientCheckInterval</key><real>604800</real>
+<key>SUVerifyUpdateBeforeExtraction</key><true/>
+<key>PortsideBuildChannel</key><string>development</string>
 <key>PortsideAPIBaseURL</key><string></string>
 <key>PortsideArtifactHosts</key><string></string>
 <key>PortsideRuntimeManifestPublicKey</key><string></string>

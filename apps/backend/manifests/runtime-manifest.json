@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "channel": "staging",
+  "manifestVersion": "development-unpublished",
+  "minimumPortsideVersion": "0.1.0",
+  "publishedAt": "2026-08-19T00:00:00Z",
+  "components": [],
+  "rendererDefaults": {
+    "renderer": "wineD3D",
+    "D3DMETAL": 0,
+    "DXMT": 0,
+    "DXVK": 0,
+    "WINEMSYNC": 1,
+    "WINEESYNC": 1
+  },
+  "compatibilityRules": [],
+  "critical": false,
+  "rollbackVersion": null,
+  "signatureKeyId": "development-key-not-configured",
+  "signature": null
+}

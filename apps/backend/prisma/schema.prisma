@@ -69,6 +69,15 @@ enum ReleaseStatus {
   rejected
 }
 
+enum AppReleaseStatus {
+  draft
+  staging
+  production
+  superseded
+  rolled_back
+  rejected
+}
+
 enum AuditAction {
   activation
   deactivation
@@ -315,6 +324,27 @@ model RuntimeRelease {
 
   @@unique([channel, version])
   @@index([channel, status, createdAt])
+}
+
+model AppRelease {
+  id                String           @id @default(cuid())
+  version           String
+  build             String
+  channel           Channel
+  status            AppReleaseStatus @default(draft)
+  url               String
+  length            BigInt
+  edSignature       String
+  minimumOSVersion  String
+  releaseNotesURL   String?
+  releaseNotes      String?
+  pubDate           DateTime
+  createdAt         DateTime         @default(now())
+  promotedAt        DateTime?
+  rolledBackAt      DateTime?
+
+  @@unique([channel, version])
+  @@index([channel, status, pubDate])
 }
 
 model ReleasePromotion {

@@ -2,7 +2,7 @@
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
   <channel>
     <title>Portside</title>
-    <link>https://example.invalid/v1/appcast.xml</link>
+    <link>https://api-production-6d06.up.railway.app/v1/appcast.xml</link>
     <description>Portside updates</description>
     <language>en</language>
   </channel>

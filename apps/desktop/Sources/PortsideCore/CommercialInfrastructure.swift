@@ -8,13 +8,15 @@ public struct PortsideBackendConfiguration: Sendable, Equatable {
     public let runtimeManifestPublicKey: String?
     public let licensePublicKey: String?
     public let licenseKeyID: String?
+    public let buildChannel: String
 
-    public init(baseURL: URL?, allowedHosts: Set<String> = [], runtimeManifestPublicKey: String? = nil, licensePublicKey: String? = nil, licenseKeyID: String? = nil) {
+    public init(baseURL: URL?, allowedHosts: Set<String> = [], runtimeManifestPublicKey: String? = nil, licensePublicKey: String? = nil, licenseKeyID: String? = nil, buildChannel: String = "production") {
         self.baseURL = baseURL
         self.allowedHosts = allowedHosts
         self.runtimeManifestPublicKey = runtimeManifestPublicKey
         self.licensePublicKey = licensePublicKey
         self.licenseKeyID = licenseKeyID
+        self.buildChannel = buildChannel
     }
 
     public var isConfigured: Bool { baseURL != nil && !(allowedHosts.isEmpty) }
@@ -28,7 +30,7 @@ public struct PortsideBackendConfiguration: Sendable, Equatable {
             let value = (bundle.object(forInfoDictionaryKey: key) as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
             return value?.isEmpty == false ? value : nil
         }
-        return Self(baseURL: url, allowedHosts: host, runtimeManifestPublicKey: value("PortsideRuntimeManifestPublicKey"), licensePublicKey: value("PortsideLicensePublicKey"), licenseKeyID: value("PortsideLicenseKeyID"))
+        return Self(baseURL: url, allowedHosts: host, runtimeManifestPublicKey: value("PortsideRuntimeManifestPublicKey"), licensePublicKey: value("PortsideLicensePublicKey"), licenseKeyID: value("PortsideLicenseKeyID"), buildChannel: value("PortsideBuildChannel") ?? "production")
     }
 }
 
@@ -51,6 +53,14 @@ public enum PortsideCommercialError: LocalizedError, Equatable {
         case .invalidLicenseToken: return "The Portside license could not be validated."
         case .keychainFailure(let status): return "Secure local storage failed (\(status))."
         }
+    }
+}
+
+public enum PortsideAppUpdateConfiguration {
+    public static func isConfigured(feed: String?, publicKey: String?) -> Bool {
+        let feed = feed?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let publicKey = publicKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !feed.isEmpty && !publicKey.isEmpty && !feed.contains("example.invalid")
     }
 }
 
@@ -89,10 +99,11 @@ public struct PortsideRuntimeManifest: Codable, Equatable, Sendable {
 }
 
 public enum PortsideManifestVerifier {
-    public static func verify(_ data: Data, publicKeyBase64: String, expectedKeyID: String? = nil, currentVersion: String, allowedHosts: Set<String> = []) throws -> PortsideRuntimeManifest {
+    public static func verify(_ data: Data, publicKeyBase64: String, expectedKeyID: String? = nil, expectedChannel: String? = nil, currentVersion: String, allowedHosts: Set<String> = []) throws -> PortsideRuntimeManifest {
         let decoder = JSONDecoder.portside
         let manifest = try decoder.decode(PortsideRuntimeManifest.self, from: data)
         if let expectedKeyID, manifest.signatureKeyId != expectedKeyID { throw PortsideCommercialError.invalidSignature }
+        if let expectedChannel, manifest.channel != expectedChannel { throw PortsideCommercialError.invalidManifest("manifest channel is not approved for this build") }
         let signature = try Data(base64Encoded: manifest.signature, options: [.ignoreUnknownCharacters]).unwrap(or: PortsideCommercialError.invalidSignature)
         let publicKey = try Curve25519.Signing.PublicKey(rawRepresentation: Data(base64Encoded: publicKeyBase64, options: [.ignoreUnknownCharacters]).unwrap(or: PortsideCommercialError.invalidSignature))
         var unsigned = data
@@ -103,17 +114,24 @@ public enum PortsideManifestVerifier {
         guard publicKey.isValidSignature(signature, for: unsigned) else { throw PortsideCommercialError.invalidSignature }
         guard compareVersions(currentVersion, manifest.minimumPortsideVersion) >= 0 else { throw PortsideCommercialError.incompatibleVersion }
         guard !allowedHosts.isEmpty else { throw PortsideCommercialError.unauthorizedURL }
+        var identifiers = Set<String>()
         for component in manifest.components {
+            guard identifiers.insert(component.id).inserted else { throw PortsideCommercialError.invalidManifest("manifest contains a duplicate component") }
+            guard !component.downloadURL.absoluteString.contains("example.invalid") else { throw PortsideCommercialError.invalidManifest("manifest contains a placeholder download") }
             guard component.downloadURL.scheme == "https", let host = component.downloadURL.host, allowedHosts.contains(host), !component.sha256.isEmpty, component.size > 0 else { throw PortsideCommercialError.invalidManifest("component is incomplete or outside the Portside host allowlist") }
         }
         return manifest
     }
 
-    private static func compareVersions(_ lhs: String, _ rhs: String) -> Int {
+    public static func compareVersions(_ lhs: String, _ rhs: String) -> Int {
         let left = lhs.split(separator: ".").map { Int($0) ?? 0 }
         let right = rhs.split(separator: ".").map { Int($0) ?? 0 }
         for index in 0..<max(left.count, right.count) { let a = index < left.count ? left[index] : 0; let b = index < right.count ? right[index] : 0; if a != b { return a < b ? -1 : 1 } }
         return 0
+    }
+
+    public static func isNewer(_ candidate: String, than installed: String) -> Bool {
+        compareVersions(candidate, installed) > 0
     }
 }
 

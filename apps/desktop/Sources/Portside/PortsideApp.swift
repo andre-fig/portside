@@ -93,8 +93,34 @@ final class PortsideModel: ObservableObject {
         if let wrapperPath = state.wrapperPath.map(URL.init(fileURLWithPath:)),
            isValidWrapper(wrapperPath),
            state.setupCompleted {
-            showsInstaller = false
-            message = "Steam is ready to play"
+            Task { @MainActor in
+                do {
+                    let prefix = URL(fileURLWithPath: state.prefixPath ?? PortsidePaths.steamPrefix.path)
+                    if !isManagedSteamRunning(wrapper: wrapperPath, prefix: prefix),
+                       let applied = try await updateService.applyStagedRuntime(using: wrapperInstaller) {
+                        state.wrapperPath = applied.result.validation.wrapper.path
+                        state.prefixPath = applied.result.validation.prefix.path
+                        state.runtimeRecord = applied.result.runtimeRecord
+                        state.runtimeManifestVersion = applied.manifest.manifestVersion
+                        persist()
+                    }
+                } catch {
+                    // A non-critical runtime update never prevents an existing
+                    // working installation from opening. The staged copy stays
+                    // on disk for retry and rollback remains available.
+                    if (try? updateService.stagedRuntimeUpdate()?.manifest.critical) == true {
+                        errorMessage = "We couldn't verify an important Portside update. Steam was not opened."
+                        message = "Portside needs attention before Steam can open."
+                        setupStep = .failed
+                        showsInstaller = true
+                        diagnostics.capture(error: error, context: context(stage: "critical_runtime_update", errorCode: "critical_runtime_update_failed"))
+                        return
+                    }
+                    logger.write("runtime update was deferred: \(error.localizedDescription)", level: .warning)
+                }
+                showsInstaller = false
+                message = "Steam is ready to play"
+            }
         } else {
             setUp()
         }
@@ -182,6 +208,7 @@ final class PortsideModel: ObservableObject {
                 state.wrapperPath = installed.validation.wrapper.path
                 state.prefixPath = installed.validation.prefix.path
                 state.runtimeRecord = installed.runtimeRecord
+                state.runtimeManifestVersion = updateService.lastManifestVersion
                 state.runtime = RuntimeDescriptor(
                     name: SikarugirBaselineConfiguration.engineName,
                     version: SikarugirBaselineConfiguration.engineVersion,
@@ -235,6 +262,7 @@ final class PortsideModel: ObservableObject {
                 state.lastErrorCode = nil
                 state.lastSetupDuration = Date().timeIntervalSince(started)
                 persist()
+                agentLauncher.startRuntimeUpdater()
                 diagnostics.event("steam_window_detected", context: context(stage: "window_detected", report: report))
                 progress = 1
                 setupStep = .ready
@@ -277,6 +305,7 @@ final class PortsideModel: ObservableObject {
                 state.lastError = nil
                 state.lastErrorCode = nil
                 persist()
+                agentLauncher.startRuntimeUpdater()
                 showsInstaller = false
                 hideAfterSteamWindow()
             } catch {
@@ -352,6 +381,16 @@ final class PortsideModel: ObservableObject {
 
     private func isValidWrapper(_ wrapper: URL) -> Bool {
         (try? SikarugirWrapperValidator.validate(wrapper: wrapper)) != nil
+    }
+
+    private func isManagedSteamRunning(wrapper: URL, prefix: URL) -> Bool {
+        let snapshots = readinessMonitor.captureProcessSnapshot()
+        var managed = SteamProcessOwnership.managedPIDs(in: snapshots, wrapper: wrapper, prefix: prefix)
+        managed.formUnion(SteamProcessOwnership.fileBackedManagedPIDs(in: snapshots, wrapper: wrapper, prefix: prefix))
+        return snapshots.contains { snapshot in
+            managed.contains(snapshot.pid) &&
+                (snapshot.command.localizedCaseInsensitiveContains("steam.exe") || snapshot.command.localizedCaseInsensitiveContains("steamwebhelper"))
+        }
     }
 
     private func hideAfterSteamWindow() {

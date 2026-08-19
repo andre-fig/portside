@@ -1,7 +1,14 @@
 import Foundation
 import PortsideCore
 
-if CommandLine.arguments.contains("--capture-diagnostics") {
+if CommandLine.arguments.contains("--runtime-updater") {
+    let worker = PortsideRuntimeUpdateWorker()
+    Task {
+        await worker.runForever()
+        exit(0)
+    }
+    RunLoop.current.run()
+} else if CommandLine.arguments.contains("--capture-diagnostics") {
     var wrapper = PortsidePaths.baselineWrapper
     var prefix = PortsidePaths.steamPrefix
     var index = 1

@@ -174,6 +174,12 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertEqual(restored, state)
     }
 
+    func testLocalBuildDisablesAppUpdatesUntilProductionValuesAreInjected() {
+        XCTAssertFalse(PortsideAppUpdateConfiguration.isConfigured(feed: "", publicKey: ""))
+        XCTAssertFalse(PortsideAppUpdateConfiguration.isConfigured(feed: "https://example.invalid/appcast.xml", publicKey: "public"))
+        XCTAssertTrue(PortsideAppUpdateConfiguration.isConfigured(feed: "https://updates.portside.test/v1/appcast.xml", publicKey: "public"))
+    }
+
     func testCompatibilityManifestStoresGunZAppIDWithoutAccountData() throws {
         let entry = GameCompatibilityEntry(appID: "3139440", executable: "GunZ.exe", architecture: "x86", graphicsAPI: "DirectX 9", preferredRenderer: .wineD3D)
         let manifest = GameCompatibilityManifest(entries: [entry])
@@ -197,7 +203,7 @@ final class PortsideCoreTests: XCTestCase {
                 "id": "engine",
                 "component": "WS12WineSikarugir10.0_6",
                 "version": "10.0.6",
-                "downloadURL": "https://downloads.example.invalid/engine.tar.xz",
+                "downloadURL": "https://downloads.portside.test/engine.tar.xz",
                 "sha256": String(repeating: "a", count: 64),
                 "size": 10,
                 "critical": false,
@@ -214,9 +220,10 @@ final class PortsideCoreTests: XCTestCase {
         let signature = try signingKey.signature(for: unsignedData).base64EncodedString()
         unsigned["signature"] = signature
         let data = try JSONSerialization.data(withJSONObject: unsigned, options: [.sortedKeys])
-        let manifest = try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", currentVersion: "0.1.0", allowedHosts: ["downloads.example.invalid"])
+        let manifest = try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", currentVersion: "0.1.0", allowedHosts: ["downloads.portside.test"])
         XCTAssertEqual(manifest.components.count, 1)
-        XCTAssertThrowsError(try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", currentVersion: "0.0.9", allowedHosts: ["downloads.example.invalid"]))
+        XCTAssertThrowsError(try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", expectedChannel: "production", currentVersion: "0.1.0", allowedHosts: ["downloads.portside.test"]))
+        XCTAssertThrowsError(try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", currentVersion: "0.0.9", allowedHosts: ["downloads.portside.test"]))
     }
 
     func testLicenseTokenAcceptsOnlyTheConfiguredSignature() throws {

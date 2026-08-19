@@ -23,6 +23,7 @@ publish_object() {
 }
 
 publish_object "$BUILD_DIR/Portside-${VERSION}-notarized.zip" "app/$CHANNEL/Portside-${VERSION}.zip" "application/zip"
+publish_object "$BUILD_DIR/Portside-${VERSION}.dmg" "app/$CHANNEL/Portside-${VERSION}.dmg" "application/x-apple-diskimage"
 publish_object "$BUILD_DIR/appcast.xml" "app/$CHANNEL/appcast.xml" "application/xml"
 publish_object "$BUILD_DIR/checksums.txt" "app/$CHANNEL/checksums.txt" "text/plain"
 if [ -f "$BUILD_DIR/runtime-manifest.json" ]; then

@@ -14,21 +14,50 @@ public final class PortsideBackendClient: @unchecked Sendable {
     }
 
     public func fetchRuntimeManifest(currentVersion: String) async throws -> PortsideRuntimeManifest {
-        let data = try await request(path: "/v1/runtime/manifest")
         guard let publicKey = configuration.runtimeManifestPublicKey else { throw PortsideCommercialError.invalidSignature }
-        return try PortsideManifestVerifier.verify(data, publicKeyBase64: publicKey, currentVersion: currentVersion, allowedHosts: configuration.allowedHosts)
+        let cachedData = try? Data(contentsOf: PortsidePaths.runtimeManifest)
+        let cachedManifest = cachedData.flatMap { try? PortsideManifestVerifier.verify($0, publicKeyBase64: publicKey, expectedChannel: expectedChannel, currentVersion: currentVersion, allowedHosts: configuration.allowedHosts) }
+        let etag = try? String(contentsOf: PortsidePaths.runtimeManifestETag, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            let response = try await requestResponse(path: "/v1/runtime/manifest", headers: etag.map { ["If-None-Match": $0] } ?? [:])
+            if response.status == 304, let cachedManifest { return cachedManifest }
+            guard (200..<300).contains(response.status), response.status != 304 else { throw PortsideCommercialError.backendUnavailable }
+            let manifest = try PortsideManifestVerifier.verify(response.data, publicKeyBase64: publicKey, expectedChannel: expectedChannel, currentVersion: currentVersion, allowedHosts: configuration.allowedHosts)
+            if let cachedManifest,
+               PortsideManifestVerifier.compareVersions(manifest.manifestVersion, cachedManifest.manifestVersion) < 0,
+               manifest.rollbackVersion != cachedManifest.manifestVersion {
+                throw PortsideCommercialError.invalidManifest("runtime update would downgrade the installed release")
+            }
+            try FileManager.default.createDirectory(at: PortsidePaths.manifests, withIntermediateDirectories: true)
+            try response.data.write(to: PortsidePaths.runtimeManifest, options: .atomic)
+            if let responseETag = response.headers["etag"] {
+                try responseETag.write(to: PortsidePaths.runtimeManifestETag, atomically: true, encoding: .utf8)
+            } else { try? FileManager.default.removeItem(at: PortsidePaths.runtimeManifestETag) }
+            return manifest
+        } catch {
+            // A verified cached manifest keeps an existing installation usable
+            // while the service is offline or temporarily unavailable. Invalid
+            // network data is never written over that cache.
+            if let cachedManifest { return cachedManifest }
+            throw error
+        }
     }
 
     public func downloadBaselineArtifacts(currentVersion: String, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> [SikarugirArtifact: URL] {
         let manifest = try await fetchRuntimeManifest(currentVersion: currentVersion)
+        return try await downloadArtifacts(manifest: manifest, to: PortsidePaths.downloads, progress: progress)
+    }
+
+    public func downloadArtifacts(manifest: PortsideRuntimeManifest, to directory: URL, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> [SikarugirArtifact: URL] {
         let expected = [SikarugirOfficialCatalog.template, SikarugirOfficialCatalog.engine, SikarugirOfficialCatalog.winetricks]
         var result: [SikarugirArtifact: URL] = [:]
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         for (index, artifact) in expected.enumerated() {
             guard let component = manifest.components.first(where: { $0.component == artifact.identifier || $0.id == artifact.identifier }) else {
                 throw PortsideCommercialError.invalidManifest("required runtime component is missing")
             }
             guard let host = component.downloadURL.host, configuration.allowedHosts.contains(host) else { throw PortsideCommercialError.unauthorizedURL }
-            let destination = PortsidePaths.downloads.appendingPathComponent(component.downloadURL.lastPathComponent)
+            let destination = directory.appendingPathComponent(component.downloadURL.lastPathComponent)
             if FileManager.default.fileExists(atPath: destination.path) {
                 try IntegrityVerifier.verify(url: destination, expectedSHA256: component.sha256, expectedSize: component.size)
             } else {
@@ -48,15 +77,38 @@ public final class PortsideBackendClient: @unchecked Sendable {
         return response.url
     }
 
+    private struct HTTPResponse {
+        let data: Data
+        let status: Int
+        let headers: [String: String]
+    }
+
     private func request(path: String) async throws -> Data {
+        let response = try await requestResponse(path: path, headers: [:])
+        guard (200..<300).contains(response.status) else { throw PortsideCommercialError.backendUnavailable }
+        return response.data
+    }
+
+    private func requestResponse(path: String, headers: [String: String]) async throws -> HTTPResponse {
         guard let baseURL = configuration.baseURL else { throw PortsideCommercialError.backendUnavailable }
         let url = baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
         guard url.host == baseURL.host, url.scheme == "https" else { throw PortsideCommercialError.unauthorizedURL }
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
+        for (field, value) in headers { request.setValue(value, forHTTPHeaderField: field) }
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw PortsideCommercialError.backendUnavailable }
-        return data
+        guard let http = response as? HTTPURLResponse else { throw PortsideCommercialError.backendUnavailable }
+        let responseHeaders = http.allHeaderFields.reduce(into: [String: String]()) { result, entry in
+            if let key = entry.key as? String, let value = entry.value as? String { result[key.lowercased()] = value }
+        }
+        return HTTPResponse(data: data, status: http.statusCode, headers: responseHeaders)
+    }
+
+    private var expectedChannel: String? {
+        switch configuration.buildChannel {
+        case "staging", "production": return configuration.buildChannel
+        default: return nil
+        }
     }
 }
 

@@ -1,0 +1,236 @@
+name: Release Portside
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Portside version to build"
+        required: true
+        type: string
+      promote:
+        description: "After staging validation, request the protected production promotion job"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build-stage-and-publish:
+    name: Build, notarize and publish staging
+    runs-on: macos-15
+    timeout-minutes: 90
+    environment: staging
+    env:
+      PORTSIDE_VERSION: ${{ inputs.version }}
+      PORTSIDE_UPDATE_CHANNEL: staging
+      PORTSIDE_API_BASE_URL: ${{ secrets.PORTSIDE_API_BASE_URL }}
+      PORTSIDE_UPDATE_FEED_URL: ${{ secrets.PORTSIDE_UPDATE_FEED_URL }}
+      PORTSIDE_SPARKLE_PUBLIC_KEY: ${{ secrets.PORTSIDE_SPARKLE_PUBLIC_KEY }}
+      PORTSIDE_RUNTIME_MANIFEST_PUBLIC_KEY: ${{ secrets.PORTSIDE_RUNTIME_MANIFEST_PUBLIC_KEY }}
+      PORTSIDE_LICENSE_PUBLIC_KEY: ${{ secrets.PORTSIDE_LICENSE_PUBLIC_KEY }}
+      PORTSIDE_LICENSE_KEY_ID: ${{ secrets.PORTSIDE_LICENSE_KEY_ID }}
+      PORTSIDE_ARTIFACT_HOSTS: ${{ secrets.PORTSIDE_ARTIFACT_HOSTS }}
+      PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
+      PORTSIDE_SECONDARY_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_SECONDARY_PUBLIC_BUCKET }}
+      PORTSIDE_PUBLIC_BASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}
+      PORTSIDE_CODESIGN_IDENTITY: ${{ secrets.PORTSIDE_CODESIGN_IDENTITY }}
+      PORTSIDE_NOTARY_PROFILE: ${{ secrets.PORTSIDE_NOTARY_PROFILE }}
+      PORTSIDE_CONFIRM_PRODUCTION: "NO"
+    steps:
+      - name: Check out tested sources
+        uses: actions/checkout@v7
+
+      - name: Resolve and build Swift dependencies
+        run: |
+          swift package resolve --package-path apps/desktop
+
+      - name: Run desktop tests
+        run: swift test --package-path apps/desktop
+
+      - name: Set up Node.js for backend validation
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/backend/package-lock.json
+
+      - name: Run backend checks
+        working-directory: apps/backend
+        env:
+          DATABASE_URL: postgresql://portside:portside@127.0.0.1:5432/portside
+        run: |
+          npm ci
+          npm run prisma:validate
+          npm run typecheck
+          npm run lint
+          npm test
+          npm run build
+
+      - name: Validate production source policy
+        run: ./scripts/validate-production-policy.sh
+
+      - name: Materialize CI-only signing inputs
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.PORTSIDE_SPARKLE_PRIVATE_KEY }}
+          MANIFEST_PRIVATE_KEY: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY }}
+          UNSIGNED_MANIFEST: ${{ secrets.PORTSIDE_RUNTIME_MANIFEST_JSON }}
+        run: |
+          set -eu
+          umask 077
+          test -n "$SPARKLE_PRIVATE_KEY"
+          test -n "$MANIFEST_PRIVATE_KEY"
+          test -n "$UNSIGNED_MANIFEST"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/portside-sparkle-ed25519.key"
+          printf '%s' "$MANIFEST_PRIVATE_KEY" > "$RUNNER_TEMP/portside-manifest-ed25519.key"
+          printf '%s' "$UNSIGNED_MANIFEST" > "$RUNNER_TEMP/runtime-manifest-unsigned.json"
+
+      - name: Validate release inputs without printing secrets
+        run: |
+          set -eu
+          for value in "$PORTSIDE_VERSION" "$PORTSIDE_API_BASE_URL" "$PORTSIDE_UPDATE_FEED_URL" "$PORTSIDE_SPARKLE_PUBLIC_KEY" "$PORTSIDE_RUNTIME_MANIFEST_PUBLIC_KEY" "$PORTSIDE_LICENSE_PUBLIC_KEY" "$PORTSIDE_LICENSE_KEY_ID" "$PORTSIDE_ARTIFACT_HOSTS" "$PORTSIDE_PUBLIC_BASE_URL" "$PORTSIDE_CODESIGN_IDENTITY" "$PORTSIDE_NOTARY_PROFILE"; do
+            test -n "$value"
+            case "$value" in *example.invalid*) echo "placeholder release value" >&2; exit 1;; esac
+          done
+
+      - name: Build unsigned configured app
+        env:
+          PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
+        run: ./scripts/build_release.sh
+
+      - name: Sign application and generate provenance
+        env:
+          PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
+          PORTSIDE_RUNTIME_MANIFEST_INPUT: ${{ runner.temp }}/runtime-manifest-unsigned.json
+          PORTSIDE_MANIFEST_SIGNING_KEY_FILE: ${{ runner.temp }}/portside-manifest-ed25519.key
+        run: ./scripts/sign_release.sh
+
+      - name: Notarize and staple app, ZIP and DMG
+        env:
+          PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
+        run: ./scripts/notarize_release.sh
+
+      - name: Validate final signed bundle metadata
+        env:
+          PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
+        run: ./scripts/validate_release_bundle.sh
+
+      - name: Generate signed staging appcast
+        env:
+          PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
+          PORTSIDE_UPDATES_DIR: ${{ runner.temp }}/portside-release/updates
+          PORTSIDE_APPCAST_OUTPUT: ${{ runner.temp }}/portside-release/appcast.xml
+          PORTSIDE_SPARKLE_PRIVATE_KEY_FILE: ${{ runner.temp }}/portside-sparkle-ed25519.key
+          PORTSIDE_DOWNLOAD_URL_PREFIX: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/app/staging/
+          SPARKLE_BIN: apps/desktop/.build/artifacts/sparkle/Sparkle/bin
+        run: |
+          set -eu
+          mkdir -p "$PORTSIDE_UPDATES_DIR"
+          cp "$PORTSIDE_BUILD_DIR/Portside-${PORTSIDE_VERSION}-notarized.zip" "$PORTSIDE_UPDATES_DIR/"
+          printf '%s\n' "Portside ${PORTSIDE_VERSION}: performance, stability and compatibility improvements." > "$PORTSIDE_UPDATES_DIR/Portside-${PORTSIDE_VERSION}-notarized.md"
+          ./scripts/generate_appcast.sh
+
+      - name: Publish staging artifacts to both Portside buckets
+        env:
+          PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
+        run: ./scripts/publish_release.sh
+
+      - name: Upload signed staging release for protected promotion
+        uses: actions/upload-artifact@v7
+        with:
+          name: portside-release-${{ inputs.version }}
+          retention-days: 14
+          if-no-files-found: error
+          path: ${{ runner.temp }}/portside-release
+
+  promote-production:
+    name: Promote reviewed staging release to production
+    needs: build-stage-and-publish
+    if: ${{ inputs.promote == true }}
+    runs-on: macos-15
+    timeout-minutes: 20
+    environment: production
+    env:
+      PORTSIDE_VERSION: ${{ inputs.version }}
+      PORTSIDE_UPDATE_CHANNEL: production
+      PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
+      PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
+      PORTSIDE_SECONDARY_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_SECONDARY_PUBLIC_BUCKET }}
+      PORTSIDE_PUBLIC_BASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}
+      PORTSIDE_CONFIRM_PRODUCTION: YES
+    steps:
+      - name: Check out release scripts
+        uses: actions/checkout@v7
+
+      - name: Resolve Sparkle tooling
+        run: swift package resolve --package-path apps/desktop
+
+      - name: Build Sparkle tooling for appcast generation
+        run: swift build -c release --arch arm64 --product Portside --package-path apps/desktop
+
+      - name: Download staged release
+        uses: actions/download-artifact@v7
+        with:
+          name: portside-release-${{ inputs.version }}
+          path: ${{ runner.temp }}/portside-release
+
+      - name: Materialize Sparkle signing key
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.PORTSIDE_SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -eu
+          umask 077
+          test -n "$SPARKLE_PRIVATE_KEY"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/portside-sparkle-ed25519.key"
+
+      - name: Re-sign appcast for production storage URLs
+        env:
+          PORTSIDE_UPDATES_DIR: ${{ runner.temp }}/portside-release/updates-production
+          PORTSIDE_APPCAST_OUTPUT: ${{ runner.temp }}/portside-release/appcast.xml
+          PORTSIDE_SPARKLE_PRIVATE_KEY_FILE: ${{ runner.temp }}/portside-sparkle-ed25519.key
+          PORTSIDE_DOWNLOAD_URL_PREFIX: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/app/production/
+          SPARKLE_BIN: ${{ github.workspace }}/apps/desktop/.build/artifacts/sparkle/Sparkle/bin
+        run: |
+          set -eu
+          mkdir -p "$PORTSIDE_UPDATES_DIR"
+          cp "$PORTSIDE_BUILD_DIR/Portside-${PORTSIDE_VERSION}-notarized.zip" "$PORTSIDE_UPDATES_DIR/"
+          printf '%s\n' "Portside ${PORTSIDE_VERSION}: performance, stability and compatibility improvements." > "$PORTSIDE_UPDATES_DIR/Portside-${PORTSIDE_VERSION}-notarized.md"
+          ./scripts/generate_appcast.sh
+
+      - name: Publish the reviewed artifact to production storage
+        run: ./scripts/publish_release.sh
+
+      - name: Require explicit backend promotion
+        env:
+          API_URL: ${{ secrets.PORTSIDE_API_BASE_URL }}
+          ADMIN_TOKEN: ${{ secrets.PORTSIDE_ADMIN_BEARER_TOKEN }}
+          RELEASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/app/production/Portside-${{ inputs.version }}.zip
+        run: |
+          set -eu
+          test -n "$API_URL"
+          test -n "$ADMIN_TOKEN"
+          test -n "$RELEASE_URL"
+          metadata="$(node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const xml = readFileSync(process.env.PORTSIDE_BUILD_DIR + '/appcast.xml', 'utf8');
+          const enclosure = xml.match(/<enclosure\\b([^>]+)>/i)?.[1] ?? '';
+          const attr = (name) => enclosure.match(new RegExp(name + '=\\"([^\\"]+)\\"', 'i'))?.[1] ?? '';
+          const decoded = (value) => value.replaceAll('&quot;', '"').replaceAll('&amp;', '&');
+          const result = { length: Number(attr('length')), edSignature: decoded(attr('sparkle:edSignature')) };
+          if (!Number.isSafeInteger(result.length) || result.length <= 0 || !result.edSignature) process.exit(1);
+          process.stdout.write(JSON.stringify(result));
+          NODE
+          )"
+          length="$(printf '%s' "$metadata" | jq -r '.length')"
+          signature="$(printf '%s' "$metadata" | jq -r '.edSignature')"
+          response="$(curl --fail --silent --show-error --retry 3 \
+            -H "Authorization: Bearer $ADMIN_TOKEN" \
+            -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg version "$PORTSIDE_VERSION" --arg url "$RELEASE_URL" --arg signature "$signature" --argjson length "$length" '{version:$version,build:$version,channel:"staging",url:$url,length:$length,edSignature:$signature,minimumOSVersion:"13.0",releaseNotes:("Portside " + $version + ": performance, stability and compatibility improvements.")}')" \
+            "$API_URL/v1/admin/app-releases/register")"
+          release_id="$(printf '%s' "$response" | jq -r '.id')"
+          test -n "$release_id" && test "$release_id" != null
+          curl --fail --silent --show-error --retry 3 \
+            -H "Authorization: Bearer $ADMIN_TOKEN" \
+            -X POST "$API_URL/v1/admin/app-releases/$release_id/promote"

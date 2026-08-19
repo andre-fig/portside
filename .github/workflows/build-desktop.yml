@@ -1,4 +1,4 @@
-name: Build Desktop
+name: Build Desktop Validation
 
 on:
   workflow_dispatch:
@@ -25,13 +25,13 @@ jobs:
       - name: Resolve desktop dependencies
         run: swift package resolve --package-path apps/desktop
 
-      - name: Build and package Portside.app
+      - name: Build local validation bundle (non-commercial)
         run: ./scripts/package_app.sh
 
-      - name: Create distributable archives
+      - name: Create validation archives (not for customer distribution)
         run: |
           ditto -c -k --sequesterRsrc --keepParent \
-            build/Portside.app build/Portside.app.zip
+            build/Portside.app build/Portside-validation.app.zip
           ditto -c -k --sequesterRsrc --keepParent \
             build/Portside.app.dSYM build/Portside.app.dSYM.zip
           hdiutil create \
@@ -39,21 +39,21 @@ jobs:
             -srcfolder build/Portside.app \
             -ov \
             -format UDZO \
-            build/Portside.dmg
+            build/Portside-validation.dmg
           shasum -a 256 \
-            build/Portside.app.zip \
-            build/Portside.dmg \
+            build/Portside-validation.app.zip \
+            build/Portside-validation.dmg \
             build/Portside.app.dSYM.zip \
             > build/checksums.txt
 
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: Portside-desktop-${{ github.event.workflow_run.head_sha || github.sha }}
+          name: Portside-desktop-validation-${{ github.event.workflow_run.head_sha || github.sha }}
           if-no-files-found: error
           retention-days: 14
           path: |
-            build/Portside.app.zip
-            build/Portside.dmg
+            build/Portside-validation.app.zip
+            build/Portside-validation.dmg
             build/Portside.app.dSYM.zip
             build/checksums.txt

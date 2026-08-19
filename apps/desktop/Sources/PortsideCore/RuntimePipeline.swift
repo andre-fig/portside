@@ -353,6 +353,19 @@ public final class SikarugirWrapperInstaller: @unchecked Sendable {
         return SikarugirWrapperInstallResult(validation: canonicalValidation, runtimeRecord: record)
     }
 
+    @discardableResult
+    public func rollbackLatest() throws -> WrapperValidation? {
+        let candidates = (try? fileManager.contentsOfDirectory(at: PortsidePaths.runtime, includingPropertiesForKeys: nil)) ?? []
+        guard let previous = candidates.filter({ $0.lastPathComponent.hasPrefix("rollback-") }).sorted(by: { $0.lastPathComponent > $1.lastPathComponent }).first else { return nil }
+        let destination = PortsidePaths.baselineWrapper
+        if fileManager.fileExists(atPath: destination.path) {
+            let failed = PortsidePaths.runtime.appendingPathComponent("failed-(UUID().uuidString)", isDirectory: true)
+            try fileManager.moveItem(at: destination, to: failed)
+        }
+        try fileManager.moveItem(at: previous, to: destination)
+        return try SikarugirWrapperValidator.validate(wrapper: destination)
+    }
+
     private func extract(archive: URL, to destination: URL) async throws {
         let listing = try await runner.run(ProcessLaunchSpec(executable: URL(fileURLWithPath: "/usr/bin/tar"), arguments: ["-tf", archive.path], timeout: 120), logger: logger)
         guard listing.status == 0 else { throw PortsideError.processFailed("archive listing", listing.status) }
@@ -386,6 +399,12 @@ public final class SikarugirUpdateService: @unchecked Sendable {
     private let logger: PortsideLogger
     private let backend: PortsideBackendClient?
     private let currentVersion: String
+    public private(set) var lastManifestVersion: String?
+
+    private struct StagedRuntimeIndex: Codable {
+        let manifest: PortsideRuntimeManifest
+        let artifacts: [String: String]
+    }
 
     public init(logger: PortsideLogger = PortsideLogger(), backendConfiguration: PortsideBackendConfiguration? = nil, currentVersion: String = "0.1.0") {
         self.logger = logger
@@ -415,7 +434,87 @@ public final class SikarugirUpdateService: @unchecked Sendable {
     public func downloadBaselineArtifacts(progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> [SikarugirArtifact: URL] {
         guard let backend else { throw PortsideCommercialError.backendUnavailable }
         logger.write("Downloading approved runtime components from Portside storage")
-        return try await backend.downloadBaselineArtifacts(currentVersion: currentVersion, progress: progress)
+        let manifest = try await backend.fetchRuntimeManifest(currentVersion: currentVersion)
+        lastManifestVersion = manifest.manifestVersion
+        return try await backend.downloadArtifacts(manifest: manifest, to: PortsidePaths.downloads, progress: progress)
+    }
+
+    /// Downloads and verifies a candidate runtime without touching the active
+    /// wrapper or prefix. The helper can run this after Portside.app exits.
+    @discardableResult
+    public func stageRuntimeUpdate(progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> PortsideRuntimeManifest? {
+        guard let backend else { throw PortsideCommercialError.backendUnavailable }
+        let manifest = try await backend.fetchRuntimeManifest(currentVersion: currentVersion)
+        let installedVersion = EnvironmentStore().load().runtimeManifestVersion
+        if let installedVersion,
+           PortsideManifestVerifier.compareVersions(manifest.manifestVersion, installedVersion) <= 0,
+           manifest.rollbackVersion != installedVersion {
+            return nil
+        }
+        let directory = PortsidePaths.runtimeStaging.appendingPathComponent(stagingDirectoryName(for: manifest.manifestVersion), isDirectory: true)
+        let indexURL = directory.appendingPathComponent("index.json")
+        if let data = try? Data(contentsOf: indexURL), let existing = try? JSONDecoder.portside.decode(StagedRuntimeIndex.self, from: data), existing.manifest.manifestVersion == manifest.manifestVersion {
+            return existing.manifest
+        }
+        let temporary = PortsidePaths.runtimeStaging.appendingPathComponent(".pending-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let artifactsDirectory = temporary.appendingPathComponent("artifacts", isDirectory: true)
+        try FileManager.default.createDirectory(at: artifactsDirectory, withIntermediateDirectories: true)
+        let artifacts = try await backend.downloadArtifacts(manifest: manifest, to: artifactsDirectory, progress: progress)
+        var filenames: [String: String] = [:]
+        for (artifact, url) in artifacts {
+            filenames[artifact.identifier] = url.lastPathComponent
+        }
+        let index = StagedRuntimeIndex(manifest: manifest, artifacts: filenames)
+        try JSONEncoder.portside.encode(index).write(to: temporary.appendingPathComponent("index.json"), options: .atomic)
+        try FileManager.default.createDirectory(at: PortsidePaths.runtimeStaging, withIntermediateDirectories: true)
+        for existing in (try? FileManager.default.contentsOfDirectory(at: PortsidePaths.runtimeStaging, includingPropertiesForKeys: nil)) ?? [] where existing.lastPathComponent.hasPrefix("runtime-") && existing.path != directory.path {
+            try? FileManager.default.removeItem(at: existing)
+        }
+        if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
+        try FileManager.default.moveItem(at: temporary, to: directory)
+        logger.write("Verified a runtime update and staged it for the next Steam opening")
+        return manifest
+    }
+
+    public func applyStagedRuntime(using installer: SikarugirWrapperInstaller) async throws -> (result: SikarugirWrapperInstallResult, manifest: PortsideRuntimeManifest)? {
+        guard let staged = try stagedRuntimeUpdate() else { return nil }
+        let result: SikarugirWrapperInstallResult
+        do {
+            result = try await installer.install(artifacts: staged.artifacts)
+        } catch {
+            _ = try? installer.rollbackLatest()
+            throw error
+        }
+        removeStagedRuntime(staged.manifest.manifestVersion)
+        return (result, staged.manifest)
+    }
+
+    public func stagedRuntimeUpdate() throws -> (manifest: PortsideRuntimeManifest, artifacts: [SikarugirArtifact: URL])? {
+        let directories = ((try? FileManager.default.contentsOfDirectory(at: PortsidePaths.runtimeStaging, includingPropertiesForKeys: [.isDirectoryKey])) ?? [])
+            .filter { $0.lastPathComponent.hasPrefix("runtime-") }
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+        guard let directory = directories.first else { return nil }
+        let index = try JSONDecoder.portside.decode(StagedRuntimeIndex.self, from: Data(contentsOf: directory.appendingPathComponent("index.json")))
+        let expected = [SikarugirOfficialCatalog.template, SikarugirOfficialCatalog.engine, SikarugirOfficialCatalog.winetricks]
+        var artifacts: [SikarugirArtifact: URL] = [:]
+        for artifact in expected {
+            guard let filename = index.artifacts[artifact.identifier], SafeArchiveExtractor.isSafeRelativePath(filename) else { throw PortsideError.invalidArtifact("staged runtime path is unsafe") }
+            let url = directory.appendingPathComponent("artifacts", isDirectory: true).appendingPathComponent(filename)
+            guard url.standardizedFileURL.path.hasPrefix(directory.standardizedFileURL.path + "/"), FileManager.default.fileExists(atPath: url.path) else { throw PortsideError.invalidArtifact("staged runtime artifact is missing") }
+            artifacts[artifact] = url
+        }
+        return (index.manifest, artifacts)
+    }
+
+    public func removeStagedRuntime(_ manifestVersion: String) {
+        let directory = PortsidePaths.runtimeStaging.appendingPathComponent(stagingDirectoryName(for: manifestVersion), isDirectory: true)
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    private func stagingDirectoryName(for version: String) -> String {
+        let digest = SHA256.hash(data: Data(version.utf8)).map { String(format: "%02x", $0) }.joined().prefix(32)
+        return "runtime-\(digest)"
     }
 }
 

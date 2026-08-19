@@ -1,5 +1,8 @@
 #!/bin/sh
 set -eu
+# This script intentionally creates a local/development bundle. Commercial
+# builds must use build_release.sh so feed, API and public keys are injected
+# from a protected CI environment before signing and notarization.
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 DESKTOP_DIR="$ROOT_DIR/apps/desktop"
@@ -30,6 +33,8 @@ for SIZE in 16 32 128 256 512; do
     sips -z "$DOUBLE_SIZE" "$DOUBLE_SIZE" "$DESKTOP_DIR/Resources/PortsideLogo.png" --out "$ICONSET_DIR/icon_${SIZE}x${SIZE}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET_DIR" -o "$APP_DIR/Contents/Resources/PortsideIcon.icns"
+/usr/libexec/PlistBuddy -c "Set :PortsideBuildChannel development" "$APP_DIR/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :PortsideBuildChannel development" "$APP_DIR/Contents/Helpers/PortsideAgent.app/Contents/Info.plist"
 chmod +x "$APP_DIR/Contents/MacOS/Portside"
 dsymutil "$APP_DIR/Contents/MacOS/Portside" -o "$DSYM_DIR"
 
@@ -45,5 +50,5 @@ if [ -n "${SENTRY_AUTH_TOKEN:-}" ] && command -v sentry-cli >/dev/null 2>&1; the
     sentry-cli debug-files upload "$DSYM_DIR"
 fi
 
-echo "Created $APP_DIR"
+echo "Created local development bundle $APP_DIR (not a commercial release)"
 echo "Created $DSYM_DIR"
