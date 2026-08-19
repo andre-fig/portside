@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out tested commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
       - name: Wait for Railway API healthcheck

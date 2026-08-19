@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Check out the tested revision
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
@@ -47,7 +47,7 @@ jobs:
             > build/checksums.txt
 
       - name: Upload desktop artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Portside-desktop-${{ github.event.workflow_run.head_sha || github.sha }}
           if-no-files-found: error
