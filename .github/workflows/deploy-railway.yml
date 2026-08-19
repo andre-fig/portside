@@ -1,4 +1,4 @@
-name: Deploy Railway
+name: Verify Railway
 
 on:
   workflow_run:
@@ -10,31 +10,27 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
-    name: Deploy ${{ matrix.service }}
+  verify-api:
+    name: Verify Railway API
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        service: [api, sync-worker, upstream-cron]
-    env:
-      RAILWAY_PROJECT_ID: c948dfee-f2e0-47f9-9ede-39283181c3bd
-      RAILWAY_ENVIRONMENT: production
-      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+    timeout-minutes: 10
     steps:
       - name: Check out tested commit
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Install Railway CLI
-        run: npm install --global @railway/cli
-      - name: Apply database migrations
-        if: ${{ matrix.service == 'api' }}
-        run: railway run --service api --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" -- npm --prefix apps/backend run prisma:migrate:deploy
-      - name: Deploy service
-        run: railway up --service "${{ matrix.service }}" --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --detach --yes
+      - name: Wait for Railway API healthcheck
+        env:
+          API_URL: https://api-production-6d06.up.railway.app
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error "$API_URL/health" | grep -q '"status":"ok"'; then
+              echo "Railway API is healthy."
+              exit 0
+            fi
+            echo "Waiting for Railway deployment (attempt $attempt/30)..."
+            sleep 10
+          done
+          echo "Railway API did not become healthy in time."
+          exit 1

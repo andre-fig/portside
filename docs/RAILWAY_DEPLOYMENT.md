@@ -12,11 +12,12 @@ project create independent services for:
 
 Set the service root for each application service to `apps/backend` and use
 `Dockerfile` as the Dockerfile path. Set `DATABASE_URL` from the PostgreSQL
-service and run the migration command once as a controlled release step:
+service. The API runs `npx prisma migrate deploy` as its Railway pre-deploy
+command, inside the service network where the private PostgreSQL hostname is
+available.
 
 ```sh
 railway link --project <staging-project-id> --environment staging
-railway run --service api npm --prefix apps/backend run prisma:migrate:deploy
 railway up --service api
 railway up --service sync-worker
 railway up --service upstream-cron
@@ -32,5 +33,8 @@ Before adding a public custom domain, verify `/health`, `/ready`, TLS, signed
 artifact URLs, appcast content type and manifest signature. The API should
 return a temporary object-storage URL rather than proxying large files.
 
-This workspace has not been deployed to Railway. The commands above are a
-runbook and require the owner's authenticated Railway CLI session.
+Production is connected to `andre-fig/portside` on the `main` branch. Railway
+deploys the three application services automatically after each push; the
+`Verify Railway` GitHub workflow waits for the public API healthcheck after CI.
+The production API is available at
+`https://api-production-6d06.up.railway.app`.
