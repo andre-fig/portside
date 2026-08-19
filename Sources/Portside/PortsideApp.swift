@@ -664,7 +664,7 @@ private enum InstallerLayout {
     static let contentHeight: CGFloat = 276
     static let failureWidth: CGFloat = 560
     static let failureContentHeight: CGFloat = 350
-    static let headerHeight: CGFloat = 40
+    static let headerHeight: CGFloat = 48
     static let progressContentHeight = contentHeight - headerHeight - 1
     static let failureContentBodyHeight = failureContentHeight - headerHeight - 1
 }
@@ -673,16 +673,18 @@ struct InstallerHeader: View {
     @ObservedObject var model: PortsideModel
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            PortsideLogoView(size: 34)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Portside")
-                    .font(.headline)
-                Text(model.state.setupCompleted && model.setupStep == .failed ? "Steam could not be opened" : "Preparing Steam for your Mac")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+        ZStack {
+            HStack(alignment: .center, spacing: 12) {
+                PortsideLogoView(size: 34)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Portside")
+                        .font(.headline)
+                    Text(model.state.setupCompleted && model.setupStep == .failed ? "Steam could not be opened" : "Preparing Steam for your Mac")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
             }
-            Spacer()
         }
         .padding(.horizontal, 22)
         .frame(maxWidth: .infinity, minHeight: InstallerLayout.headerHeight, maxHeight: InstallerLayout.headerHeight, alignment: .center)
