@@ -664,6 +664,9 @@ private enum InstallerLayout {
     static let contentHeight: CGFloat = 276
     static let failureWidth: CGFloat = 560
     static let failureContentHeight: CGFloat = 350
+    static let headerHeight: CGFloat = 42
+    static let progressContentHeight = contentHeight - headerHeight - 1
+    static let failureContentBodyHeight = failureContentHeight - headerHeight - 1
 }
 
 struct InstallerHeader: View {
@@ -673,7 +676,7 @@ struct InstallerHeader: View {
         HStack(spacing: 12) {
             PortsideLogoView(size: 34)
             VStack(alignment: .leading, spacing: 3) {
-                Text(model.state.setupCompleted ? "Portside" : "Portside Installer")
+                Text("Portside")
                     .font(.headline)
                 Text(model.state.setupCompleted && model.setupStep == .failed ? "Steam could not be opened" : "Preparing Steam for your Mac")
                     .font(.subheadline)
@@ -682,7 +685,7 @@ struct InstallerHeader: View {
             Spacer()
         }
         .padding(.horizontal, 22)
-        .frame(height: 48)
+        .frame(height: InstallerLayout.headerHeight)
     }
 }
 
@@ -771,7 +774,7 @@ struct SetupProgressView: View {
             if model.progressIsIndeterminate { ProgressView().frame(width: 360) }
             else { ProgressView(value: model.progress).frame(width: 360) }
             Spacer()
-        }.padding(22).frame(width: InstallerLayout.width, height: 227)
+        }.padding(22).frame(width: InstallerLayout.width, height: InstallerLayout.progressContentHeight)
     }
 }
 
@@ -786,7 +789,7 @@ struct FailureView: View {
                 Button("Try Again") { model.repair() }.buttonStyle(.borderedProminent)
             }.disabled(model.isWorking)
             Spacer()
-        }.padding(22).frame(width: InstallerLayout.failureWidth, height: 301)
+        }.padding(22).frame(width: InstallerLayout.failureWidth, height: InstallerLayout.failureContentBodyHeight)
     }
 }
 
