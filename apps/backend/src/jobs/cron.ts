@@ -1,4 +1,5 @@
 import "reflect-metadata";
+
 console.log(
   JSON.stringify({
     level: "info",

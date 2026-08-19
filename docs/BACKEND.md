@@ -1,6 +1,6 @@
 # Portside backend
 
-`backend/` is an independent NestJS/TypeScript service with PostgreSQL via
+`apps/backend/` is an independent NestJS/TypeScript service with PostgreSQL via
 Prisma. The API, worker, sync Cron Job, database and private object storage
 are separate Railway services or resources. Railway's ephemeral filesystem is
 never treated as artifact storage.
@@ -38,7 +38,7 @@ OIDC/mTLS gateway before production.
 Run locally:
 
 ```sh
-cd backend
+cd apps/backend
 cp .env.example .env
 npm ci
 npx prisma generate

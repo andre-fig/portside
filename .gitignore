@@ -5,13 +5,13 @@ build/
 DerivedData/
 
 # Commercial backend and release credentials/artifacts
-backend/node_modules/
-backend/dist/
-backend/.env
-backend/.env.*
-!backend/.env.example
-backend/prisma/*.db
-backend/test-results/
+apps/backend/node_modules/
+apps/backend/dist/
+apps/backend/.env
+apps/backend/.env.*
+!apps/backend/.env.example
+apps/backend/prisma/*.db
+apps/backend/test-results/
 release-secrets/
 build/releases/
 *.p8

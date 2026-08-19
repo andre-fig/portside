@@ -5,8 +5,8 @@
 Run:
 
 ~~~sh
-swift test
-swift build
+swift test --package-path apps/desktop
+swift build --package-path apps/desktop
 ./scripts/package_app.sh
 ~~~
 

@@ -2,6 +2,7 @@
 set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+DESKTOP_DIR="$ROOT_DIR/apps/desktop"
 BUILD_DIR="${PORTSIDE_BUILD_DIR:-$ROOT_DIR/build/releases}"
 APP_DIR="$BUILD_DIR/Portside.app"
 IDENTITY="${PORTSIDE_CODESIGN_IDENTITY:?Set PORTSIDE_CODESIGN_IDENTITY to a Developer ID Application identity}"
@@ -15,7 +16,7 @@ if [ -d "$APP_DIR/Contents/Frameworks/Sparkle.framework" ]; then
     find "$APP_DIR/Contents/Frameworks/Sparkle.framework" -type f -perm -111 -exec codesign --force --options runtime --timestamp --sign "$IDENTITY" {} \;
     codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP_DIR/Contents/Frameworks/Sparkle.framework"
 fi
-codesign --force --options runtime --timestamp --entitlements "$ROOT_DIR/Resources/Portside.entitlements" --sign "$IDENTITY" "$APP_DIR"
+codesign --force --options runtime --timestamp --entitlements "$DESKTOP_DIR/Resources/Portside.entitlements" --sign "$IDENTITY" "$APP_DIR"
 codesign --verify --deep --strict --verbose=2 "$APP_DIR"
 ditto -c -k --sequesterRsrc --keepParent "$APP_DIR" "$BUILD_DIR/Portside-${PORTSIDE_VERSION:?Set PORTSIDE_VERSION}.zip"
 shasum -a 256 "$BUILD_DIR/Portside-${PORTSIDE_VERSION}.zip" > "$BUILD_DIR/checksums.txt"

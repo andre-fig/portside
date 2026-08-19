@@ -2,6 +2,7 @@
 set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+DESKTOP_DIR="$ROOT_DIR/apps/desktop"
 BUILD_DIR="${PORTSIDE_BUILD_DIR:-$ROOT_DIR/build/releases}"
 VERSION="${PORTSIDE_VERSION:?Set PORTSIDE_VERSION, for example 1.0.0}"
 API_URL="${PORTSIDE_API_BASE_URL:?Set the Portside HTTPS API URL}"
@@ -16,22 +17,22 @@ case "$API_URL:$FEED_URL" in *:http://*|http://*) echo "Release URLs must use HT
 APP_DIR="$BUILD_DIR/Portside.app"
 DSYM_DIR="$BUILD_DIR/Portside.app.dSYM"
 ICONSET_DIR="$BUILD_DIR/Portside.iconset"
-BIN_PATH="$ROOT_DIR/.build/arm64-apple-macosx/release"
+BIN_PATH="$DESKTOP_DIR/.build/arm64-apple-macosx/release"
 
-swift build -c release --arch arm64 --product Portside --package-path "$ROOT_DIR"
-swift build -c release --arch arm64 --product PortsideAgent --package-path "$ROOT_DIR"
+swift build -c release --arch arm64 --product Portside --package-path "$DESKTOP_DIR"
+swift build -c release --arch arm64 --product PortsideAgent --package-path "$DESKTOP_DIR"
 rm -rf "$APP_DIR" "$DSYM_DIR" "$ICONSET_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" "$APP_DIR/Contents/Frameworks" "$APP_DIR/Contents/Helpers/PortsideAgent.app/Contents/MacOS"
 cp "$BIN_PATH/Portside" "$APP_DIR/Contents/MacOS/Portside"
 cp "$BIN_PATH/PortsideAgent" "$APP_DIR/Contents/Helpers/PortsideAgent.app/Contents/MacOS/PortsideAgent"
-cp "$ROOT_DIR/Resources/PortsideAgent-Info.plist" "$APP_DIR/Contents/Helpers/PortsideAgent.app/Contents/Info.plist"
-cp "$ROOT_DIR/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
-cp "$ROOT_DIR/Resources/PortsideLogo.png" "$APP_DIR/Contents/Resources/PortsideLogo.png"
+cp "$DESKTOP_DIR/Resources/PortsideAgent-Info.plist" "$APP_DIR/Contents/Helpers/PortsideAgent.app/Contents/Info.plist"
+cp "$DESKTOP_DIR/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
+cp "$DESKTOP_DIR/Resources/PortsideLogo.png" "$APP_DIR/Contents/Resources/PortsideLogo.png"
 mkdir -p "$ICONSET_DIR"
 for SIZE in 16 32 128 256 512; do
-    sips -z "$SIZE" "$SIZE" "$ROOT_DIR/Resources/PortsideLogo.png" --out "$ICONSET_DIR/icon_${SIZE}x${SIZE}.png" >/dev/null
+    sips -z "$SIZE" "$SIZE" "$DESKTOP_DIR/Resources/PortsideLogo.png" --out "$ICONSET_DIR/icon_${SIZE}x${SIZE}.png" >/dev/null
     DOUBLE_SIZE=$((SIZE * 2))
-    sips -z "$DOUBLE_SIZE" "$DOUBLE_SIZE" "$ROOT_DIR/Resources/PortsideLogo.png" --out "$ICONSET_DIR/icon_${SIZE}x${SIZE}@2x.png" >/dev/null
+    sips -z "$DOUBLE_SIZE" "$DOUBLE_SIZE" "$DESKTOP_DIR/Resources/PortsideLogo.png" --out "$ICONSET_DIR/icon_${SIZE}x${SIZE}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET_DIR" -o "$APP_DIR/Contents/Resources/PortsideIcon.icns"
 

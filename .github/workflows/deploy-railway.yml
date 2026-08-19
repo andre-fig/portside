@@ -35,6 +35,6 @@ jobs:
         run: npm install --global @railway/cli
       - name: Apply database migrations
         if: ${{ matrix.service == 'api' }}
-        run: railway run --service api --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" -- npm --prefix backend run prisma:migrate:deploy
+        run: railway run --service api --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" -- npm --prefix apps/backend run prisma:migrate:deploy
       - name: Deploy service
         run: railway up --service "${{ matrix.service }}" --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --detach --yes

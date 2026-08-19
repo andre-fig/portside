@@ -11,11 +11,22 @@ anti-cheat, or expose Sikarugir Creator to the end user.
 ## Build and test
 
 ~~~sh
-swift test
-swift build
+swift test --package-path apps/desktop
+swift build --package-path apps/desktop
 ./scripts/package_app.sh
 open build/Portside.app
 ~~~
+
+## Monorepo layout
+
+The repository keeps the two deployable products isolated:
+
+```text
+apps/desktop/   Native macOS client, Swift Package and tests
+apps/backend/   NestJS API, Prisma schema, worker and sync job
+docs/           Product, security, validation and deployment documentation
+scripts/        Release packaging, signing and publishing automation
+```
 
 After the first setup, Portside stays ready and opens Steam only when you
 choose `Open Steam`; closing Steam does not launch it again.
@@ -65,7 +76,7 @@ SIKARUGIR_AUTHORIZATION.md.
 
 ## Commercial infrastructure
 
-The commercial control plane is scaffolded separately in `backend/`. It uses
+The commercial control plane is scaffolded separately in `apps/backend/`. It uses
 NestJS, PostgreSQL/Prisma, private object storage, signed runtime manifests,
 Sparkle 2 app updates and one-Mac license activation. Start with
 `docs/COMMERCIALIZATION.md`, `docs/BACKEND.md` and

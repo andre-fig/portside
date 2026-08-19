@@ -74,17 +74,21 @@ export class AppConfig {
 
   validateProduction(): void {
     if (this.nodeEnv !== "production") return;
-    if (!this.publicBaseURL.startsWith("https://"))
+    if (!this.publicBaseURL.startsWith("https://")) {
       throw new Error("PUBLIC_BASE_URL must use HTTPS in production");
-    if (!this.allowedSourceHosts.size)
+    }
+    if (!this.allowedSourceHosts.size) {
       throw new Error("ALLOWED_SOURCE_HOSTS must not be empty in production");
+    }
     if (
       !this.s3.endpoint ||
       !this.s3.bucket ||
       !this.s3.accessKeyId ||
       !this.s3.secretAccessKey
-    )
+    ) {
       throw new Error("private artifact storage is required in production");
+    }
+
     this.adminToken();
     this.licenseHMACSecret();
     this.licensePrivateKey();
