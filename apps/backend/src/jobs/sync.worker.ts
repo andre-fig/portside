@@ -5,7 +5,11 @@ const prisma = new PrismaClient();
 
 function waitForShutdown(): Promise<void> {
   return new Promise((resolve) => {
-    const shutdown = () => resolve();
+    const keepAlive = setInterval(() => undefined, 60_000);
+    const shutdown = () => {
+      clearInterval(keepAlive);
+      resolve();
+    };
     process.once("SIGTERM", shutdown);
     process.once("SIGINT", shutdown);
   });
