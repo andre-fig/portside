@@ -390,6 +390,7 @@ struct SetupProgressView: View {
     var body: some View {
         VStack(spacing: 22) {
             Spacer()
+            PortsideLogoView()
             Text(model.message.isEmpty ? "Preparando o Portside…" : model.message).font(.title3.weight(.medium))
             if model.progressIsIndeterminate { ProgressView().frame(width: 360) }
             else { ProgressView(value: model.progress).frame(width: 360) }
@@ -406,6 +407,7 @@ struct FailureView: View {
     var body: some View {
         VStack(spacing: 18) {
             Spacer()
+            PortsideLogoView()
             Text("Não foi possível concluir a preparação.").font(.title3.weight(.medium))
             HStack(spacing: 12) {
                 Button("Tentar novamente") { model.setUp() }.buttonStyle(.borderedProminent)
@@ -420,6 +422,20 @@ struct FailureView: View {
             Button("Enviar dados técnicos") { model.sendDiagnostic() }
             Button("Cancelar", role: .cancel) {}
         } message: { Text("Serão enviados somente dados técnicos sanitizados para corrigir falhas. Nenhuma credencial, conta Steam ou lista de jogos será enviada.") }
+    }
+}
+
+struct PortsideLogoView: View {
+    var body: some View {
+        Group {
+            if let url = Bundle.main.url(forResource: "PortsideLogo", withExtension: "png"), let image = NSImage(contentsOf: url) {
+                Image(nsImage: image).resizable().scaledToFit()
+            } else {
+                Image(systemName: "shippingbox.and.arrow.backward.fill").resizable().scaledToFit().padding(18)
+            }
+        }
+        .frame(width: 96, height: 96)
+        .accessibilityLabel("Portside")
     }
 }
 
