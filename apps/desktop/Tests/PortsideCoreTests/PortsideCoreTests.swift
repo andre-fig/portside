@@ -18,11 +18,12 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertEqual(configuration.environment["DXVK"], "0")
     }
 
-    func testOfficialCatalogUsesPinnedHTTPSArtifactsAndChecksums() throws {
+    func testCatalogUsesPortsideManifestComponentsWithoutDirectUpstreamURLs() throws {
         for artifact in SikarugirOfficialCatalog.all {
             try SikarugirArtifactValidator.validate(artifact)
             XCTAssertEqual(artifact.sha256.count, 64)
-            XCTAssertTrue(artifact.url.absoluteString.contains("Sikarugir-App"))
+            XCTAssertNil(artifact.url)
+            XCTAssertNil(artifact.sourceRepository)
         }
         XCTAssertEqual(SikarugirOfficialCatalog.engine.sha256, SikarugirBaselineConfiguration.engineArchiveSHA256)
         XCTAssertEqual(SikarugirOfficialCatalog.template.sha256, SikarugirBaselineConfiguration.templateArchiveSHA256)
@@ -213,9 +214,9 @@ final class PortsideCoreTests: XCTestCase {
         let signature = try signingKey.signature(for: unsignedData).base64EncodedString()
         unsigned["signature"] = signature
         let data = try JSONSerialization.data(withJSONObject: unsigned, options: [.sortedKeys])
-        let manifest = try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", currentVersion: "0.1.0")
+        let manifest = try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", currentVersion: "0.1.0", allowedHosts: ["downloads.example.invalid"])
         XCTAssertEqual(manifest.components.count, 1)
-        XCTAssertThrowsError(try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", currentVersion: "0.0.9"))
+        XCTAssertThrowsError(try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", currentVersion: "0.0.9", allowedHosts: ["downloads.example.invalid"]))
     }
 
     func testLicenseTokenAcceptsOnlyTheConfiguredSignature() throws {

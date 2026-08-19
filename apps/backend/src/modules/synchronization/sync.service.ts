@@ -4,7 +4,7 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { ArtifactStatus, SyncStatus } from "@prisma/client";
+import { ArtifactStatus, BuildStatus, Channel, Prisma, SourceSnapshotStatus, SyncStatus } from "@prisma/client";
 import { createHash, verify } from "node:crypto";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { AppConfig } from "../../core/app-config.js";
@@ -57,6 +57,21 @@ export class SyncService {
   ): Promise<{ id: string; status: ArtifactStatus; sha256: string }> {
     if (!/^[a-f0-9]{64}$/i.test(request.expectedSHA256))
       throw new BadRequestException("expectedSHA256 must be a SHA-256 digest");
+    const sourceSnapshotId = request.sourceSnapshotId;
+    if (request.channel === Channel.production) {
+      if (!request.sourceSnapshotId || !request.buildId)
+        throw new BadRequestException(
+          "production artifacts require a verified source snapshot and build",
+        );
+      const [snapshot, build] = await Promise.all([
+        this.prisma.sourceSnapshot.findUnique({ where: { id: request.sourceSnapshotId } }),
+        this.prisma.runtimeBuild.findUnique({ where: { id: request.buildId } }),
+      ]);
+      if (!snapshot || snapshot.status !== SourceSnapshotStatus.verified)
+        throw new BadRequestException("source snapshot is not verified");
+      if (!build || build.status !== BuildStatus.succeeded)
+        throw new BadRequestException("runtime build is not successful");
+    }
     const existingRun = await this.prisma.syncExecution.findUnique({
       where: { idempotencyKey: request.idempotencyKey },
     });
@@ -82,6 +97,9 @@ export class SyncService {
         data: {
           idempotencyKey: request.idempotencyKey,
           status: SyncStatus.running,
+          sourceSnapshotId,
+          requestedCommit: request.sourceCommitOrTag,
+          sourceSnapshotChecksum: undefined,
         },
       }));
     try {
@@ -91,7 +109,9 @@ export class SyncService {
         );
       const source = validateHTTPSHost(
         request.sourceURL,
-        this.config.allowedSourceHosts,
+        request.channel === Channel.production
+          ? this.config.artifactHosts
+          : this.config.allowedSourceHosts,
       );
       const response = await fetch(source, {
         redirect: "manual",
@@ -180,6 +200,10 @@ export class SyncService {
           sha256,
           signature: request.signature,
           storageKey,
+          sourceSnapshotId,
+          buildId: request.buildId,
+          provenance: request.provenance as Prisma.InputJsonValue | undefined,
+          sbom: request.sbom as Prisma.InputJsonValue | undefined,
           status: ArtifactStatus.verified,
           verifiedAt: new Date(),
         },
@@ -196,6 +220,10 @@ export class SyncService {
           sha256,
           signature: request.signature,
           storageKey,
+          sourceSnapshotId,
+          buildId: request.buildId,
+          provenance: request.provenance as Prisma.InputJsonValue | undefined,
+          sbom: request.sbom as Prisma.InputJsonValue | undefined,
           status: ArtifactStatus.verified,
           verifiedAt: new Date(),
         },
@@ -206,6 +234,10 @@ export class SyncService {
           status: SyncStatus.succeeded,
           discovered: 1,
           verified: 1,
+          sourceSnapshotId,
+          sourceSnapshotChecksum: sourceSnapshotId
+            ? (await this.prisma.sourceSnapshot.findUnique({ where: { id: sourceSnapshotId }, select: { snapshotChecksum: true } }))?.snapshotChecksum
+            : undefined,
           finishedAt: new Date(),
         },
       });

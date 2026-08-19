@@ -80,6 +80,9 @@ export class AppConfig {
     if (!this.allowedSourceHosts.size) {
       throw new Error("ALLOWED_SOURCE_HOSTS must not be empty in production");
     }
+    if (!this.artifactHosts.size) {
+      throw new Error("PORTSIDE_ARTIFACT_HOSTS must not be empty in production");
+    }
     if (
       !this.s3.endpoint ||
       !this.s3.bucket ||

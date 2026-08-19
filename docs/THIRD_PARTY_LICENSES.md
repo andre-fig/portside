@@ -11,8 +11,10 @@ ship required notices with Portside.
 | Sparkle 2 | `sparkle-project/Sparkle` | Sparkle license and embedded notices |
 | WineD3D/Wine | selected approved engine/source revision | LGPL-2.1-or-later and included notices |
 | winetricks | selected approved source revision | LGPL-2.1-or-later |
-| Official wrapper/template | approved upstream artifact | upstream notices/authorization |
+| Wrapper/template | pinned source snapshot; build blocked | `vendor/wrapper`, license review and authorization required |
 | Steam for Windows | Valve official distribution | Valve terms; not bundled by Portside |
 
-Run a source/license inventory for every new version before promotion. Do not
-mark an artifact production merely because its checksum is correct.
+Run a source/license inventory for every new version before promotion. The
+sync workflow records a separate license/notice checksum and blocks replacement
+when it changes until it is reviewed. Do not mark an artifact production merely
+because its checksum is correct.

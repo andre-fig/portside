@@ -27,11 +27,23 @@ export class AdminService {
   }
 
   async promote(id: string) {
-    const artifact = await this.prisma.artifact.findUnique({ where: { id } });
+    const artifact = await this.prisma.artifact.findUnique({
+      where: { id },
+      include: { sourceSnapshot: true, build: true },
+    });
     if (!artifact) throw new NotFoundException("artifact not found");
     if (artifact.status !== "approved" && artifact.status !== "verified")
       throw new BadRequestException(
         "artifact must pass approval before promotion",
+      );
+    if (
+      !artifact.sourceSnapshot ||
+      artifact.sourceSnapshot.status !== "verified" ||
+      !artifact.build ||
+      artifact.build.status !== "succeeded"
+    )
+      throw new BadRequestException(
+        "artifact requires a verified source snapshot and successful Portside build",
       );
     return this.prisma.artifact.update({
       where: { id },
@@ -42,6 +54,7 @@ export class AdminService {
   async rollback(id: string, rollbackVersion: string) {
     const current = await this.prisma.artifact.findUniqueOrThrow({
       where: { id },
+      include: { sourceSnapshot: true, build: true },
     });
     const target = await this.prisma.artifact.findFirst({
       where: {
@@ -51,7 +64,11 @@ export class AdminService {
         status: { in: ["approved", "production"] },
       },
     });
-    if (!target)
+    if (
+      !target ||
+      !target.sourceSnapshotId ||
+      !target.buildId
+    )
       throw new BadRequestException("rollback target is not approved");
     await this.prisma.artifact.update({
       where: { id },

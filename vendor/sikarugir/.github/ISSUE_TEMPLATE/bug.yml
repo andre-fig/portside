@@ -1,0 +1,160 @@
+name: Bug Report
+description: File a bug report.
+title: "[Bug]: "
+labels: ["bug"]
+
+body:
+  - type: dropdown
+    id: version
+    attributes:
+      label: macOS Version
+      description: What version of macOS are you running?
+      options:
+        - "Tahoe (macOS 26)"
+        - "Sequoia (macOS 15)"
+        - "Sonoma (macOS 14)"
+        - "Ventura (macOS 13)"
+        - "Monterey (macOS 12)"
+        - "Big Sur (macOS 11)"
+        - "Catalina (macOS 10.15)"
+      default: 0
+    validations:
+      required: true
+  - type: dropdown
+    id: cpu
+    attributes:
+      label: Apple Silicon or Intel
+      options:
+        - "Apple Silicon"
+        - "Intel"
+      default: 0
+    validations:
+      required: true
+  - type: dropdown
+    id: wrapper
+    attributes:
+      label: Wrapper Version
+      options:
+        - "Template-1.0.11"
+        - "Template-1.0.10"
+        - "Template-1.0.9"
+        - "Template-1.0.8"
+        - "Template-1.0.7"
+        - "Template-1.0.6"
+        - "Template-1.0.5"
+        - "Template-1.0.4"
+        - "Template-1.0.3"
+        - "Template-1.0.2"
+        - "Template-1.0.1"
+        - "Template-1.0"
+      default: 0
+    validations:
+      required: true
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Engine
+      description: What Engine where you using
+      options:
+        - "WS12WineSikarugir10.0_6"
+        - "WS12WineSikarugir10.0_5 (not supported)"
+        - "WS12WineSikarugir10.0_4 (not supported)"
+        - "WS12WineSikarugir10.0_3 (not supported)"
+        - "WS12WineSikarugir10.0_2 (not supported)"
+        - "WS12WineSikarugir10.0_1 (not supported)"
+        - "WS12WineSikarugir10.0 (not supported)"
+        - "WS12WineSikarugir10.0-battle.net (not supported)"
+        - "WS12WineCX24.0.7_7"
+        - "WS12WineCX24.0.7_6 (not supported)"
+        - "WS12WineCX24.0.7_5 (not supported)"
+        - "WS12WineCX24.0.7_4 (not supported)"
+        - "WS12WineCX24.0.7_3 (not supported)"
+        - "WS12WineCX24.0.7_2 (not supported)"
+        - "WS12WineCX24.0.7 (not supported)"
+        - "WS12WineCX23.7.1_4 (not supported)"
+        - "WS12WineCX23.7.1_3 (not supported)"
+        - "WS12WineCX23.7.1_2 (not supported)"
+        - "WS12WineCX23.7.1_1 (not supported)"
+        - "WS12WineCX23.7.1 (not supported)"
+        - "WS12WineGPTK1.1_3 (not supported)"
+        - "WS12WineGPTK1.1_2 (not supported)"
+        - "WS12WineGPTK1.1_1 (not supported)"
+        - "WS12WineGPTK1.1 (not supported)"
+        - "WS12WhiskyWine2.5.0_3 (not supported)"
+        - "WS12WhiskyWine2.5.0_2 (not supported)"
+        - "WS12WhiskyWine2.5.0_1 (not supported)"
+        - "WS12WhiskyWine2.5.0 (not supported)"
+        - "WS12WhiskyWine2.4.5 (not supported)"
+        - "WS12WhiskyWine2.4.4 (not supported)"
+        - "WS11Wine10.0_3 (not supported)"
+        - "WS11Wine10.0_1 (not supported)"
+        - "WS11Wine10.0 (not supported)"
+        - "WS11WineCX21.2.0 (not supported)"
+        - "WS11WineCX32Bit21.2.0 (not supported)"
+        - "WS11WineCX20.0.4 (not supported)"
+        - "WS11WineCX32Bit20.0.4 (not supported)"
+        - "WS11WineCX19.0.2 (not supported)"
+        - "WS11WineCX32Bit19.0.2 (not supported)"
+      default: 0
+    validations:
+      required: true
+  - type: textarea
+    id: appname
+    attributes:
+      label: Application/Game Name
+    validations:
+      required: true
+  - type: dropdown
+    id: render
+    attributes:
+      label: Render Used
+      description: What render backend was used
+      options:
+        - "WineD3D (default)"
+        - "D3DMetal (Apple silicon, 64-bit only & macOS Sonoma or
+        greater)"
+        - "DXMT (macOS Sonoma or greater)"
+        - "DXVK"
+        - "D9VK (winetricks verb)"
+      default: 0
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description of problem
+      description: A clear and concise description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Provide steps to reproduce the behavior.
+      value: |
+       1.
+       2.
+       3.
+       ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: A clear and concise description of what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: LastRunWine.log
+      description: Please attach LastRunWine.log
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Code of Conduct
+      description: By submitting this issue, you agree to follow our [Code of Conduct](https://example.com). 
+      options:
+        - label: I agree to follow this project's Code of Conduct
+          required: true

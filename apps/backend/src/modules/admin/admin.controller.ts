@@ -10,11 +10,50 @@ import { AdminService } from "./admin.service.js";
 import { RevokeLicenseDto } from "./dtos/revoke-license.dto.js";
 import { RollbackArtifactDto } from "./dtos/rollback-artifact.dto.js";
 import { SyncArtifactDto } from "./dtos/sync-artifact.dto.js";
+import { RegisterBuildDto } from "../runtime/dtos/register-build.dto.js";
+import { RegisterReleaseDto } from "../runtime/dtos/register-release.dto.js";
+import { RegisterSourceSnapshotDto } from "../runtime/dtos/register-source-snapshot.dto.js";
+import { RollbackReleaseDto } from "../runtime/dtos/rollback-release.dto.js";
+import { PublishManifestDto } from "../runtime/dtos/publish-manifest.dto.js";
+import { RuntimeService } from "../runtime/runtime.service.js";
 
 @Controller("/v1/admin")
 @UseGuards(AdminGuard)
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly runtimeService: RuntimeService,
+  ) {}
+
+  @Post("source-snapshots/register")
+  registerSourceSnapshot(@Body() body: RegisterSourceSnapshotDto) {
+    return this.runtimeService.registerSourceSnapshot(body);
+  }
+
+  @Post("builds/register")
+  registerBuild(@Body() body: RegisterBuildDto) {
+    return this.runtimeService.registerBuild(body);
+  }
+
+  @Post("releases/register")
+  registerRelease(@Body() body: RegisterReleaseDto) {
+    return this.runtimeService.registerRelease(body);
+  }
+
+  @Post("releases/:id/promote")
+  promoteRelease(@Param("id") id: string) {
+    return this.runtimeService.promoteRelease(id);
+  }
+
+  @Post("releases/:id/rollback")
+  rollbackRelease(@Param("id") id: string, @Body() body: RollbackReleaseDto) {
+    return this.runtimeService.rollbackRelease(id, body.targetReleaseId, body.reason);
+  }
+
+  @Post("manifests/publish")
+  publishManifest(@Body() body: PublishManifestDto) {
+    return this.runtimeService.publishManifest(body);
+  }
 
   @Post("artifacts/sync")
   sync(@Body() body: SyncArtifactDto) {

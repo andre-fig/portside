@@ -67,15 +67,9 @@ final class PortsideModel: ObservableObject {
         self.requiresCommercialLicense = backendConfiguration.isConfigured
         #endif
         self.licenseClient = backendConfiguration.isConfigured ? PortsideLicenseClient(configuration: backendConfiguration) : nil
-        #if DEBUG
-        let allowDirectOfficialSources = true
-        #else
-        let allowDirectOfficialSources = false
-        #endif
         self.updateService = SikarugirUpdateService(
             logger: PortsideLogger(logFileName: "sikarugir-update.log"),
             backendConfiguration: PortsideBackendConfiguration.fromBundle(),
-            allowDirectOfficialSources: allowDirectOfficialSources,
             currentVersion: (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.1.0"
         )
         self.wrapperInstaller = SikarugirWrapperInstaller(logger: PortsideLogger(logFileName: "sikarugir-install.log"))

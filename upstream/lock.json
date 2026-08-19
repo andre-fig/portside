@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-19",
+  "sourcePolicy": {
+    "noGitSubmodulesInVendor": true,
+    "noCompiledReleasesInVendor": true,
+    "productionArtifactsMustHavePortsideBuild": true
+  },
+  "repositories": [
+    {
+      "name": "Sikarugir",
+      "repository": "https://github.com/Sikarugir-App/Sikarugir",
+      "commit": "39710f11e0b9a1b4a1a7110ef8c8ad6fbf1fe786",
+      "commitDate": "2026-08-04T21:47:10Z",
+      "license": "Mixed; Configure sources are described as LGPL-2.1 in README.md and D3DMetal notices are preserved in the snapshot",
+      "localPath": "vendor/sikarugir",
+      "submodules": [],
+      "gitLFSUsed": false,
+      "snapshotChecksum": "56a3b72745b6a4c6e0859de3370172c1a5e3716574c98e3e313841f85a22c98f",
+      "licenseSnapshotChecksum": "06c39a08d1b6eda5d9521ec8bd722d380f1c419c2dc59a5259bd2ad917ad8046",
+      "licenseChangeDetected": false,
+      "lastValidatedBuild": null,
+      "sync": true,
+      "excludedPaths": []
+    },
+    {
+      "name": "Creator",
+      "repository": "https://github.com/Sikarugir-App/Creator",
+      "commit": "6086e3d34f37d7ba9d59708bef0de2aba31cd4ca",
+      "commitDate": "2025-08-10T02:09:32Z",
+      "license": "Not imported; provenance-only record pending proof that Creator is needed for the build",
+      "localPath": null,
+      "submodules": [],
+      "gitLFSUsed": false,
+      "snapshotChecksum": null,
+      "licenseSnapshotChecksum": null,
+      "licenseChangeDetected": false,
+      "lastValidatedBuild": "not required for the current source build path",
+      "sync": false,
+      "role": "provenance-only; not copied into Portside",
+      "excludedPaths": ["entire repository; interface tool not proven necessary for runtime build"]
+    },
+    {
+      "name": "Wrapper",
+      "repository": "https://github.com/Sikarugir-App/Wrapper",
+      "commit": "9f0e08d76e36f60bcd74a4b2ca729a5349655dc5",
+      "commitDate": "2026-03-18T18:50:00Z",
+      "license": "No license file in the pinned snapshot; review required before distribution",
+      "localPath": "vendor/wrapper",
+      "submodules": [],
+      "gitLFSUsed": false,
+      "snapshotChecksum": "822b9167130ad17d709e204996d7ce04d2ed15d4aa8843a0a718e586547c5cb6",
+      "licenseSnapshotChecksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "licenseChangeDetected": false,
+      "lastValidatedBuild": "blocked: pinned repository contains README.md and NewestVersion.txt only",
+      "sync": true,
+      "excludedPaths": []
+    },
+    {
+      "name": "Engines",
+      "repository": "https://github.com/Sikarugir-App/Engines",
+      "commit": "9581b3a7d1e473b832c0dda2ecdf6eac1791c0dc",
+      "commitDate": "2026-04-10T22:45:16Z",
+      "license": "No license file in the pinned snapshot; review required before distribution",
+      "localPath": "vendor/engines",
+      "submodules": [],
+      "gitLFSUsed": false,
+      "snapshotChecksum": "2790f78bbab76bea754b0dba0d49520ba7ea5671730d04d93409365da2987e38",
+      "licenseSnapshotChecksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "licenseChangeDetected": false,
+      "lastValidatedBuild": "blocked: pinned repository contains EngineList.txt, README.md and index.html only",
+      "sync": true,
+      "excludedPaths": []
+    },
+    {
+      "name": "Sikarugir-foss-sources",
+      "repository": "https://github.com/Sikarugir-App/Sikarugir-foss-sources",
+      "commit": "4be1b048f8df14b073a6e39e8245bbb52c6a71c0",
+      "commitDate": "2026-01-28T13:20:08Z",
+      "license": "LGPL-2.1-or-later",
+      "localPath": "vendor/foss-sources",
+      "submodules": [],
+      "gitLFSUsed": false,
+      "snapshotChecksum": "3fc5c2c983955ddb3b2105b1dab1f0a48382ebd80e695130384dc95dbcf71677",
+      "licenseSnapshotChecksum": "000957a6412c183f3075342613e58624704d77d964eb47d8c7cb4927aeaab34d",
+      "licenseChangeDetected": false,
+      "lastValidatedBuild": null,
+      "sync": true,
+      "excludedPaths": [
+        "Configure/cabextract",
+        "Configure/fntoggle"
+      ]
+    },
+    {
+      "name": "wine",
+      "repository": "https://github.com/Sikarugir-App/wine",
+      "commit": "2df1ee28039cf84776eb1421ed90bd154cebb65f",
+      "commitDate": "2026-08-08T11:48:00Z",
+      "license": "LGPL-2.1-or-later plus included component notices",
+      "localPath": "vendor/wine",
+      "submodules": [],
+      "gitLFSUsed": false,
+      "snapshotChecksum": "81c4f83e51358f5da235c8113cf423b22d98a104b88f34d19ec8d0a69e2438fd",
+      "licenseSnapshotChecksum": "fe662fd027edfdccc95b261a79ea398c00e9610f6b9fdd7b88055a37dd5d85cdb",
+      "licenseChangeDetected": false,
+      "lastValidatedBuild": "source snapshot imported; engine-equivalence build not yet validated",
+      "sync": true,
+      "cloneOptions": ["--depth 1", "--filter=blob:none"],
+      "excludedPaths": []
+    },
+    {
+      "name": "winetricks",
+      "repository": "https://github.com/Sikarugir-App/winetricks",
+      "commit": "5a59ea07513b24093bd90fad943ecf9543cf05bc",
+      "commitDate": "2026-08-07T08:36:44Z",
+      "license": "LGPL-2.1-or-later",
+      "localPath": "vendor/winetricks",
+      "submodules": [],
+      "gitLFSUsed": false,
+      "snapshotChecksum": "b7c335e2d0b2188df69eb955f4e91a4ccb7af020611b94461bb6010e16e13e76",
+      "licenseSnapshotChecksum": "649e7c2989ab4fd10be6c23e4d90bbc19d9254a13454e1329b5e200226a1add2",
+      "licenseChangeDetected": false,
+      "lastValidatedBuild": null,
+      "sync": true,
+      "excludedPaths": []
+    }
+  ],
+  "artifacts": [
+    {
+      "identifier": "Creator",
+      "version": "1.0.1",
+      "sourceRepository": "https://github.com/Sikarugir-App/Creator",
+      "sourceCommit": "6086e3d34f37d7ba9d59708bef0de2aba31cd4ca",
+      "status": "not-imported; provenance only"
+    },
+    {
+      "identifier": "Wrapper Template",
+      "version": "1.0.11",
+      "sourceRepository": "https://github.com/Sikarugir-App/Wrapper",
+      "sourceCommit": "9f0e08d76e36f60bcd74a4b2ca729a5349655dc5",
+      "status": "not-built; pinned source repository has no template source"
+    },
+    {
+      "identifier": "WS12WineSikarugir10.0_6",
+      "version": "10.0 revision 6",
+      "sourceRepository": "https://github.com/Sikarugir-App/wine",
+      "sourceCommit": "2df1ee28039cf84776eb1421ed90bd154cebb65f",
+      "status": "not-built; engine patches/build recipe are not present in the pinned source set"
+    },
+    {
+      "identifier": "Sikarugir winetricks",
+      "version": "commit 5a59ea0",
+      "sourceRepository": "https://github.com/Sikarugir-App/winetricks",
+      "sourceCommit": "5a59ea07513b24093bd90fad943ecf9543cf05bc",
+      "status": "source available; Portside artifact build pending"
+    }
+  ],
+  "baseline": {
+    "wrapper": "PortsideBaseline.app",
+    "template": "1.0.11",
+    "engine": "WS12WineSikarugir10.0_6",
+    "renderer": "WineD3D",
+    "D3DMETAL": 0,
+    "DXMT": 0,
+    "DXVK": 0,
+    "WINEMSYNC": 1,
+    "WINEESYNC": 1,
+    "WINEDEBUG": "-plugplay,+loaddll",
+    "program": "/Program Files (x86)/Steam/steam.exe"
+  }
+}

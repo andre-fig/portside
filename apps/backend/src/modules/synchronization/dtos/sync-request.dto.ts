@@ -7,10 +7,14 @@ export type SyncRequest = {
   sourceURL: string;
   sourceRepository?: string;
   sourceCommitOrTag?: string;
+  sourceSnapshotId?: string;
+  buildId?: string;
   license: string;
   fileName: string;
   expectedSHA256: string;
   signature?: string;
   signatureKeyId?: string;
+  provenance?: Record<string, unknown>;
+  sbom?: Record<string, unknown>;
   idempotencyKey: string;
 };

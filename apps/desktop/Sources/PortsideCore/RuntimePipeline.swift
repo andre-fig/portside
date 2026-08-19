@@ -76,14 +76,14 @@ public struct SikarugirBaselineConfiguration: Codable, Equatable, Sendable {
 public struct SikarugirArtifact: Codable, Equatable, Hashable, Sendable {
     public let identifier: String
     public let version: String
-    public let url: URL
+    public let url: URL?
     public let sha256: String
     public let expectedSize: Int64?
-    public let sourceRepository: URL
+    public let sourceRepository: URL?
     public let sourceCommit: String?
     public let license: String
 
-    public init(identifier: String, version: String, url: URL, sha256: String, expectedSize: Int64? = nil, sourceRepository: URL, sourceCommit: String? = nil, license: String) {
+    public init(identifier: String, version: String, url: URL? = nil, sha256: String, expectedSize: Int64? = nil, sourceRepository: URL? = nil, sourceCommit: String? = nil, license: String) {
         self.identifier = identifier
         self.version = version
         self.url = url
@@ -99,42 +99,34 @@ public enum SikarugirOfficialCatalog {
     public static let creator = SikarugirArtifact(
         identifier: "Creator",
         version: SikarugirBaselineConfiguration.creatorVersion,
-        url: URL(string: "https://github.com/Sikarugir-App/Creator/releases/download/v1.0.1/Creator-v1.0.1.tar.xz")!,
         sha256: "187825e4e6bf96f294cf9ccb65e53049432b3ee2925480e8ad1cbca12a96e819",
         expectedSize: 793_320,
-        sourceRepository: URL(string: "https://github.com/Sikarugir-App/Creator")!,
         sourceCommit: "6086e3d",
-        license: "See the official Creator distribution and notices."
+        license: "Provenance only; Creator is not part of the Portside runtime build."
     )
     public static let template = SikarugirArtifact(
         identifier: "Wrapper Template",
         version: SikarugirBaselineConfiguration.templateVersion,
-        url: URL(string: "https://github.com/Sikarugir-App/Wrapper/releases/download/v1.0/Template-1.0.11.tar.xz")!,
         sha256: SikarugirBaselineConfiguration.templateArchiveSHA256,
         expectedSize: 84_533_420,
-        sourceRepository: URL(string: "https://github.com/Sikarugir-App/Wrapper")!,
-        license: "See the official Wrapper distribution and notices."
+        sourceCommit: "9f0e08d76e36f60bcd74a4b2ca729a5349655dc5",
+        license: "Source license is unresolved in the pinned repository; not eligible for production promotion."
     )
     public static let engine = SikarugirArtifact(
         identifier: SikarugirBaselineConfiguration.engineName,
         version: "10.0 revision 6",
-        url: URL(string: "https://github.com/Sikarugir-App/Engines/releases/download/v1.0/WS12WineSikarugir10.0_6.tar.xz")!,
         sha256: SikarugirBaselineConfiguration.engineArchiveSHA256,
         expectedSize: 166_304_096,
-        sourceRepository: URL(string: "https://github.com/Sikarugir-App/Engines")!,
         sourceCommit: "9581b3a7d1e473b832c0dda2ecdf6eac1791c0dc",
-        license: "Wine and included component licenses; see RUNTIME_LICENSES.md."
+        license: "Wine and included component licenses; source build is currently blocked."
     )
     public static let winetricks = SikarugirArtifact(
         identifier: "Sikarugir winetricks",
         version: "2026-08-07",
-        url: URL(string: "https://raw.githubusercontent.com/Sikarugir-App/winetricks/5a59ea07513b24093bd90fad943ecf9543cf05bc/src/winetricks")!,
         sha256: SikarugirBaselineConfiguration.winetricksSHA256,
-        sourceRepository: URL(string: "https://github.com/Sikarugir-App/winetricks")!,
         sourceCommit: "5a59ea07513b24093bd90fad943ecf9543cf05bc",
-        license: "LGPL-2.1-or-later"
+        license: "LGPL-2.1-or-later; Portside source snapshot is vendored."
     )
-    public static let engineListURL = URL(string: "https://raw.githubusercontent.com/Sikarugir-App/Engines/main/EngineList.txt")!
     public static let all: [SikarugirArtifact] = [creator, template, engine, winetricks]
 }
 
@@ -158,9 +150,9 @@ public struct InstalledRuntimeRecord: Codable, Equatable, Sendable {
 
 public enum SikarugirArtifactValidator {
     public static func validate(_ artifact: SikarugirArtifact) throws {
-        guard artifact.url.scheme == "https",
-              artifact.url.host == "github.com" || artifact.url.host == "raw.githubusercontent.com" else {
-            throw PortsideError.invalidArtifact("artifact URL is not an official HTTPS source")
+        guard !artifact.identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !artifact.version.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw PortsideError.invalidArtifact("artifact identity is incomplete")
         }
         guard artifact.sha256.count == 64, artifact.sha256.allSatisfy(\.isHexDigit) else {
             throw PortsideError.invalidArtifact("missing checksum")
@@ -391,19 +383,13 @@ public final class SikarugirWrapperInstaller: @unchecked Sendable {
 }
 
 public final class SikarugirUpdateService: @unchecked Sendable {
-    private let downloader: SecureDownloader
     private let logger: PortsideLogger
-    private let fileManager: FileManager
     private let backend: PortsideBackendClient?
-    private let allowDirectOfficialSources: Bool
     private let currentVersion: String
 
-    public init(downloader: SecureDownloader = SecureDownloader(), logger: PortsideLogger = PortsideLogger(), fileManager: FileManager = .default, backendConfiguration: PortsideBackendConfiguration? = nil, allowDirectOfficialSources: Bool = true, currentVersion: String = "0.1.0") {
-        self.downloader = downloader
+    public init(logger: PortsideLogger = PortsideLogger(), backendConfiguration: PortsideBackendConfiguration? = nil, currentVersion: String = "0.1.0") {
         self.logger = logger
-        self.fileManager = fileManager
         self.backend = backendConfiguration.flatMap { try? PortsideBackendClient(configuration: $0) }
-        self.allowDirectOfficialSources = allowDirectOfficialSources
         self.currentVersion = currentVersion
     }
 
@@ -419,11 +405,7 @@ public final class SikarugirUpdateService: @unchecked Sendable {
     }
 
     public func fetchOfficialEngineList() async throws -> String {
-        guard allowDirectOfficialSources else { throw PortsideCommercialError.backendUnavailable }
-        let destination = PortsidePaths.manifests.appendingPathComponent("EngineList.txt")
-        let result = try await downloader.download(from: SikarugirOfficialCatalog.engineListURL, to: destination)
-        logger.write("Fetched official EngineList.txt (\(result.bytes) bytes)")
-        return try String(contentsOf: destination)
+        throw PortsideCommercialError.backendUnavailable
     }
 
     public func validatePinnedCatalog() throws {
@@ -431,26 +413,9 @@ public final class SikarugirUpdateService: @unchecked Sendable {
     }
 
     public func downloadBaselineArtifacts(progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> [SikarugirArtifact: URL] {
-        if let backend {
-            logger.write("Downloading approved runtime components from Portside storage")
-            return try await backend.downloadBaselineArtifacts(currentVersion: currentVersion, progress: progress)
-        }
-        guard allowDirectOfficialSources else { throw PortsideCommercialError.backendUnavailable }
-        try validatePinnedCatalog()
-        try fileManager.createDirectory(at: PortsidePaths.downloads, withIntermediateDirectories: true)
-        var result: [SikarugirArtifact: URL] = [:]
-        let baselineArtifacts = [SikarugirOfficialCatalog.template, SikarugirOfficialCatalog.engine, SikarugirOfficialCatalog.winetricks]
-        for (index, artifact) in baselineArtifacts.enumerated() {
-            let file = PortsidePaths.downloads.appendingPathComponent(artifact.url.lastPathComponent)
-            if fileManager.fileExists(atPath: file.path) {
-                try IntegrityVerifier.verify(url: file, expectedSHA256: artifact.sha256, expectedSize: artifact.expectedSize)
-            } else {
-                _ = try await downloader.download(from: artifact.url, to: file, expectedSHA256: artifact.sha256, expectedSize: artifact.expectedSize)
-            }
-            result[artifact] = file
-            progress(Double(index + 1) / Double(baselineArtifacts.count))
-        }
-        return result
+        guard let backend else { throw PortsideCommercialError.backendUnavailable }
+        logger.write("Downloading approved runtime components from Portside storage")
+        return try await backend.downloadBaselineArtifacts(currentVersion: currentVersion, progress: progress)
     }
 }
 

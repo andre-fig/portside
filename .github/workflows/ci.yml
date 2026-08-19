@@ -10,6 +10,15 @@ permissions:
   contents: read
 
 jobs:
+  production-source-policy:
+    name: Production source policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Reject direct upstream runtime dependencies
+        run: ./scripts/validate-production-policy.sh
+
   swift:
     name: Swift tests
     runs-on: macos-15

@@ -102,8 +102,9 @@ public enum PortsideManifestVerifier {
         }
         guard publicKey.isValidSignature(signature, for: unsigned) else { throw PortsideCommercialError.invalidSignature }
         guard compareVersions(currentVersion, manifest.minimumPortsideVersion) >= 0 else { throw PortsideCommercialError.incompatibleVersion }
+        guard !allowedHosts.isEmpty else { throw PortsideCommercialError.unauthorizedURL }
         for component in manifest.components {
-            guard component.downloadURL.scheme == "https", let host = component.downloadURL.host, (allowedHosts.isEmpty || allowedHosts.contains(host)), !component.sha256.isEmpty, component.size > 0 else { throw PortsideCommercialError.invalidManifest("component is incomplete or outside the Portside host allowlist") }
+            guard component.downloadURL.scheme == "https", let host = component.downloadURL.host, allowedHosts.contains(host), !component.sha256.isEmpty, component.size > 0 else { throw PortsideCommercialError.invalidManifest("component is incomplete or outside the Portside host allowlist") }
         }
         return manifest
     }

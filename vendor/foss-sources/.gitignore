@@ -1,0 +1,105 @@
+#Folder view settings
+.DS_Store
+
+#Xcode3 build folders
+build/
+
+#XCode4 build folders
+DerivedData/
+
+#user-specific project settings: breakpoints, custom executables, etc.; files are inside the .xcodeproj bundle
+*.mode1v3
+
+#user-specific xcode workspace settings; files are inside the .xcodeproj bundle
+*.pbxuser
+
+#user-specific xcode data
+*.xcuserdatad/
+
+#some merge tools or editors generate .bak files to store old versions backups
+*.bak
+
+#some merge tools or editors generate .orig files to store old versions backups
+*.orig
+
+#some merge tools or editors generate ~ files to store old versions backups
+*~
+
+#ignore resource forks in non-HFS+ filesystems
+._*
+
+#stuff that appears in non-HFS+ filesystems accessed through afp:// shares
+.Apple*
+
+#nasty windows xp thumbnail cache
+Thumbs.db
+
+#vim/MacVim temporary swap files
+.*.swp
+
+# Xcode
+#
+# gitignore contributors: remember to update Global/Xcode.gitignore, Objective-C.gitignore & Swift.gitignore
+
+## Build generated
+build/
+DerivedData/
+
+## Various settings
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+
+## Other
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+
+## Obj-C/Swift specific
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# CocoaPods
+#
+# We recommend against adding the Pods directory to your .gitignore. However
+# you should judge for yourself, the pros and cons are mentioned at:
+# https://guides.cocoapods.org/using/using-cocoapods.html#should-i-check-the-pods-directory-into-source-control
+#
+# Pods/
+
+# Carthage
+#
+# Add this line if you want to avoid checking in source code from Carthage dependencies.
+
+Carthage/Checkouts
+Carthage/Build
+
+# fastlane
+#
+# It is recommended to not store the screenshots in the git repo. Instead, use fastlane to re-generate the
+# screenshots whenever they are needed.
+# For more information about the recommended setup visit:
+# https://docs.fastlane.tools/best-practices/source-control/#source-control
+
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+# Code Injection
+#
+# After new code Injection tools there's a generated folder /iOSInjectionProject
+# https://github.com/johnno1962/injectionforxcode
+
+iOSInjectionProject/
+
+# Avoiding replacement
+README.md

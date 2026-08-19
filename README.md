@@ -3,7 +3,7 @@
 **Your Steam library, now on Mac.**
 
 Portside is a native SwiftUI macOS app that prepares one private, user-local
-Sikarugir wrapper and opens the official Windows Steam client. It preserves the
+runtime wrapper and opens the official Windows Steam client. It preserves the
 Portside identity, Sentry boundary, sanitized diagnostics and rotating logs.
 It does not distribute games, copy a native Steam session, bypass DRM or
 anti-cheat, or expose Sikarugir Creator to the end user.
@@ -37,8 +37,10 @@ choose `Open Steam`; closing Steam does not launch it again.
 
 The package targets macOS 13+ on Apple silicon. Rosetta 2 is detected and
 installed only when missing through Apple’s official softwareupdate mechanism.
-Runtime assets are downloaded to the Portside Application Support directory
-and never embedded in Portside.app.
+Portside-produced runtime assets are downloaded from the signed Portside
+manifest to the Portside Application Support directory and never embedded in
+Portside.app. Upstream source snapshots are versioned under `vendor/`; they are
+not a production download fallback.
 
 ## Official Sikarugir baseline
 

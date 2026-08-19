@@ -1,0 +1,41 @@
+name: Build Runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Portside runtime source build version"
+        required: true
+        default: "source"
+
+permissions:
+  contents: read
+
+jobs:
+  build-runtime:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      PORTSIDE_RUNTIME_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Check out Portside sources
+        uses: actions/checkout@v7
+
+      - name: Record build environment
+        run: |
+          sw_vers
+          xcode-select -p
+          clang --version
+          git --version
+
+      - name: Build only from checked-in sources
+        run: ./scripts/build-runtime/build.sh
+
+      - name: Upload source-build evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: Portside-runtime-source-build-${{ inputs.version }}
+          if-no-files-found: warn
+          retention-days: 30
+          path: build/runtime/

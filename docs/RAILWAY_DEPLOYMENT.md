@@ -28,10 +28,19 @@ in `apps/backend/.env.example`: database URL, public API URL, S3 endpoint/bucket
 credentials, allowlists, HMAC secret, license signing key pair and IDs,
 manifest public key, Sparkle public key, offline grace period and size limits.
 Use different values and key IDs for staging and production.
+Configure both primary and secondary S3-compatible credentials; a production
+deployment must never rely on Railway's ephemeral filesystem. Store the
+manifest signing private key only in the CI/administrative secret store and
+expose only `MANIFEST_SIGNING_PUBLIC_KEY` to the API.
 
 Before adding a public custom domain, verify `/health`, `/ready`, TLS, signed
 artifact URLs, appcast content type and manifest signature. The API should
 return a temporary object-storage URL rather than proxying large files.
+
+Runtime publication is staging-only by default. The authenticated release
+sequence is source snapshot, successful build, staging release, validation,
+explicit promotion and signed manifest publication. Do not point a production
+manifest at a GitHub/Sikarugir URL.
 
 Production is connected to `andre-fig/portside` on the `main` branch. Railway
 deploys the three application services automatically after each push; the

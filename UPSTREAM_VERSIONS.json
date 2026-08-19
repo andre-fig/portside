@@ -1,31 +1,6 @@
 {
+  "lockfile": "upstream/lock.json",
+  "schemaVersion": 2,
   "generatedAt": "2026-08-19",
-  "repositories": [
-    {"name": "Sikarugir", "url": "https://github.com/Sikarugir-App/Sikarugir", "commit": "39710f11e0b9a1b4a1a7110ef8c8ad6fbf1fe786", "clone": "--depth 1"},
-    {"name": "Creator", "url": "https://github.com/Sikarugir-App/Creator", "commit": "6086e3d34f37d7ba9d59708bef0de2aba31cd4ca", "clone": "--depth 1", "role": "provenance only; not copied into Portside"},
-    {"name": "Wrapper", "url": "https://github.com/Sikarugir-App/Wrapper", "commit": "9f0e08d76e36f60bcd74a4b2ca729a5349655dc5", "clone": "--depth 1"},
-    {"name": "Engines", "url": "https://github.com/Sikarugir-App/Engines", "commit": "9581b3a7d1e473b832c0dda2ecdf6eac1791c0dc", "clone": "--depth 1"},
-    {"name": "Sikarugir-foss-sources", "url": "https://github.com/Sikarugir-App/Sikarugir-foss-sources", "commit": "4be1b048f8df14b073a6e39e8245bbb52c6a71c0", "clone": "--depth 1"},
-    {"name": "wine", "url": "https://github.com/Sikarugir-App/wine", "commit": "2df1ee28039cf84776eb1421ed90bd154cebb65f", "clone": "--depth 1 --filter=blob:none"},
-    {"name": "winetricks", "url": "https://github.com/Sikarugir-App/winetricks", "commit": "5a59ea07513b24093bd90fad943ecf9543cf05bc", "clone": "--depth 1"}
-  ],
-  "artifacts": [
-    {"identifier": "Creator", "version": "1.0.1", "url": "https://github.com/Sikarugir-App/Creator/releases/download/v1.0.1/Creator-v1.0.1.tar.xz", "sha256": "187825e4e6bf96f294cf9ccb65e53049432b3ee2925480e8ad1cbca12a96e819", "expectedSize": 793320},
-    {"identifier": "Wrapper Template", "version": "1.0.11", "url": "https://github.com/Sikarugir-App/Wrapper/releases/download/v1.0/Template-1.0.11.tar.xz", "sha256": "9fa15479e7ff6abd99c1d07be285fb95f41fc6991586502427152b1f7d6ccb8a", "expectedSize": 84533420},
-    {"identifier": "WS12WineSikarugir10.0_6", "version": "10.0 revision 6", "url": "https://github.com/Sikarugir-App/Engines/releases/download/v1.0/WS12WineSikarugir10.0_6.tar.xz", "sha256": "9da7ee0cbf386522f3a9906943726d9c3c125dbbd9ab120e3cde80e88d6091b2", "expectedSize": 166304096},
-    {"identifier": "Sikarugir winetricks", "version": "commit 5a59ea0", "url": "https://raw.githubusercontent.com/Sikarugir-App/winetricks/5a59ea07513b24093bd90fad943ecf9543cf05bc/src/winetricks", "sha256": "f35c29737ca08a583569e6a3752d52fbe23333c5acfad5f16c4177d25eaf3f4b"}
-  ],
-  "baseline": {
-    "wrapper": "PortsideBaseline.app",
-    "template": "1.0.11",
-    "engine": "WS12WineSikarugir10.0_6",
-    "renderer": "WineD3D",
-    "D3DMETAL": 0,
-    "DXMT": 0,
-    "DXVK": 0,
-    "WINEMSYNC": 1,
-    "WINEESYNC": 1,
-    "WINEDEBUG": "-plugplay,+loaddll",
-    "program": "/Program Files (x86)/Steam/steam.exe"
-  }
+  "sourceSnapshotPolicy": "The canonical repository/source/checksum records live in upstream/lock.json. This compatibility pointer prevents older tooling from silently using release URLs."
 }

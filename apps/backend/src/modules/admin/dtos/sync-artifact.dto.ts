@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString, Matches, MaxLength, MinLength } from "class-validator";
+import { IsEnum, IsObject, IsOptional, IsString, Matches, MaxLength, MinLength } from "class-validator";
 import { Channel } from "@prisma/client";
 import type { SyncRequest } from "../../synchronization/dtos/sync-request.dto.js";
 
@@ -30,6 +30,14 @@ export class SyncArtifactDto implements Omit<SyncRequest, "idempotencyKey"> {
   @IsString()
   sourceCommitOrTag?: string;
 
+  @IsOptional()
+  @IsString()
+  sourceSnapshotId?: string;
+
+  @IsOptional()
+  @IsString()
+  buildId?: string;
+
   @IsString()
   @MinLength(1)
   license!: string;
@@ -51,6 +59,14 @@ export class SyncArtifactDto implements Omit<SyncRequest, "idempotencyKey"> {
   @IsString()
   @Matches(/^[A-Za-z0-9._-]+$/)
   signatureKeyId?: string;
+
+  @IsOptional()
+  @IsObject()
+  provenance?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsObject()
+  sbom?: Record<string, unknown>;
 
   @IsOptional()
   @IsString()

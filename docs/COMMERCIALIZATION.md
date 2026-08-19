@@ -61,6 +61,7 @@ the application never carries the admin credential.
 
 ```sh
 PORTSIDE_VERSION=1.0.0 PORTSIDE_PUBLIC_BUCKET=<approved-bucket> \
+PORTSIDE_SECONDARY_PUBLIC_BUCKET=<approved-secondary-bucket> \
 PORTSIDE_UPDATE_CHANNEL=staging ./scripts/publish_release.sh
 
 curl --fail --request POST \
@@ -68,6 +69,13 @@ curl --fail --request POST \
   --header 'Content-Type: application/json' \
   --data '{}' "$PORTSIDE_API_BASE_URL/v1/admin/artifacts/<artifact-id>/promote"
 ```
+
+For runtime assets, use the source/build/release endpoints documented in
+`docs/BACKEND.md`. Register only a successful Portside build, create a staging
+release, validate it on a real Mac, promote it explicitly, then publish the
+signed manifest with `POST /v1/admin/manifests/publish`. Production publication
+also requires `PORTSIDE_CONFIRM_PRODUCTION=YES`; the publishing script writes
+each object to both approved buckets and keeps prior versions for rollback.
 
 The repository scaffolds these gates locally. No Railway deployment,
 Developer ID signature or notarization is claimed until its external result is

@@ -6,8 +6,9 @@ are separate Railway services or resources. Railway's ephemeral filesystem is
 never treated as artifact storage.
 
 The Prisma schema includes customers, purchases, licenses, devices,
-activations, one-use challenges, artifacts, versions, channels, manifests,
-upstream sources, sync executions, audit events and revocations. License keys
+activations, one-use challenges, source snapshots, runtime builds, artifacts,
+releases, channels, manifests, promotions, rollbacks, upstream sources, sync
+executions, audit events and revocations. License keys
 are represented by an HMAC and a support prefix; the plaintext key is not
 stored.
 
@@ -27,6 +28,12 @@ POST /v1/admin/artifacts/sync
 POST /v1/admin/artifacts/:id/promote
 POST /v1/admin/artifacts/:id/rollback
 POST /v1/admin/licenses/:id/revoke
+POST /v1/admin/source-snapshots/register
+POST /v1/admin/builds/register
+POST /v1/admin/releases/register
+POST /v1/admin/releases/:id/promote
+POST /v1/admin/releases/:id/rollback
+POST /v1/admin/manifests/publish
 ```
 
 `/ready` checks PostgreSQL. Rate limiting, Helmet, strict DTO validation,
@@ -55,5 +62,13 @@ cover. DTOs are grouped under each feature's `dtos/` directory. The backend
 build excludes specs, while CI runs type-checking, linting, tests and the
 production build.
 
-The example environment is intentionally nonfunctional. PostgreSQL, object
-storage and all signing secrets must be supplied separately.
+The source synchronization workflow owns source cloning and opens a pull
+request; Railway does not clone upstream source into ephemeral storage. The
+worker reconciles stale synchronization, source-snapshot and build records.
+The release sequence is `register source snapshot` → `register successful
+build` → `register staging release` → `promote release` → `publish signed
+manifest`. The manifest endpoint verifies the Ed25519 signature and requires
+the release record for the selected channel. A production manifest cannot be
+published from a staging or failed release.
+The example environment is intentionally nonfunctional. PostgreSQL, both
+object-storage locations and all signing secrets must be supplied separately.
