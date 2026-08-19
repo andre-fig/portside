@@ -343,6 +343,7 @@ public final class SecureDownloader: NSObject, @unchecked Sendable {
 public enum SteamInstaller {
     public static let officialURL = URL(string: "https://cdn.fastly.steamstatic.com/client/installer/SteamSetup.exe")!
     public static let bootstrapArguments = ["-silent"]
+    public static let uiArguments = ["-cef-disable-gpu"]
     public static var localURL: URL { PortsidePaths.downloads.appendingPathComponent("SteamSetup.exe") }
 
     public static var steamExecutableCandidates: [URL] {

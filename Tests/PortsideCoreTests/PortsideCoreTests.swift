@@ -224,10 +224,10 @@ final class PortsideCoreTests: XCTestCase {
             XCTAssertTrue(bootstrapCompleted)
             supervisor.requestStop()
         }
-        try supervisor.launchSteam(state: state)
+        try supervisor.launchSteam(state: state, arguments: SteamInstaller.uiArguments)
         let timeout = TimeInterval(ProcessInfo.processInfo.environment["PORTSIDE_REAL_TIMEOUT"] ?? "180") ?? 180
         let status = await monitor.waitForSteam(executable: steam, timeout: timeout)
-        XCTAssertTrue(status == .windowVisible || status == .ready, "Steam did not become ready; status=\(status.rawValue)")
+        XCTAssertEqual(status, .windowVisible, "Steam did not present a real window; status=\(status.rawValue)")
     }
 
     func testSteamHasNoAppIDCompatibilityAllowlist() {

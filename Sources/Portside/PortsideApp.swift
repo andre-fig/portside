@@ -213,7 +213,9 @@ final class PortsideModel: ObservableObject {
         case .runtimeInstalling, .prefixCreating, .graphicsInstalling: return "Preparing the game environment…"
         case .steamDownloading, .steamInstalling: return "Installing Steam…"
         case .steamUpdating: return "Updating Steam…"
-        case .steamLaunching, .validatingInstallation, .steamReady: return "Finishing…"
+        case .steamLaunching: return "Opening Steam…"
+        case .validatingInstallation: return "Finishing…"
+        case .steamReady: return "Ready"
         case .failedRecoverable, .failedFatal: return "Could not complete setup."
         }
     }
@@ -296,7 +298,7 @@ final class PortsideModel: ObservableObject {
 
     private func openSteamAndWait(executable: URL) async throws {
         state.lastProcessType = "steam-launch"
-        state.phase = .steamLaunching; persistState()
+        state.phase = .steamLaunching; message = friendlyMessage(for: .steamLaunching); persistState()
         guard let runtimePath = state.runtimeRecord?.executablePath ?? state.runtime?.executablePath.map(URL.init(fileURLWithPath:)) else {
             throw PortsideError.runtimeUnavailable
         }
@@ -307,7 +309,20 @@ final class PortsideModel: ObservableObject {
         }
         let policyResult = try await WinePrefixManager.configureSilentCrashHandling(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix, logger: logger)
         guard policyResult.status == 0 else { throw RuntimePipelineError.processFailed("Wine crash-dialog configuration", policyResult.status) }
-        try supervisor.launchSteam(state: state)
+        if await steamMonitor.activateVisibleSteamWindow() {
+            state.lastSteamStatus = .windowVisible
+            state.phase = .steamReady; state.setupCompleted = true; state.lastError = nil; persistState()
+            NSApp.hide(nil)
+            return
+        }
+        if await steamMonitor.isSteamProcessRunning() {
+            logger.write("Stopping an existing Steam process before opening the UI")
+            await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
+            guard await steamMonitor.waitForSteamToStop() else {
+                throw PortsideError.processLaunchFailed("Steam could not be restarted after its update.")
+            }
+        }
+        try supervisor.launchSteam(state: state, arguments: SteamInstaller.uiArguments)
         let status = await steamMonitor.waitForSteam(executable: executable, prefix: PortsidePaths.steamPrefix)
         state.lastSteamStatus = status
         guard status == .windowVisible || status == .ready else {
@@ -462,7 +477,6 @@ struct SetupProgressView: View {
 
 struct FailureView: View {
     @ObservedObject var model: PortsideModel
-    @State private var showDetails = false
 
     var body: some View {
         VStack(spacing: 18) {
@@ -470,9 +484,7 @@ struct FailureView: View {
             Text("Could not complete setup.").font(.title3.weight(.medium))
             HStack(spacing: 12) {
                 Button("Try Again") { model.repair() }.buttonStyle(.borderedProminent)
-                Button(showDetails ? "Hide Details" : "View Details") { showDetails.toggle() }.buttonStyle(.bordered)
             }.disabled(model.isWorking)
-            if showDetails { Text(model.state.lastError ?? "No details available.").font(.caption).foregroundStyle(.secondary).textSelection(.enabled).frame(maxWidth: 520) }
             Spacer()
         }.padding(28).frame(width: 620, height: 331)
     }

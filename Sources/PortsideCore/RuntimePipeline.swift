@@ -499,9 +499,10 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         return false
     }
 
-    public func waitForSteam(executable: URL, prefix: URL = PortsidePaths.steamPrefix, timeout: TimeInterval = 180) async -> SteamProcessStatus {
+    public func waitForSteam(executable: URL, prefix: URL = PortsidePaths.steamPrefix, timeout: TimeInterval = 60) async -> SteamProcessStatus {
         let deadline = Date().addingTimeInterval(timeout)
         var sawSteam = false
+        var loggedUIReadiness = false
         while Date() < deadline {
             let snapshot = await processSnapshot()
             if snapshot.contains("winedbg") {
@@ -509,20 +510,52 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
                 return .exitedUnexpectedly
             }
             if snapshot.contains("steam.exe") || snapshot.contains("steamwebhelper") { sawSteam = true }
-            if sawSteam, let processIdentifier = visibleSteamWindowProcessIdentifier() {
+            if sawSteam, let processIdentifier = visibleSteamWindowProcessIdentifier(processSnapshot: snapshot) {
                 NSRunningApplication(processIdentifier: processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
                 logger.write("Steam window detected and activated")
                 return .windowVisible
             }
-            if sawSteam && steamUIReady(prefix: prefix) {
-                logger.write("Steam UI readiness evidence detected")
-                return .ready
+            if sawSteam && !loggedUIReadiness && steamUIReady(prefix: prefix) {
+                logger.write("Steam UI readiness evidence detected; waiting for the visible client window")
+                loggedUIReadiness = true
             }
             if sawSteam { try? await Task.sleep(for: .milliseconds(750)); continue }
             if snapshot.contains(executable.lastPathComponent) { try? await Task.sleep(for: .milliseconds(750)); continue }
             try? await Task.sleep(for: .seconds(1))
         }
         return sawSteam ? .steamProcessRunning : .exitedUnexpectedly
+    }
+
+    public func isSteamProcessRunning() async -> Bool {
+        let snapshot = await processSnapshot()
+        return snapshot.contains("steam.exe") || snapshot.contains("steamwebhelper")
+    }
+
+    public func stopSteam(runtimeExecutable: URL, prefix: URL) async {
+        let wineserver = runtimeExecutable.deletingLastPathComponent().appendingPathComponent("wineserver")
+        guard FileManager.default.isExecutableFile(atPath: wineserver.path) else {
+            logger.write("Could not locate wineserver while stopping Steam", level: .error)
+            return
+        }
+        _ = try? await DirectProcess.run(
+            executable: wineserver,
+            arguments: ["-k"],
+            environment: ["WINEPREFIX": prefix.path, "WINEDEBUG": WineRuntimePolicy.debug],
+            logger: logger
+        )
+    }
+
+    public func waitForSteamToStop(timeout: TimeInterval = 20) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !(await isSteamProcessRunning()) {
+                logger.write("Steam process tree stopped")
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        logger.write("Steam process tree did not stop before the timeout", level: .error)
+        return false
     }
 
     private func steamUIReady(prefix: URL) -> Bool {
@@ -537,18 +570,32 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
     }
 
     private func processSnapshot() async -> String {
-        let result = try? await DirectProcess.run(executable: URL(fileURLWithPath: "/bin/ps"), arguments: ["-axo", "comm=,args="] , logger: logger)
+        let result = try? await DirectProcess.run(executable: URL(fileURLWithPath: "/bin/ps"), arguments: ["-axo", "pid=,comm=,args="] , logger: logger)
         return result?.output.lowercased() ?? ""
     }
 
-    private func visibleSteamWindowProcessIdentifier() -> pid_t? {
+    public func activateVisibleSteamWindow() async -> Bool {
+        let snapshot = await processSnapshot()
+        guard let processIdentifier = visibleSteamWindowProcessIdentifier(processSnapshot: snapshot) else { return false }
+        NSRunningApplication(processIdentifier: processIdentifier)?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        return true
+    }
+
+    private func visibleSteamWindowProcessIdentifier(processSnapshot: String) -> pid_t? {
         guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
         return windows.compactMap { window -> pid_t? in
             let owner = (window[kCGWindowOwnerName as String] as? String)?.lowercased() ?? ""
             let name = (window[kCGWindowName as String] as? String)?.lowercased() ?? ""
             let steamTitle = ["steam", "login", "sign in", "update", "store", "library"].contains { name.contains($0) }
-            guard owner.contains("steam") || steamTitle || (owner.contains("wine") && steamTitle) else { return nil }
-            return (window[kCGWindowOwnerPID as String] as? NSNumber).map { pid_t($0.intValue) }
+            guard let ownerPID = (window[kCGWindowOwnerPID as String] as? NSNumber).map({ pid_t($0.intValue) }) else { return nil }
+            let isSteamProcess = processSnapshot.split(whereSeparator: \.isNewline).contains { line in
+                let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
+                guard fields.count == 3, Int32(String(fields[0])) == Int32(ownerPID) else { return false }
+                let processArguments = String(fields[1...].joined(separator: " "))
+                return processArguments.contains("steam.exe") || processArguments.contains("steamwebhelper")
+            }
+            guard owner.contains("steam") || steamTitle || (owner.contains("wine") && isSteamProcess) else { return nil }
+            return ownerPID
         }.first
     }
 }

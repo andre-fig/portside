@@ -52,13 +52,19 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
 
     public func capture(error: Error, context: DiagnosticContext) {
         let safeCode = context.errorCode ?? "portside_error"
-        let safeError = NSError(domain: "Portside", code: 1, userInfo: [NSLocalizedDescriptionKey: safeCode])
+        let safeDescription = PortsideLogger.sanitize(error.localizedDescription)
+        let safeError = NSError(domain: "Portside", code: 1, userInfo: [NSLocalizedDescriptionKey: "\(safeCode): \(safeDescription)"])
+        let logData = Data(PortsideLogger().read().utf8.prefix(64_000))
         SentrySDK.configureScope { scope in
             for (key, value) in context.fields where Self.allowedTagKeys.contains(key) {
                 scope.setTag(value: value, key: key)
             }
+            if !logData.isEmpty {
+                scope.addAttachment(Attachment(data: logData, filename: "portside-log.txt", contentType: "text/plain"))
+            }
         }
         SentrySDK.capture(error: safeError)
+        SentrySDK.configureScope { scope in scope.clearAttachments() }
     }
 
 }
