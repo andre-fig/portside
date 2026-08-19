@@ -8,14 +8,17 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
     private static let allowedTagKeys: Set<String> = [
         "stage", "error_code", "portside_version", "portside_build", "macos_version", "architecture",
         "runtime_name", "runtime_version", "graphics_backend", "process_type", "exit_code", "duration", "retry_count",
-        "cef_strategy", "webhelper_restart_count", "host_bundle_identifier"
+        "cef_strategy", "cef_failure_category", "webhelper_restart_count", "webhelper_started", "webhelper_exit_code",
+        "renderer_mode", "gpu_process_status", "window_detected", "browser_ready_detected", "cache_recovery_attempted",
+        "steam_version", "host_bundle_identifier"
     ]
     private static let allowedBreadcrumbs: Set<String> = [
         "setup_started", "requirements_checked", "runtime_download_started", "runtime_verified", "prefix_created",
         "steam_install_started", "steam_update_started", "steam_launch_requested", "process_exited", "repair_requested",
         "steam_started", "steamwebhelper_started", "steamwebhelper_exit_code", "steamwebhelper_crash_loop",
         "steamwebhelper_timeout", "steam_login_ui_unverified", "steam_html_cache_recovery_attempted",
-        "steam_cef_initialization_failed", "steam_window_detected"
+        "steam_cef_initialization_failed", "steam_window_detected", "steam_cef_strategy_attempted",
+        "cef_ui_unverified", "cef_failure_detected", "steam_ui_ready"
     ]
 
     public init() {
@@ -66,17 +69,12 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
         let safeCode = context.errorCode ?? "portside_error"
         let safeDescription = PortsideLogger.sanitize(error.localizedDescription)
         let safeError = NSError(domain: "Portside", code: 1, userInfo: [NSLocalizedDescriptionKey: "\(safeCode): \(safeDescription)"])
-        let logData = Data(PortsideLogger().read().utf8.prefix(64_000))
         SentrySDK.configureScope { scope in
             for (key, value) in context.fields where Self.allowedTagKeys.contains(key) {
                 scope.setTag(value: value, key: key)
             }
-            if !logData.isEmpty {
-                scope.addAttachment(Attachment(data: logData, filename: "portside-log.txt", contentType: "text/plain"))
-            }
         }
         SentrySDK.capture(error: safeError)
-        SentrySDK.configureScope { scope in scope.clearAttachments() }
     }
 
 }

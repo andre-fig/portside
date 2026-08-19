@@ -52,6 +52,33 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertFalse(context.fields.keys.contains("steam_id"))
     }
 
+    func testWineEnvironmentInheritsHostContextAndPrependsRuntimePaths() {
+        let environment = WineProcessEnvironment.make(
+            runtimeExecutable: URL(fileURLWithPath: "/private/Runtime/bin/wine"),
+            prefix: URL(fileURLWithPath: "/private/Prefix/Steam"),
+            baseEnvironment: [
+                "HOME": "/private/home",
+                "TMPDIR": "/private/tmp",
+                "USER": "tester",
+                "LOGNAME": "tester",
+                "LANG": "en_US.UTF-8",
+                "LC_ALL": "en_US.UTF-8",
+                "PATH": "/usr/bin:/bin",
+                "SHELL": "/bin/zsh"
+            ]
+        )
+        XCTAssertEqual(environment["HOME"], "/private/home")
+        XCTAssertEqual(environment["TMPDIR"], "/private/tmp")
+        XCTAssertEqual(environment["LANG"], "en_US.UTF-8")
+        XCTAssertEqual(environment["LC_ALL"], "en_US.UTF-8")
+        XCTAssertEqual(environment["WINEPREFIX"], "/private/Prefix/Steam")
+        XCTAssertEqual(environment["WINEARCH"], "win64")
+        XCTAssertEqual(environment["PATH"]?.split(separator: ":").first.map(String.init), "/private/Runtime/bin")
+        XCTAssertTrue(environment["PATH"]?.contains("/usr/bin") == true)
+        XCTAssertFalse(environment["DYLD_FRAMEWORK_PATH"]?.isEmpty ?? true)
+        XCTAssertTrue(environment["GST_PLUGIN_PATH"]?.contains("gstreamer-1.0") == true)
+    }
+
     func testDownloaderRejectsUnapprovedHostBeforeNetworkAccess() async {
         let downloader = SecureDownloader(allowedHosts: ["cdn.fastly.steamstatic.com"])
         let destination = FileManager.default.temporaryDirectory.appendingPathComponent("portside-blocked-download-\(UUID().uuidString)")
@@ -102,9 +129,10 @@ final class PortsideCoreTests: XCTestCase {
     }
 
     func testSteamCEFStrategiesAreSeparateLimitedAndSecure() {
-        XCTAssertEqual(SteamInstaller.uiArguments, ["-cef-disable-gpu"])
+        XCTAssertEqual(SteamInstaller.uiArguments, [])
         XCTAssertEqual(SteamInstaller.fallbackUIArguments, ["-cef-disable-gpu", "-cef-disable-gpu-compositing"])
-        XCTAssertEqual(SteamInstaller.uiLaunchConfigurations.count, 2)
+        XCTAssertEqual(SteamInstaller.uiLaunchConfigurations.count, 3)
+        XCTAssertEqual(SteamInstaller.uiLaunchConfigurations.map(\.arguments), [[], ["-cef-disable-gpu"], ["-cef-disable-gpu", "-cef-disable-gpu-compositing"]])
         XCTAssertFalse(SteamInstaller.uiLaunchConfigurations.flatMap(\.arguments).contains("-no-cef-sandbox"))
         XCTAssertFalse(SteamInstaller.uiLaunchConfigurations.flatMap(\.arguments).contains { $0.contains("steamapps") })
     }
@@ -128,9 +156,72 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertEqual(analysis.webhelperRestartCount, 1)
         XCTAssertEqual(analysis.webhelperExitCode, 7)
         XCTAssertTrue(analysis.cacheCorruptionLikely)
-        XCTAssertTrue(analysis.findings.contains { $0.category == "gpu" })
-        XCTAssertTrue(analysis.findings.contains { $0.category == "cache" })
+        XCTAssertTrue(analysis.failureCategories.contains("cef_gpu_initialization_failed"))
+        XCTAssertTrue(analysis.failureCategories.contains("cef_cache_failure"))
         XCTAssertEqual(analysis.filesRead, ["cef_log.txt"])
+    }
+
+    func testSteamCEFLogAnalyzerReadsAllCEFLogsAndDoesNotTreatBareANGLEAsFailure() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-cef-all-logs-\(UUID().uuidString)", isDirectory: true)
+        let logs = root.appendingPathComponent("drive_c/Program Files (x86)/Steam/logs", isDirectory: true)
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        let contents: [String: String] = [
+            "webhelper_gpu.txt": "ANGLE renderer selected\n",
+            "cef_log.txt": "GPU process crashed\n",
+            "steamui_html.txt": "BrowserReady\nCreateResponse\nGetDesiredSteamUIWindows\n",
+            "webhelper.txt": "renderer process exited\n",
+            "bootstrap_log.txt": "missing dll: d3dcompiler_47.dll\n",
+            "console_log.txt": "ERR_CONNECTION_RESET\n",
+            "connection_log.txt": "CRL - Verification failed\n"
+        ]
+        for (filename, content) in contents {
+            try content.write(to: logs.appendingPathComponent(filename), atomically: true, encoding: .utf8)
+        }
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let analysis = SteamCEFLogAnalyzer.analyze(prefix: root)
+        XCTAssertEqual(Set(analysis.filesRead), Set(SteamCEFLogAnalyzer.logFilenames))
+        XCTAssertTrue(analysis.failureCategories.contains("cef_gpu_initialization_failed"))
+        XCTAssertTrue(analysis.failureCategories.contains("cef_renderer_failed"))
+        XCTAssertTrue(analysis.failureCategories.contains("cef_dependency_missing"))
+        XCTAssertTrue(analysis.failureCategories.contains("cef_network_failure"))
+        XCTAssertTrue(analysis.failureCategories.contains("cef_certificate_failure"))
+        XCTAssertFalse(analysis.failureCategories.contains("gpu"))
+        XCTAssertFalse(analysis.hasStrongUIEvidence == true)
+    }
+
+    func testSteamCEFLogAnalyzerRequiresMoreThanBrowserReadyForStrongEvidence() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-cef-readiness-\(UUID().uuidString)", isDirectory: true)
+        let logs = root.appendingPathComponent("drive_c/Program Files (x86)/Steam/logs", isDirectory: true)
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        try "BrowserReady\n".write(to: logs.appendingPathComponent("steamui_html.txt"), atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let analysis = SteamCEFLogAnalyzer.analyze(prefix: root)
+        XCTAssertTrue(analysis.browserReadyDetected)
+        XCTAssertFalse(analysis.contentWindowEvidence)
+        XCTAssertTrue(analysis.failureCategories.contains("cef_ui_unverified"))
+        XCTAssertFalse(analysis.hasStrongUIEvidence)
+
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-120)], ofItemAtPath: logs.appendingPathComponent("steamui_html.txt").path)
+        let stale = SteamCEFLogAnalyzer.analyze(prefix: root, minimumModificationDate: Date().addingTimeInterval(-10))
+        XCTAssertFalse(stale.browserReadyDetected)
+        XCTAssertFalse(stale.hasStrongUIEvidence)
+
+        try "BrowserReady\nCreateResponse\nGetDesiredSteamUIWindows\nPopupHTMLWindow\n".write(to: logs.appendingPathComponent("steamui_html.txt"), atomically: true, encoding: .utf8)
+        let verified = SteamCEFLogAnalyzer.analyze(prefix: root)
+        XCTAssertTrue(verified.hasStrongUIEvidence)
+    }
+
+    func testSteamCEFLogAnalyzerClassifiesWebhelperCrashLoopAndResourceFailure() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portside-cef-crash-loop-\(UUID().uuidString)", isDirectory: true)
+        let logs = root.appendingPathComponent("drive_c/Program Files (x86)/Steam/logs", isDirectory: true)
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        try "Restart webhelper process\nRestart webhelper process\nRestart webhelper process\n".write(to: logs.appendingPathComponent("webhelper.txt"), atomically: true, encoding: .utf8)
+        try "Failed to load resource https://example.invalid/app.js\n".write(to: logs.appendingPathComponent("cef_log.txt"), atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let analysis = SteamCEFLogAnalyzer.analyze(prefix: root)
+        XCTAssertTrue(analysis.failureCategories.contains("cef_webhelper_crash_loop"))
+        XCTAssertTrue(analysis.failureCategories.contains("cef_resources_not_loaded"))
     }
 
     func testSteamHTMLCacheRecoveryRenamesOnlyHTMLCacheAndPreservesSteamData() throws {
@@ -288,7 +379,7 @@ final class PortsideCoreTests: XCTestCase {
         try supervisor.launchSteam(state: state, arguments: SteamInstaller.uiLaunchConfigurations[0].arguments)
         let timeout = TimeInterval(ProcessInfo.processInfo.environment["PORTSIDE_REAL_TIMEOUT"] ?? "180") ?? 180
         let report = await monitor.waitForSteamReport(executable: steam, strategy: .primary, timeout: timeout)
-        XCTAssertEqual(report.status, .windowVisible, "Steam did not present a verified real window; status=\(report.status.rawValue)")
+        XCTAssertEqual(report.status, .ready, "Steam did not present a verified real window; status=\(report.status.rawValue)")
         XCTAssertTrue(report.webhelperStarted)
     }
 

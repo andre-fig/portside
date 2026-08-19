@@ -130,7 +130,16 @@ public struct DiagnosticContext: Sendable, Equatable {
     public var duration: TimeInterval?
     public var retryCount: Int
     public var cefStrategy: String?
+    public var cefFailureCategory: String?
     public var webhelperRestartCount: Int?
+    public var webhelperStarted: Bool?
+    public var webhelperExitCode: Int32?
+    public var rendererMode: String?
+    public var gpuProcessStatus: String?
+    public var windowDetected: Bool?
+    public var browserReadyDetected: Bool?
+    public var cacheRecoveryAttempted: Bool?
+    public var steamVersion: String?
     public var hostBundleIdentifier: String?
 
     public init(
@@ -148,13 +157,25 @@ public struct DiagnosticContext: Sendable, Equatable {
         duration: TimeInterval? = nil,
         retryCount: Int = 0,
         cefStrategy: String? = nil,
+        cefFailureCategory: String? = nil,
         webhelperRestartCount: Int? = nil,
+        webhelperStarted: Bool? = nil,
+        webhelperExitCode: Int32? = nil,
+        rendererMode: String? = nil,
+        gpuProcessStatus: String? = nil,
+        windowDetected: Bool? = nil,
+        browserReadyDetected: Bool? = nil,
+        cacheRecoveryAttempted: Bool? = nil,
+        steamVersion: String? = nil,
         hostBundleIdentifier: String? = nil
     ) {
         self.stage = stage; self.errorCode = errorCode; self.portsideVersion = portsideVersion; self.portsideBuild = portsideBuild
         self.macOSVersion = macOSVersion; self.architecture = architecture; self.runtimeName = runtimeName; self.runtimeVersion = runtimeVersion
         self.graphicsBackend = graphicsBackend; self.processType = processType; self.exitCode = exitCode; self.duration = duration; self.retryCount = retryCount
-        self.cefStrategy = cefStrategy; self.webhelperRestartCount = webhelperRestartCount; self.hostBundleIdentifier = hostBundleIdentifier
+        self.cefStrategy = cefStrategy; self.cefFailureCategory = cefFailureCategory; self.webhelperRestartCount = webhelperRestartCount
+        self.webhelperStarted = webhelperStarted; self.webhelperExitCode = webhelperExitCode; self.rendererMode = rendererMode
+        self.gpuProcessStatus = gpuProcessStatus; self.windowDetected = windowDetected; self.browserReadyDetected = browserReadyDetected
+        self.cacheRecoveryAttempted = cacheRecoveryAttempted; self.steamVersion = steamVersion; self.hostBundleIdentifier = hostBundleIdentifier
     }
 
     public var fields: [String: String] {
@@ -167,7 +188,12 @@ public struct DiagnosticContext: Sendable, Equatable {
             ("stage", stage), ("error_code", errorCode), ("macos_version", macOSVersion), ("architecture", architecture),
             ("runtime_name", runtimeName), ("runtime_version", runtimeVersion), ("graphics_backend", graphicsBackend),
             ("process_type", processType), ("exit_code", exitCode.map(String.init)), ("duration", duration.map { String(format: "%.2f", $0) }),
-            ("cef_strategy", cefStrategy), ("webhelper_restart_count", webhelperRestartCount.map(String.init)),
+            ("cef_strategy", cefStrategy), ("cef_failure_category", cefFailureCategory),
+            ("webhelper_restart_count", webhelperRestartCount.map(String.init)),
+            ("webhelper_started", webhelperStarted.map(String.init)), ("webhelper_exit_code", webhelperExitCode.map(String.init)),
+            ("renderer_mode", rendererMode), ("gpu_process_status", gpuProcessStatus),
+            ("window_detected", windowDetected.map(String.init)), ("browser_ready_detected", browserReadyDetected.map(String.init)),
+            ("cache_recovery_attempted", cacheRecoveryAttempted.map(String.init)), ("steam_version", steamVersion),
             ("host_bundle_identifier", hostBundleIdentifier)
         ]
         for (key, value) in optionalValues where value != nil { values[key] = value! }
@@ -355,9 +381,9 @@ public final class SecureDownloader: NSObject, @unchecked Sendable {
 public enum SteamInstaller {
     public static let officialURL = URL(string: "https://cdn.fastly.steamstatic.com/client/installer/SteamSetup.exe")!
     public static let bootstrapArguments = ["-silent"]
-    public static let uiArguments = SteamLaunchConfiguration.primary.arguments
+    public static let uiArguments = SteamLaunchConfiguration.normal.arguments
     public static let fallbackUIArguments = SteamLaunchConfiguration.fallback.arguments
-    public static let uiLaunchConfigurations = [SteamLaunchConfiguration.primary, SteamLaunchConfiguration.fallback]
+    public static let uiLaunchConfigurations = [SteamLaunchConfiguration.normal, SteamLaunchConfiguration.disableGPU, SteamLaunchConfiguration.fallback]
     public static var localURL: URL { PortsidePaths.downloads.appendingPathComponent("SteamSetup.exe") }
 
     public static var steamExecutableCandidates: [URL] {
@@ -385,15 +411,7 @@ public enum SteamInstaller {
         return ProcessLaunchSpec(
             executable: runtimeURL,
             arguments: installationArguments(for: installerURL),
-            environment: [
-                "WINEPREFIX": prefixURL.path,
-                "WINEARCH": "win64",
-                "WINEDLLOVERRIDES": WineRuntimePolicy.dllOverrides,
-                "WINEDEBUG": WineRuntimePolicy.debug,
-                "PATH": runtimeURL.deletingLastPathComponent().path,
-                "DYLD_FRAMEWORK_PATH": GStreamerManager.frameworkURL.deletingLastPathComponent().path,
-                "GST_PLUGIN_PATH": GStreamerManager.frameworkURL.appendingPathComponent("Versions/1.0/lib/gstreamer-1.0").path
-            ],
+            environment: WineProcessEnvironment.make(runtimeExecutable: runtimeURL, prefix: prefixURL),
             workingDirectory: prefixURL,
             timeout: 180
         )
@@ -442,7 +460,9 @@ public struct SteamLaunchConfiguration: Equatable, Sendable {
         arguments.isEmpty ? "default" : arguments.joined(separator: " ")
     }
 
-    public static let primary = SteamLaunchConfiguration(disableCEFGPU: true)
+    public static let normal = SteamLaunchConfiguration(disableCEFGPU: false)
+    public static let primary = normal
+    public static let disableGPU = SteamLaunchConfiguration(disableCEFGPU: true)
     public static let fallback = SteamLaunchConfiguration(disableCEFGPU: true, disableCEFGPUCompositing: true)
 }
 
@@ -470,6 +490,7 @@ public final class ProcessSupervisor: @unchecked Sendable {
     private let logger: PortsideLogger
     private var runtimeExecutablePath: URL?
     private var prefixURL: URL?
+    private var outputPipe: Pipe?
 
     public init(logger: PortsideLogger = PortsideLogger()) { self.logger = logger }
 
@@ -491,17 +512,22 @@ public final class ProcessSupervisor: @unchecked Sendable {
         prefixURL = PortsidePaths.steamPrefix
         // Fixed argument list: no shell and no remote metadata is interpolated here.
         task.arguments = [steamExecutable.path] + arguments
-        task.environment = [
-            "WINEPREFIX": PortsidePaths.steamPrefix.path,
-            "WINEARCH": "win64",
-            "WINEDLLOVERRIDES": WineRuntimePolicy.dllOverrides,
-            "WINEDEBUG": WineRuntimePolicy.debug,
-            "PATH": URL(fileURLWithPath: runtimePath).deletingLastPathComponent().path,
-            "DYLD_FRAMEWORK_PATH": GStreamerManager.frameworkURL.deletingLastPathComponent().path,
-            "GST_PLUGIN_PATH": GStreamerManager.frameworkURL.appendingPathComponent("Versions/1.0/lib/gstreamer-1.0").path
-        ]
-        task.standardOutput = FileHandle.nullDevice
-        task.standardError = FileHandle.nullDevice
+        task.environment = WineProcessEnvironment.make(
+            runtimeExecutable: URL(fileURLWithPath: runtimePath),
+            prefix: PortsidePaths.steamPrefix
+        )
+        let outputPipe = Pipe()
+        self.outputPipe = outputPipe
+        outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let output = String(data: data, encoding: .utf8), !output.isEmpty else { return }
+            self?.logger.write("steam_process_output: \(output)")
+        }
+        task.standardOutput = outputPipe
+        task.standardError = outputPipe
+        task.terminationHandler = { [weak self] _ in
+            self?.outputPipe?.fileHandleForReading.readabilityHandler = nil
+        }
         do { try task.run(); process = task; logger.write("Steam process started") }
         catch { throw PortsideError.processLaunchFailed("Steam could not be started.") }
     }
@@ -517,7 +543,7 @@ public final class ProcessSupervisor: @unchecked Sendable {
         let task = Process()
         task.executableURL = wineserver
         task.arguments = ["-k"]
-        task.environment = ["WINEPREFIX": prefixURL.path, "WINEDEBUG": WineRuntimePolicy.debug]
+        task.environment = WineProcessEnvironment.make(runtimeExecutable: runtimeExecutablePath, prefix: prefixURL)
         task.standardOutput = FileHandle.nullDevice
         task.standardError = FileHandle.nullDevice
         try? task.run()

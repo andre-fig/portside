@@ -34,6 +34,20 @@ struct SteamHostLauncher {
         }
     }
 
+    func waitForExit(timeout: TimeInterval = 10) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let isRunning = NSWorkspace.shared.runningApplications.contains {
+                $0.bundleIdentifier == SteamHostMetadata.bundleIdentifier
+            }
+            if !isRunning { return true }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        return !NSWorkspace.shared.runningApplications.contains {
+            $0.bundleIdentifier == SteamHostMetadata.bundleIdentifier
+        }
+    }
+
     private func ensureLauncherBundle() throws -> URL {
         let fileManager = FileManager.default
         let templateURL = Bundle.main.bundleURL.appendingPathComponent(SteamHostMetadata.templateRelativePath)

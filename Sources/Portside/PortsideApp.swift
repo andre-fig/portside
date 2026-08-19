@@ -50,6 +50,8 @@ final class PortsideModel: ObservableObject {
     let diagnostics: DiagnosticsService
     private var didStartAutomatically = false
     private var handoffExitScheduled = false
+    private var lastReadinessReport: SteamReadinessReport?
+    private var cacheRecoveryAttempted = false
 
     enum SetupStep: String { case checking, rosettaRequired, preparing, downloading, installing, ready, failed }
 
@@ -84,6 +86,8 @@ final class PortsideModel: ObservableObject {
         guard !isWorking else { return }
         showsInstaller = true
         isWorking = true; errorMessage = nil; progress = 0; progressIsIndeterminate = false; setupStep = .checking; message = "Checking your Mac…"
+        lastReadinessReport = nil
+        cacheRecoveryAttempted = false
         let started = Date()
         if state.phase == .failedRecoverable { state.retryCount += 1 }
         state.lastError = nil; state.lastErrorCode = nil; state.lastProcessType = nil; state.lastExitCode = nil
@@ -170,6 +174,7 @@ final class PortsideModel: ObservableObject {
                     stage: "failed",
                     errorCode: diagnosticErrorCode,
                     duration: Date().timeIntervalSince(started),
+                    cacheRecoveryAttempted: cacheRecoveryAttempted,
                     hostBundleIdentifier: diagnosticErrorCode.hasPrefix("steam_host") || diagnosticErrorCode == "steam_window_activation_failed" ? SteamHostMetadata.bundleIdentifier : nil
                 ))
             }
@@ -195,6 +200,9 @@ final class PortsideModel: ObservableObject {
     func launchSteam() {
         guard !isWorking else { return }
         isWorking = true; errorMessage = nil; message = "Preparing Portside…"
+        lastReadinessReport = nil
+        cacheRecoveryAttempted = false
+        let started = Date()
         Task {
             do {
                 try requirements.validate()
@@ -210,11 +218,14 @@ final class PortsideModel: ObservableObject {
                 state.steamExecutablePath = steamExecutable.path
                 state.phase = .steamLaunching; persistState(); message = "Opening Steam…"
                 try await openSteamAndWait(executable: steamExecutable)
+                state.lastSetupDuration = Date().timeIntervalSince(started)
                 showsInstaller = false
                 message = "Ready"
                 terminateAfterHandOff()
             } catch {
                 if supervisor.isRunning { supervisor.requestStop() }
+                state.setupCompleted = false
+                state.lastSetupDuration = Date().timeIntervalSince(started)
                 errorMessage = "Could not complete setup."
                 setupStep = .failed
                 state.phase = .failedRecoverable; state.lastError = PortsideLogger.sanitize(error.localizedDescription); state.lastErrorCode = errorCode(for: error); persistState()
@@ -223,6 +234,16 @@ final class PortsideModel: ObservableObject {
                 diagnostics.capture(error: error, context: diagnosticContext(
                     stage: "launch",
                     errorCode: diagnosticErrorCode,
+                    cefStrategy: lastReadinessReport?.cefStrategy,
+                    cefFailureCategory: lastReadinessReport?.logAnalysis.failureCategories.first,
+                    webhelperRestartCount: lastReadinessReport?.webhelperRestartCount,
+                    webhelperStarted: lastReadinessReport?.webhelperStarted,
+                    webhelperExitCode: lastReadinessReport?.webhelperExitCode,
+                    rendererMode: lastReadinessReport?.rendererMode,
+                    gpuProcessStatus: lastReadinessReport?.gpuProcessStatus,
+                    windowDetected: lastReadinessReport?.windowDetected,
+                    browserReadyDetected: lastReadinessReport?.browserReadyDetected,
+                    cacheRecoveryAttempted: cacheRecoveryAttempted,
                     hostBundleIdentifier: diagnosticErrorCode.hasPrefix("steam_host") || diagnosticErrorCode == "steam_window_activation_failed" ? SteamHostMetadata.bundleIdentifier : nil
                 ))
                 showsInstaller = true
@@ -302,6 +323,7 @@ final class PortsideModel: ObservableObject {
             case .steamInstallerUnavailable: return "steam_download_failed"
             case .processLaunchFailed(let reason):
                 let normalized = reason.lowercased()
+                if normalized.contains("cef") || normalized.contains("unverified") { return "steam_cef_ui_unverified" }
                 if normalized.contains("identity") { return "steam_host_identity_mismatch" }
                 if normalized.contains("host") { return "steam_host_launch_failed" }
                 if normalized.contains("interface") || normalized.contains("window") { return "steam_window_activation_failed" }
@@ -312,7 +334,7 @@ final class PortsideModel: ObservableObject {
         return "portside_error"
     }
 
-    private func diagnosticContext(stage: String? = nil, errorCode: String? = nil, runtimeVersion: String? = nil, duration: TimeInterval? = nil, cefStrategy: String? = nil, webhelperRestartCount: Int? = nil, hostBundleIdentifier: String? = nil) -> DiagnosticContext {
+    private func diagnosticContext(stage: String? = nil, errorCode: String? = nil, runtimeVersion: String? = nil, duration: TimeInterval? = nil, cefStrategy: String? = nil, cefFailureCategory: String? = nil, webhelperRestartCount: Int? = nil, webhelperStarted: Bool? = nil, webhelperExitCode: Int32? = nil, rendererMode: String? = nil, gpuProcessStatus: String? = nil, windowDetected: Bool? = nil, browserReadyDetected: Bool? = nil, cacheRecoveryAttempted: Bool? = nil, steamVersion: String? = nil, hostBundleIdentifier: String? = nil) -> DiagnosticContext {
         DiagnosticContext(
             stage: stage,
             errorCode: errorCode,
@@ -326,7 +348,16 @@ final class PortsideModel: ObservableObject {
             duration: duration ?? state.lastSetupDuration,
             retryCount: state.retryCount,
             cefStrategy: cefStrategy,
+            cefFailureCategory: cefFailureCategory,
             webhelperRestartCount: webhelperRestartCount,
+            webhelperStarted: webhelperStarted,
+            webhelperExitCode: webhelperExitCode,
+            rendererMode: rendererMode,
+            gpuProcessStatus: gpuProcessStatus,
+            windowDetected: windowDetected,
+            browserReadyDetected: browserReadyDetected,
+            cacheRecoveryAttempted: cacheRecoveryAttempted,
+            steamVersion: steamVersion,
             hostBundleIdentifier: hostBundleIdentifier
         )
     }
@@ -344,18 +375,6 @@ final class PortsideModel: ObservableObject {
         let windows10Result = try await WinePrefixManager.ensureWindows10(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix, logger: logger)
         guard windows10Result.status == 0 else { throw RuntimePipelineError.processFailed("Windows 10 prefix configuration", windows10Result.status) }
         await stopLegacySteamIfNeeded(runtimePath: runtimePath)
-        if await steamMonitor.activateVisibleSteamWindow() {
-            _ = try await steamHostLauncher.launch(
-                runtimePath: runtimePath,
-                prefix: PortsidePaths.steamPrefix,
-                steamExecutable: executable,
-                arguments: SteamInstaller.uiLaunchConfigurations[0].arguments
-            )
-            state.lastSteamStatus = .windowVisible
-            state.phase = .steamReady; state.setupCompleted = true; state.lastError = nil; persistState()
-            showsInstaller = false
-            return
-        }
         if await steamMonitor.isSteamProcessRunning() {
             logger.write("Stopping an existing Steam process before opening the UI")
             await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
@@ -364,48 +383,90 @@ final class PortsideModel: ObservableObject {
             }
         }
         let strategies = SteamInstaller.uiLaunchConfigurations
-        var lastReport: SteamReadinessReport?
+        let cefAttemptTimeout = max(10, min(180, TimeInterval(ProcessInfo.processInfo.environment["PORTSIDE_CEF_ATTEMPT_TIMEOUT"] ?? "60") ?? 60))
+        var reports: [(SteamLaunchConfiguration, SteamReadinessReport)] = []
         for (index, strategy) in strategies.enumerated() {
             if index > 0 {
-                if let previous = lastReport, previous.logAnalysis.cacheCorruptionLikely {
-                    let backups = try SteamHTMLCacheRecovery.renameHTMLCache(prefix: PortsidePaths.steamPrefix, logger: logger)
-                    if !backups.isEmpty {
-                        diagnostics.event("steam_html_cache_recovery_attempted", context: diagnosticContext(stage: "cef_fallback", cefStrategy: strategy.identifier, webhelperRestartCount: previous.webhelperRestartCount))
-                    }
-                }
                 if supervisor.isRunning { supervisor.requestStop() }
                 await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
                 _ = await steamMonitor.waitForSteamToStop(timeout: 10)
+                _ = await steamHostLauncher.waitForExit(timeout: 10)
             }
-            diagnostics.event("steam_started", context: diagnosticContext(stage: "launching_steam", cefStrategy: strategy.identifier))
+            let launchStartedAt = Date()
+            diagnostics.event("steam_cef_strategy_attempted", context: diagnosticContext(stage: "launching_steam", cefStrategy: strategy.identifier))
             _ = try await steamHostLauncher.launch(
                 runtimePath: runtimePath,
                 prefix: PortsidePaths.steamPrefix,
                 steamExecutable: executable,
                 arguments: strategy.arguments
             )
-            let report = await steamMonitor.waitForSteamReport(executable: executable, prefix: PortsidePaths.steamPrefix, strategy: strategy)
-            lastReport = report
+            let report = await steamMonitor.waitForSteamReport(executable: executable, prefix: PortsidePaths.steamPrefix, strategy: strategy, timeout: cefAttemptTimeout, attemptStartedAt: launchStartedAt)
+            reports.append((strategy, report))
+            lastReadinessReport = report
             state.lastSteamStatus = report.status
             if let exitCode = report.webhelperExitCode { state.lastExitCode = exitCode }
-            let reportContext = diagnosticContext(stage: "steam_readiness", duration: report.webhelperStableDuration, cefStrategy: strategy.identifier, webhelperRestartCount: report.webhelperRestartCount)
+            let reportContext = diagnosticContext(stage: "steam_readiness", duration: report.webhelperStableDuration, cefStrategy: strategy.identifier, cefFailureCategory: report.logAnalysis.failureCategories.first, webhelperRestartCount: report.webhelperRestartCount, webhelperStarted: report.webhelperStarted, webhelperExitCode: report.webhelperExitCode, rendererMode: report.rendererMode, gpuProcessStatus: report.gpuProcessStatus, windowDetected: report.windowDetected, browserReadyDetected: report.browserReadyDetected, steamVersion: report.logAnalysis.steamVersion)
+            diagnostics.event("steam_started", context: reportContext)
             if report.webhelperStarted { diagnostics.event("steamwebhelper_started", context: reportContext) }
             if report.webhelperExitCode != nil {
                 diagnostics.event("steamwebhelper_exit_code", context: reportContext)
             }
             if report.webhelperRestartCount >= 3 { diagnostics.event("steamwebhelper_crash_loop", context: reportContext) }
             if report.windowDetected { diagnostics.event("steam_window_detected", context: reportContext) }
-            if report.status == .windowVisible || report.status == .ready {
+            if report.status == .ready {
                 state.phase = .steamReady; state.setupCompleted = true; state.lastError = nil; persistState()
                 showsInstaller = false
                 return
             }
-            if report.windowDetected { diagnostics.event("steam_login_ui_unverified", context: reportContext) }
+            diagnostics.event("cef_ui_unverified", context: reportContext)
+            for category in report.logAnalysis.failureCategories where category != "cef_ui_unverified" {
+                diagnostics.event("cef_failure_detected", context: diagnosticContext(stage: "steam_readiness", cefStrategy: strategy.identifier, cefFailureCategory: category, webhelperRestartCount: report.webhelperRestartCount, webhelperStarted: report.webhelperStarted, webhelperExitCode: report.webhelperExitCode, rendererMode: report.rendererMode, gpuProcessStatus: report.gpuProcessStatus, windowDetected: report.windowDetected, browserReadyDetected: report.browserReadyDetected, steamVersion: report.logAnalysis.steamVersion))
+            }
             logger.write("CEF strategy \(strategy.identifier) did not produce a verified Steam UI: status=\(report.status.rawValue), webhelper_started=\(report.webhelperStarted), restarts=\(report.webhelperRestartCount), stable_seconds=\(String(format: "%.2f", report.webhelperStableDuration))", level: .warning)
             diagnostics.event(report.webhelperStarted ? "steam_cef_initialization_failed" : "steam_webhelper_not_started", context: reportContext)
         }
-        diagnostics.event("steamwebhelper_timeout", context: diagnosticContext(stage: "steam_readiness", cefStrategy: lastReport?.cefStrategy, webhelperRestartCount: lastReport?.webhelperRestartCount))
-        throw PortsideError.processLaunchFailed("Steam started but its interface could not be verified.")
+        let bestReport = reports.max { lhs, rhs in
+            readinessScore(lhs.1) < readinessScore(rhs.1)
+        }
+        if let bestReport, bestReport.1.windowDetected, bestReport.1.webhelperStarted {
+            if supervisor.isRunning { supervisor.requestStop() }
+            await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
+            _ = await steamMonitor.waitForSteamToStop(timeout: 10)
+            _ = await steamHostLauncher.waitForExit(timeout: 10)
+            let backups = try SteamHTMLCacheRecovery.renameHTMLCache(prefix: PortsidePaths.steamPrefix, logger: logger)
+            if !backups.isEmpty {
+                cacheRecoveryAttempted = true
+                let strategy = bestReport.0
+                diagnostics.event("steam_html_cache_recovery_attempted", context: diagnosticContext(stage: "cef_cache_recovery", cefStrategy: strategy.identifier, cefFailureCategory: "cef_cache_failure", webhelperRestartCount: bestReport.1.webhelperRestartCount, webhelperStarted: bestReport.1.webhelperStarted, webhelperExitCode: bestReport.1.webhelperExitCode, rendererMode: bestReport.1.rendererMode, gpuProcessStatus: bestReport.1.gpuProcessStatus, windowDetected: bestReport.1.windowDetected, browserReadyDetected: bestReport.1.browserReadyDetected, cacheRecoveryAttempted: true, steamVersion: bestReport.1.logAnalysis.steamVersion))
+                let launchStartedAt = Date()
+                _ = try await steamHostLauncher.launch(runtimePath: runtimePath, prefix: PortsidePaths.steamPrefix, steamExecutable: executable, arguments: strategy.arguments)
+                let recoveryReport = await steamMonitor.waitForSteamReport(executable: executable, prefix: PortsidePaths.steamPrefix, strategy: strategy, timeout: cefAttemptTimeout, attemptStartedAt: launchStartedAt)
+                lastReadinessReport = recoveryReport
+                state.lastSteamStatus = recoveryReport.status
+                let recoveryContext = diagnosticContext(stage: "cef_cache_recovery", cefStrategy: strategy.identifier, cefFailureCategory: recoveryReport.logAnalysis.failureCategories.first, webhelperRestartCount: recoveryReport.webhelperRestartCount, webhelperStarted: recoveryReport.webhelperStarted, webhelperExitCode: recoveryReport.webhelperExitCode, rendererMode: recoveryReport.rendererMode, gpuProcessStatus: recoveryReport.gpuProcessStatus, windowDetected: recoveryReport.windowDetected, browserReadyDetected: recoveryReport.browserReadyDetected, cacheRecoveryAttempted: true, steamVersion: recoveryReport.logAnalysis.steamVersion)
+                diagnostics.event(recoveryReport.status == .ready ? "steam_ui_ready" : "cef_ui_unverified", context: recoveryContext)
+                if recoveryReport.status == .ready {
+                    state.phase = .steamReady; state.setupCompleted = true; state.lastError = nil; persistState()
+                    showsInstaller = false
+                    return
+                }
+            }
+        }
+        if supervisor.isRunning { supervisor.requestStop() }
+        await steamMonitor.stopSteam(runtimeExecutable: runtimePath, prefix: PortsidePaths.steamPrefix)
+        _ = await steamMonitor.waitForSteamToStop(timeout: 10)
+        _ = await steamHostLauncher.waitForExit(timeout: 10)
+        diagnostics.event("steamwebhelper_timeout", context: diagnosticContext(stage: "steam_readiness", cefStrategy: bestReport?.1.cefStrategy, cefFailureCategory: bestReport?.1.logAnalysis.failureCategories.first, webhelperRestartCount: bestReport?.1.webhelperRestartCount, webhelperStarted: bestReport?.1.webhelperStarted, webhelperExitCode: bestReport?.1.webhelperExitCode, rendererMode: bestReport?.1.rendererMode, gpuProcessStatus: bestReport?.1.gpuProcessStatus, windowDetected: bestReport?.1.windowDetected, browserReadyDetected: bestReport?.1.browserReadyDetected, cacheRecoveryAttempted: cacheRecoveryAttempted, steamVersion: bestReport?.1.logAnalysis.steamVersion))
+        throw PortsideError.processLaunchFailed("Steam UI remained unverified after controlled CEF recovery.")
+    }
+
+    private func readinessScore(_ report: SteamReadinessReport) -> Int {
+        (report.webhelperStarted ? 4 : 0)
+            + (report.windowDetected ? 4 : 0)
+            + (report.browserReadyDetected ? 2 : 0)
+            + (report.logAnalysis.contentWindowEvidence ? 2 : 0)
+            + (report.cefArgumentsObserved ? 1 : 0)
+            - (report.webhelperRestartCount * 2)
     }
 
     private func terminateAfterHandOff() {
