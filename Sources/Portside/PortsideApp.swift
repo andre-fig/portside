@@ -49,6 +49,7 @@ final class PortsideModel: ObservableObject {
     let steamHostLauncher = SteamHostLauncher()
     let diagnostics: DiagnosticsService
     private var didStartAutomatically = false
+    private var handoffExitScheduled = false
 
     enum SetupStep: String { case checking, rosettaRequired, preparing, downloading, installing, ready, failed }
 
@@ -408,9 +409,15 @@ final class PortsideModel: ObservableObject {
     }
 
     private func terminateAfterHandOff() {
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(500))
+        guard !handoffExitScheduled else { return }
+        handoffExitScheduled = true
+        logger.write("Steam handoff completed; closing Portside")
+        NSApp.hide(nil)
+        DispatchQueue.main.async {
             NSApp.terminate(nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                if NSApp.isRunning { NSApp.terminate(nil) }
+            }
         }
     }
 
