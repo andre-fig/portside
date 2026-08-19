@@ -277,6 +277,10 @@ public final class PortsideLogger: @unchecked Sendable {
 
     public static func sanitize(_ value: String) -> String {
         var result = value.replacingOccurrences(of: NSHomeDirectory(), with: "$USER_HOME")
+        if let windowsUser = try? NSRegularExpression(pattern: "(?i)C:\\\\users\\\\[^\\\\\\s]+") {
+            let range = NSRange(result.startIndex..<result.endIndex, in: result)
+            result = windowsUser.stringByReplacingMatches(in: result, range: range, withTemplate: "C:\\\\users\\\\<user>")
+        }
         let patterns = [
             "(?i)(password|passwd|token|cookie|sessionid|steamid|auth)\\s*[=:]\\s*[^\\s,;]+",
             "(?i)(-steamid|--steamid)\\s+[^\\s]+"

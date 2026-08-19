@@ -114,6 +114,7 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertFalse(sanitized.contains("abc123"))
         XCTAssertFalse(sanitized.contains("76561198000000000"))
         XCTAssertTrue(sanitized.contains("$USER_HOME"))
+        XCTAssertFalse(PortsideLogger.sanitize("C:\\users\\andrefigueiredo\\AppData\\Local").contains("andrefigueiredo"))
     }
 
     func testDiagnosticsAllowOnlyNonSensitiveFields() {
@@ -125,9 +126,9 @@ final class PortsideCoreTests: XCTestCase {
 
     func testRendererFallbacksAreOrderedAndMutuallyExclusive() {
         let x64 = GameExecutableInfo(architecture: "x86_64", graphicsAPI: "DirectX 11")
-        XCTAssertEqual(GameCompatibilityService.renderer(for: x64), [.d3dMetal, .dxmt, .dxvk, .wineD3D])
+        XCTAssertEqual(GameCompatibilityService.renderer(for: x64), [.dxmt, .wineD3D])
         let x86 = GameExecutableInfo(architecture: "x86", graphicsAPI: "DirectX 11")
-        XCTAssertEqual(GameCompatibilityService.renderer(for: x86), [.dxvk, .wineD3D])
+        XCTAssertEqual(GameCompatibilityService.renderer(for: x86), [.dxmt, .wineD3D])
         XCTAssertTrue(GameCompatibilityService.mutuallyExclusive(.wineD3D, environment: ["D3DMETAL": "0", "DXMT": "0", "DXVK": "0"]))
         XCTAssertFalse(GameCompatibilityService.mutuallyExclusive(.wineD3D, environment: ["D3DMETAL": "1", "DXMT": "1"]))
     }
@@ -228,5 +229,146 @@ final class PortsideCoreTests: XCTestCase {
         var invalidSignature = signatureData
         invalidSignature[0] ^= 0x01
         XCTAssertThrowsError(try PortsideLicenseClient.verifyLocal(token: "\(input).\(invalidSignature.base64EncodedString())", publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "license-1"))
+    }
+
+    func testSteamLibraryScannerParsesAndTracksManagedInstallations() throws {
+        let root = PortsidePaths.root.appendingPathComponent(".test-library-" + UUID().uuidString, isDirectory: true)
+        let prefix = root.appendingPathComponent("Prefix", isDirectory: true)
+        let steamLibrary = root.appendingPathComponent("Library", isDirectory: true)
+        let steamApps = prefix.appendingPathComponent("drive_c/Program Files (x86)/Steam/steamapps", isDirectory: true)
+        let gameDirectory = steamApps.appendingPathComponent("common/Example Game", isDirectory: true)
+        try FileManager.default.createDirectory(at: gameDirectory, withIntermediateDirectories: true)
+        let folders = """
+        "libraryfolders"
+        {
+            "0"
+            {
+                "path" "C:\\Program Files (x86)\\Steam"
+                "apps"
+                {
+                    "304930" "123"
+                }
+            }
+        }
+        """
+        try Data(folders.utf8).write(to: steamApps.appendingPathComponent("libraryfolders.vdf"))
+        let manifestURL = steamApps.appendingPathComponent("appmanifest_304930.acf")
+        func writeManifest(updated: String, size: String) throws {
+            let manifest = """
+            "AppState"
+            {
+                "appid" "304930"
+                "name" "Example Game"
+                "StateFlags" "4"
+                "installdir" "Example Game"
+                "LastUpdated" "\(updated)"
+                "SizeOnDisk" "\(size)"
+            }
+            """
+            try Data(manifest.utf8).write(to: manifestURL)
+        }
+        try writeManifest(updated: "100", size: "10")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let scanner = SteamLibraryScanner(prefix: prefix, steamLibrary: steamLibrary)
+        let first = try scanner.scan()
+        XCTAssertEqual(first.snapshot.games.first?.appID, "304930")
+        XCTAssertEqual(first.snapshot.games.first?.installDirectory, gameDirectory.standardizedFileURL)
+        XCTAssertEqual(first.changes.count, 1)
+        XCTAssertTrue(first.changes.first == .installed(first.snapshot.games[0]))
+
+        try writeManifest(updated: "200", size: "20")
+        let second = try scanner.scan(previous: first.snapshot)
+        XCTAssertTrue(second.changes.contains { if case .updated = $0 { return true }; return false })
+
+        try FileManager.default.removeItem(at: manifestURL)
+        let third = try scanner.scan(previous: second.snapshot)
+        XCTAssertTrue(third.changes.contains { if case .removed(let appID, _) = $0 { return appID == "304930" }; return false })
+    }
+
+    func testPEScannerBuildsGeneralProfileWithUnityAndAntiCheatEvidence() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".exe")
+        try makeFakePE(machine: 0x8664, strings: "d3d11.dll UnityPlayer.dll BattlEye launcher").write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let evidence = try PEImportScanner().scan(url: file)
+        XCTAssertEqual(evidence.architecture, .x86_64)
+        XCTAssertTrue(evidence.graphicsAPIs.contains(.directX11))
+        XCTAssertTrue(evidence.engineHints.contains("unity"))
+        XCTAssertTrue(evidence.antiCheatProviders.contains(.battlEye))
+        let profile = CompatibilityProfileBuilder.build(appID: "304930", gameName: "Unturned", evidences: [evidence])
+        XCTAssertEqual(profile.appID, "304930")
+        XCTAssertEqual(profile.preferredRenderer, .dxmt)
+        XCTAssertTrue(profile.fallbackRenderers.contains(.dxvk))
+        XCTAssertEqual(profile.antiCheat.first?.provider, .battlEye)
+        XCTAssertEqual(profile.antiCheat.first?.status, "informational")
+    }
+
+    func testRendererManagerKeepsTwoExecutablesIndependentAndRollsBack() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let configURL = root.appendingPathComponent("renderer-configurations.json")
+        let firstURL = root.appendingPathComponent("GameA.exe")
+        let secondURL = root.appendingPathComponent("GameB.exe")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("save data".utf8).write(to: root.appendingPathComponent("save.dat"))
+        defer { try? FileManager.default.removeItem(at: root) }
+        let inventory = RuntimeComponentInventory(wrapper: root, renderers: [
+            RendererProfile(renderer: .wineD3D, available: true),
+            RendererProfile(renderer: .dxmt, available: true),
+            RendererProfile(renderer: .dxvk, available: true)
+        ])
+        let manager = RendererManager(wrapper: root, prefix: root.appendingPathComponent("prefix"), configurationURL: configURL, executeRegistryChanges: false, inventory: inventory)
+        let firstSnapshot = manager.snapshot(appID: "304930", executable: firstURL)
+        let first = try await manager.apply(renderer: .dxmt, appID: "304930", executable: firstURL)
+        let second = try await manager.apply(renderer: .dxvk, appID: "304930", executable: secondURL)
+        let proof = RendererManager.isolationProof(first: first, second: second)
+        XCTAssertTrue(proof.independent)
+        XCTAssertEqual(manager.configuration(appID: "304930", executable: firstURL)?.renderer, .dxmt)
+        XCTAssertEqual(manager.configuration(appID: "304930", executable: secondURL)?.renderer, .dxvk)
+        try await manager.rollback(firstSnapshot)
+        XCTAssertNil(manager.configuration(appID: "304930", executable: firstURL))
+        XCTAssertEqual(manager.configuration(appID: "304930", executable: secondURL)?.renderer, .dxvk)
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("save.dat")), "save data")
+    }
+
+    func testLaunchMonitorDistinguishesGraphicsAnticheatAndUnverifiedState() {
+        let graphics = GameLaunchSignals(appID: "1", executable: "game.exe", renderer: .wineD3D, architecture: .x86_64, duration: 2, exitCode: 1, deviceCreationFailed: true)
+        XCTAssertEqual(GameLaunchMonitor.classify(graphics), .graphicsInitializationFailed)
+        let anticheat = GameLaunchSignals(appID: "304930", executable: "Unturned.exe", renderer: .wineD3D, architecture: .x86_64, duration: 5, exitCode: 1, anticheatDetected: true)
+        XCTAssertEqual(GameLaunchMonitor.classify(anticheat), .anticheatUnsupported)
+        let unverified = GameLaunchSignals(appID: "1", executable: "game.exe", renderer: .wineD3D, architecture: .x86, duration: 30, exitCode: 0, stable: true, visualStateVerified: false)
+        let attempt = GameLaunchMonitor.attempt(from: unverified)
+        XCTAssertEqual(attempt.result, .visualStateUnverified)
+        XCTAssertTrue(attempt.visualStateUnverified)
+    }
+
+    func testAgentStopsOnlyWhenManagedSteamIsGone() {
+        XCTAssertTrue(PortsideAgent.shouldContinue(steamManagedProcessCount: 1))
+        XCTAssertFalse(PortsideAgent.shouldContinue(steamManagedProcessCount: 0))
+    }
+
+    func testFallbackPolicyAllowsOnlyOneOfflineGraphicsRetry() {
+        let profile = GameCompatibilityProfile(appID: "1", gameName: "Game", executables: [ExecutableProfile(executablePath: "/Games/Game.exe", architecture: .x86_64, detectedAPIs: [.directX11], preferredRenderer: .wineD3D, fallbackRenderers: [.dxmt, .wineD3D])], preferredRenderer: .wineD3D, fallbackRenderers: [.dxmt])
+        let decision = CompatibilityFallbackPolicy.nextRenderer(profile: profile, executable: "/Games/Game.exe", attempted: .wineD3D, result: .graphicsInitializationFailed, attemptsAlreadyMade: 0)
+        XCTAssertEqual(decision?.renderer, .dxmt)
+        XCTAssertNil(CompatibilityFallbackPolicy.nextRenderer(profile: profile, executable: "/Games/Game.exe", attempted: .wineD3D, result: .graphicsInitializationFailed, attemptsAlreadyMade: 1))
+        XCTAssertNil(CompatibilityFallbackPolicy.nextRenderer(profile: profile, executable: "/Games/Game.exe", attempted: .wineD3D, result: .graphicsInitializationFailed, attemptsAlreadyMade: 0, onlineSession: true))
+        let antiCheat = GameCompatibilityProfile(appID: "1", gameName: "Game", executables: [], preferredRenderer: .wineD3D, fallbackRenderers: [.dxmt], antiCheat: [AntiCheatProfile(provider: .battlEye)])
+        XCTAssertNil(CompatibilityFallbackPolicy.nextRenderer(profile: antiCheat, executable: "Game.exe", attempted: .wineD3D, result: .graphicsInitializationFailed, attemptsAlreadyMade: 0))
+    }
+
+    private func makeFakePE(machine: UInt16, strings: String) -> Data {
+        var data = Data(repeating: 0, count: 512)
+        data[0] = 0x4d
+        data[1] = 0x5a
+        data[0x3c] = 0x80
+        data[0x80] = 0x50
+        data[0x81] = 0x45
+        data[0x84] = UInt8(machine & 0xff)
+        data[0x85] = UInt8(machine >> 8)
+        data[0x94] = 0x02
+        data[0x98] = 0x0b
+        data[0x99] = 0x01
+        data.append(contentsOf: Data(strings.utf8))
+        return data
     }
 }

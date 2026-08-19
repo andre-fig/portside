@@ -51,6 +51,7 @@ final class PortsideModel: ObservableObject {
     private let wrapperInstaller: SikarugirWrapperInstaller
     private let steamLauncher: SteamProcessLauncher
     private let readinessMonitor: SteamReadinessMonitor
+    private let agentLauncher = PortsideAgentLauncher()
     private let diagnostics: DiagnosticsService
     private let licenseClient: PortsideLicenseClient?
     private let requiresCommercialLicense: Bool
@@ -233,6 +234,7 @@ final class PortsideModel: ObservableObject {
                 guard report.windowDetected && report.webHelperStarted else {
                     throw PortsideError.processLaunchFailed("Steam processes started without a managed graphical window.")
                 }
+                agentLauncher.start(wrapper: installed.validation.wrapper, prefix: installed.validation.prefix)
                 state.setupCompleted = true
                 state.phase = .steamReady
                 state.lastError = nil
@@ -275,6 +277,7 @@ final class PortsideModel: ObservableObject {
                 let report = await readinessMonitor.waitForSteamWindow(wrapper: wrapper, baselinePIDs: baselinePIDs)
                 state.lastReadiness = report
                 guard report.windowDetected && report.webHelperStarted else { throw PortsideError.processLaunchFailed("Steam opened without a managed graphical window.") }
+                agentLauncher.start(wrapper: wrapper, prefix: URL(fileURLWithPath: state.prefixPath ?? PortsidePaths.steamPrefix.path))
                 state.setupCompleted = true
                 state.phase = .steamReady
                 state.lastError = nil

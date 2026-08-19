@@ -9,16 +9,17 @@ public enum EnvironmentPhase: String, Codable, CaseIterable, Sendable {
     case failedRecoverable, failedFatal
 }
 
-public enum GraphicsBackend: String, Codable, CaseIterable, Sendable {
-    case wineD3D, d3dMetal, dxmt, dxvk, vkd3d
+public enum GraphicsBackend: String, Codable, CaseIterable, Sendable, Hashable {
+    case wineD3D, dxmt, dxvk, vkd3d, nativeVulkan, nativeOpenGL
 
     public var displayName: String {
         switch self {
         case .wineD3D: return "WineD3D"
-        case .d3dMetal: return "D3DMetal"
         case .dxmt: return "DXMT"
         case .dxvk: return "DXVK"
         case .vkd3d: return "VKD3D"
+        case .nativeVulkan: return "Native Vulkan"
+        case .nativeOpenGL: return "Native OpenGL"
         }
     }
 }
@@ -562,10 +563,11 @@ public enum SteamProcessOwnership {
 
     /// Some Wine processes are reparented to launchd and expose only a Windows
     /// command line. Their open files still identify the wrapper and prefix.
-    /// Inspect only Steam/Wine candidates so native macOS Steam is never
-    /// selected by a broad process-name match.
+    /// Inspect only Windows/Wine candidates so native macOS Steam is never
+    /// selected by a broad process-name match. File ownership is the final
+    /// association check for Wine processes that lost their parent.
     public static func fileBackedManagedPIDs(in snapshots: [ManagedProcessSnapshot], wrapper: URL, prefix: URL) -> Set<Int32> {
-        let candidates = snapshots.filter { isLikelySteamRuntime($0.command) }
+        let candidates = snapshots.filter { isLikelySteamRuntime($0.command) || $0.command.localizedCaseInsensitiveContains(".exe") }
         guard !candidates.isEmpty else { return [] }
         return Set(candidates.compactMap { snapshot in
             let process = Process()
@@ -718,17 +720,16 @@ public enum GameCompatibilityService {
     public static func renderer(for info: GameExecutableInfo) -> [GraphicsBackend] {
         switch (info.graphicsAPI, info.architecture) {
         case ("DirectX 8", _), ("DirectX 9", _): return [.dxvk, .wineD3D]
-        case ("DirectX 10", "x86_64"), ("DirectX 11", "x86_64"): return [.d3dMetal, .dxmt, .dxvk, .wineD3D]
-        case ("DirectX 10", _), ("DirectX 11", _): return [.dxvk, .wineD3D]
-        case ("DirectX 12", _): return [.d3dMetal, .vkd3d]
-        case ("OpenGL", _), ("Vulkan", _): return [.wineD3D]
+        case ("DirectX 10", _), ("DirectX 11", _): return [.dxmt, .wineD3D]
+        case ("DirectX 12", _): return [.vkd3d, .wineD3D]
+        case ("OpenGL", _): return [.nativeOpenGL, .wineD3D]
+        case ("Vulkan", _): return [.nativeVulkan, .wineD3D]
         default: return [.wineD3D]
         }
     }
 
     public static func mutuallyExclusive(_ renderer: GraphicsBackend, environment: [String: String]) -> Bool {
-        let enabled = [
-            environment["D3DMETAL"] == "1" ? GraphicsBackend.d3dMetal : nil,
+        let enabled: [GraphicsBackend] = [
             environment["DXMT"] == "1" ? .dxmt : nil,
             environment["DXVK"] == "1" ? .dxvk : nil
         ].compactMap { $0 }

@@ -6,7 +6,8 @@ let package = Package(
     platforms: [.macOS(.v13)],
     products: [
         .library(name: "PortsideCore", targets: ["PortsideCore"]),
-        .executable(name: "Portside", targets: ["Portside"])
+        .executable(name: "Portside", targets: ["Portside"]),
+        .executable(name: "PortsideAgent", targets: ["PortsideAgent"])
     ],
     dependencies: [
         .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.26.0"),
@@ -22,6 +23,7 @@ let package = Package(
                 .product(name: "Sparkle", package: "Sparkle")
             ]
         ),
+        .executableTarget(name: "PortsideAgent", dependencies: ["PortsideCore"]),
         .testTarget(name: "PortsideCoreTests", dependencies: ["PortsideCore"])
     ]
 )
