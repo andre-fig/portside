@@ -41,6 +41,8 @@ scripts/             Build, validation, release and publication automation
 
 The complete folder map, script catalog, artifact origins, DMG procedure and
 release/update runbooks are in [`docs/PROJECT_GUIDE.md`](docs/PROJECT_GUIDE.md).
+New contributors should start with [`AGENTS.md`](AGENTS.md) and the
+[`developer guide`](docs/DEVELOPER_GUIDE.md).
 The landing page can be run independently from `apps/landing/`; its CI build
 is defined in `.github/workflows/build-landing.yml`.
 
@@ -98,6 +100,7 @@ The commercial control plane is scaffolded separately in `apps/backend/`. It use
 NestJS, PostgreSQL/Prisma, private object storage, signed runtime manifests,
 Sparkle 2 app updates and one-Mac license activation. Start with
 `docs/COMMERCIALIZATION.md`, `docs/BACKEND.md` and
-`docs/RAILWAY_DEPLOYMENT.md`. No Railway deployment, Developer ID signature or
-notarization is present in this repository until the owner's credentials and
-external approvals are supplied.
+`docs/RAILWAY_DEPLOYMENT.md`. The Railway API and dual object storage are
+configured for runtime staging. Customer-facing Developer ID signing,
+notarization, production promotion and the final private-bucket download path
+still require protected credentials, approvals and validation.

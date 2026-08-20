@@ -77,6 +77,10 @@ signed manifest with `POST /v1/admin/manifests/publish`. Production publication
 also requires `PORTSIDE_CONFIRM_PRODUCTION=YES`; the publishing script writes
 each object to both approved buckets and keeps prior versions for rollback.
 
-The repository scaffolds these gates locally. No Railway deployment,
-Developer ID signature or notarization is claimed until its external result is
-actually produced and recorded.
+The Railway API and dual object storage are configured for runtime staging, and
+the staging runtime workflow has produced signed evidence in both buckets.
+This does not claim a customer release: Developer ID signature, notarization,
+production promotion, real-Mac GUI acceptance and an end-to-end desktop
+download still require their external result to be produced and recorded. The
+current buckets are private, so the desktop download proxy/redirect remains a
+required infrastructure step before rollout.

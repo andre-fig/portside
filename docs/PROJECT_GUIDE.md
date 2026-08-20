@@ -5,6 +5,11 @@ fonte de código para o app macOS, a API, a landing page, os builds de runtime e
 a automação de release. Saídas de build ficam em `build/` e `.build/`, que são
 geradas localmente ou pelo CI e não são fonte de código.
 
+Para onboarding rápido, leia primeiro [`docs/DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md)
+e [`AGENTS.md`](../AGENTS.md). Este documento é o catálogo detalhado de scripts,
+artefatos e procedimentos; os runbooks especializados continuam sendo a fonte
+de detalhes de cada operação.
+
 ## Organização do monorepo
 
 ```text
@@ -318,11 +323,16 @@ Environment `staging` deve conter `PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX`,
 `PORTSIDE_SECONDARY_S3_REGION` e `PORTSIDE_SECONDARY_S3_ENDPOINT`. Esses
 valores são cópias das credenciais dos dois buckets S3-compatible criados no
 Railway; o runner do GitHub não lê variáveis do Railway automaticamente.
-Todos devem ficar em GitHub Environments,
+No estado atual, o Environment `staging` já está configurado com esses valores
+e a última build de runtime validada publicou nos dois buckets. Todos devem
+ficar em GitHub Environments,
 Keychain ou secret manager. O Railway hospeda API/worker/cron e PostgreSQL; os
 arquivos de runtime e releases ficam em storage de objetos primário e
-secundário. O bucket e os hosts reais ainda precisam ser configurados pelo
-operador antes de produção.
+secundário. Os buckets continuam privados: antes de um rollout do desktop, o
+backend precisa fornecer uma rota Portside para URL temporária/redirect
+assinado, ou uma política pública deve ser aprovada explicitamente. Publicar
+em staging e assinar o manifesto não prova, por si só, o download anônimo pelo
+cliente.
 
 Arquivos `.env`, chaves, certificados, DMGs, ZIPs, `node_modules`, `.build` e
 `build/` são ignorados. Confirme `git status` antes de adicionar qualquer

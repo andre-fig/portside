@@ -37,4 +37,13 @@ Runtime manifests are signed before backend promotion. The desktop validates the
 
 The backend appcast is generated from `AppRelease` rows with `channel=production` and `status=production`; it returns the current release and two previous releases. A release must pass through staging and explicit promotion before it is visible to production clients.
 
-For the first real release, create Sparkle keys with the `generate_keys` tool shipped in Sparkle, register the public key as `PORTSIDE_SPARKLE_PUBLIC_KEY`, configure a macOS Developer ID identity and a `notarytool` keychain profile, then add the secrets above to the GitHub Environments. No Railway, Apple signing, notarization or end-to-end update claim is valid until that protected workflow has completed and the final DMG/appcast/runtime endpoint have been inspected.
+For the first real customer release, create Sparkle keys with the `generate_keys`
+tool shipped in Sparkle, register the public key as
+`PORTSIDE_SPARKLE_PUBLIC_KEY`, configure a macOS Developer ID identity and a
+`notarytool` keychain profile, then add the secrets above to the GitHub
+Environments. Railway API and dual-bucket runtime staging are configured, but
+the buckets are private: the desktop still needs a stable Portside API
+proxy/redirect that returns a short-lived signed object URL, or an explicitly
+reviewed public read policy, before an end-to-end customer update can be
+claimed. Apple signing, notarization, production promotion and final appcast
+inspection remain separate release gates.

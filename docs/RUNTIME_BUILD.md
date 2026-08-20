@@ -36,12 +36,13 @@ runtime substitutions are not accepted by the production recipe.
 
 The local macOS build has produced the Portside wrapper, Wine engine and
 Winetricks archives from checked-in sources. The clean archive layout and
-unsigned manifest checks pass. This proves source compilation and packaging,
-not Steam installation or a graphical result. The current GitHub Actions run
-must finish before its evidence is accepted; staging signing/storage still
-requires configured secrets, and the clean GUI procedure in
-`docs/VALIDATION.md` requires a logged-in self-hosted Mac. The lockfile is not
-updated from an incomplete build.
+unsigned manifest checks pass. The GitHub Actions staging build is configured
+with the manifest key and separate primary/secondary Railway bucket
+credentials; its latest validated execution signed the manifest and replicated
+the runtime evidence to both buckets. This proves source compilation,
+signature and dual storage, not Steam installation or a graphical result. The
+clean GUI procedure in `docs/VALIDATION.md` still requires a logged-in
+self-hosted Mac. The lockfile is not updated from an incomplete build.
 
 ## Publication
 
