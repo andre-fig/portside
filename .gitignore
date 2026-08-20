@@ -21,6 +21,10 @@ build/releases/
 *.p8
 *.pem
 *.key
+*.p12
+*.pfx
+*.cer
+*.certSigningRequest
 
 # Local Portside runtime and user data
 PortsideRuntime/
