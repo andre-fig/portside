@@ -47,7 +47,8 @@ jobs:
         run: |
           set -eu
           for formula in bison mingw-w64 llvm lld freetype pkgconf; do brew list "$formula" >/dev/null 2>&1 || brew install "$formula"; done
-          test "$($(brew --prefix bison)/bin/bison --version | awk 'NR==1 {print $4}')" = "3.8.2"
+          bison_bin="$(brew --prefix bison)/bin/bison"
+          test "$("$bison_bin" --version | awk 'NR==1 {print $4}')" = "3.8.2"
           test "$(brew list --versions mingw-w64 | awk '{print $2}')" = "14.0.0_3"
           test "$(brew list --versions llvm | awk '{print $2}')" = "22.1.8_2"
           test "$(brew list --versions lld | awk '{print $2}')" = "22.1.8"
@@ -171,7 +172,6 @@ jobs:
     env:
       PORTSIDE_VERSION: ${{ inputs.version }}
       PORTSIDE_UPDATE_CHANNEL: production
-      PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
       PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
       PORTSIDE_SECONDARY_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_SECONDARY_PUBLIC_BUCKET }}
       PORTSIDE_PUBLIC_BASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}
@@ -213,6 +213,7 @@ jobs:
 
       - name: Create signed production runtime manifest
         env:
+          PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
           PORTSIDE_RUNTIME_BUILD_DIR: ${{ runner.temp }}/portside-release
           PORTSIDE_RUNTIME_VERSION: ${{ inputs.version }}
           PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/runtime/production/
@@ -236,6 +237,7 @@ jobs:
 
       - name: Re-sign appcast for production storage URLs
         env:
+          PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
           PORTSIDE_UPDATES_DIR: ${{ runner.temp }}/portside-release/updates-production
           PORTSIDE_APPCAST_OUTPUT: ${{ runner.temp }}/portside-release/appcast.xml
           PORTSIDE_SPARKLE_PRIVATE_KEY_FILE: ${{ runner.temp }}/portside-sparkle-ed25519.key
@@ -249,10 +251,13 @@ jobs:
           ./scripts/generate_appcast.sh
 
       - name: Publish the reviewed artifact to production storage
+        env:
+          PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
         run: ./scripts/publish_release.sh
 
       - name: Require explicit backend promotion
         env:
+          PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
           API_URL: ${{ secrets.PORTSIDE_API_BASE_URL }}
           ADMIN_TOKEN: ${{ secrets.PORTSIDE_ADMIN_BEARER_TOKEN }}
           RELEASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/app/production/Portside-${{ inputs.version }}.zip

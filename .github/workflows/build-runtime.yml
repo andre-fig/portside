@@ -87,26 +87,26 @@ jobs:
 
       - name: Sign and validate staging manifest
         env:
-          PORTSIDE_RUNTIME_MANIFEST_INPUT: ${{ runner.workspace }}/build/runtime/runtime-manifest-unsigned.json
+          PORTSIDE_RUNTIME_MANIFEST_INPUT: ${{ github.workspace }}/build/runtime/runtime-manifest-unsigned.json
           PORTSIDE_MANIFEST_SIGNING_KEY_FILE: ${{ runner.temp }}/portside-runtime-manifest.key
-          PORTSIDE_MANIFEST_OUTPUT: ${{ runner.workspace }}/build/runtime/runtime-manifest.json
+          PORTSIDE_MANIFEST_OUTPUT: ${{ github.workspace }}/build/runtime/runtime-manifest.json
         run: |
           ./scripts/generate_manifest.sh
           ./scripts/build-runtime/validate-manifest.sh "$PORTSIDE_MANIFEST_OUTPUT"
 
       - name: Publish staging runtime to both buckets
         env:
-          PORTSIDE_RUNTIME_BUILD_DIR: ${{ runner.workspace }}/build/runtime
+          PORTSIDE_RUNTIME_BUILD_DIR: ${{ github.workspace }}/build/runtime
         run: ./scripts/publish_runtime_staging.sh
 
       - name: Run artifact and source policy checks
         run: |
           ./scripts/validate-production-policy.sh
-          test -s build/runtime/PortsideWrapper-${PORTSIDE_RUNTIME_VERSION}.tar.xz
-          test -s build/runtime/PortsideWineEngine-${PORTSIDE_RUNTIME_VERSION}.tar.xz
-          test -s build/runtime/PortsideWinetricks-${PORTSIDE_RUNTIME_VERSION}.tar.xz
-          test -s build/runtime/sbom.spdx.json
-          test -s build/runtime/provenance.json
+          test -s "build/runtime/PortsideWrapper-${PORTSIDE_RUNTIME_VERSION}.tar.xz"
+          test -s "build/runtime/PortsideWineEngine-${PORTSIDE_RUNTIME_VERSION}.tar.xz"
+          test -s "build/runtime/PortsideWinetricks-${PORTSIDE_RUNTIME_VERSION}.tar.xz"
+          test -s "build/runtime/sbom.spdx.json"
+          test -s "build/runtime/provenance.json"
 
       - name: Upload staging evidence
         if: always()
