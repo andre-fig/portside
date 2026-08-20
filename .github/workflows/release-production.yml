@@ -204,7 +204,7 @@ jobs:
           printf '%s' "$CODESIGN_P12_BASE64" | base64 -D > "$SIGNING_P12"
           printf '%s' "$CODESIGN_CERT_BASE64" | base64 -D > "$SIGNING_CERT"
           security import "$SIGNING_P12" -P "$CODESIGN_P12_PASSWORD" -A -f pkcs12 -k "$SIGNING_KEYCHAIN"
-          security import "$SIGNING_CERT" -A -f x509 -k "$SIGNING_KEYCHAIN"
+          security import "$SIGNING_CERT" -A -k "$SIGNING_KEYCHAIN"
           security set-key-partition-list -S apple-tool:,apple: -s -k '' "$SIGNING_KEYCHAIN"
           security list-keychains -d user -s "$SIGNING_KEYCHAIN"
           security default-keychain -s "$SIGNING_KEYCHAIN"
