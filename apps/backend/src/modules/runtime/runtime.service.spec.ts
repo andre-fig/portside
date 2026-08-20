@@ -47,4 +47,23 @@ describe("RuntimeService", () => {
       else process.env.NODE_ENV = previous;
     }
   });
+
+  it("does not promote a build without clean-install acceptance", async () => {
+    const service = new RuntimeService({
+      runtimeRelease: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "release-1",
+          channel: "staging",
+          status: "staging",
+          build: { status: "succeeded", testResult: { conclusion: "success" } },
+          artifacts: [],
+          manifests: [],
+        }),
+      },
+    } as never);
+
+    await expect(service.promoteRelease("release-1")).rejects.toMatchObject({
+      response: { message: "clean-install acceptance is required before promotion" },
+    });
+  });
 });

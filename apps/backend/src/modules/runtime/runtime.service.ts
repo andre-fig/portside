@@ -361,11 +361,15 @@ export class RuntimeService {
       data: {
         version: input.version,
         portsideCommit: input.portsideCommit,
+        workflowRunId: input.workflowRunId,
+        workflowURL: input.workflowURL,
         status: input.status,
+        promotionStatus: "not_promoted",
         environment: input.environment as Prisma.InputJsonValue,
         toolchain: input.toolchain as Prisma.InputJsonValue | undefined,
         provenance: input.provenance as Prisma.InputJsonValue | undefined,
         sbom: input.sbom as Prisma.InputJsonValue | undefined,
+        testResult: input.testResult as Prisma.InputJsonValue | undefined,
         startedAt: input.status === BuildStatus.queued ? undefined : new Date(),
         finishedAt:
           input.status === BuildStatus.succeeded || input.status === BuildStatus.failed
@@ -411,6 +415,10 @@ export class RuntimeService {
         where: { id: { in: input.artifactIds } },
         data: { buildId: input.buildId },
       });
+      await transaction.runtimeBuild.update({
+        where: { id: input.buildId },
+        data: { promotionStatus: "staging" },
+      });
       return transaction.runtimeRelease.create({
         data: {
           version: input.version,
@@ -429,13 +437,30 @@ export class RuntimeService {
     const prisma = this.requireDatabase();
     const release = await prisma.runtimeRelease.findUnique({
       where: { id },
-      include: { build: true, artifacts: true },
+      include: {
+        build: true,
+        artifacts: true,
+        manifests: {
+          where: { channel: Channel.staging, status: "published" },
+          take: 1,
+        },
+      },
     });
     if (!release) throw new NotFoundException("runtime release not found");
     if (release.channel !== Channel.staging || release.status !== ReleaseStatus.staging)
       throw new BadRequestException("only staging releases can be promoted");
     if (release.build.status !== BuildStatus.succeeded)
       throw new BadRequestException("release build did not succeed");
+    const testResult = release.build.testResult;
+    if (
+      !testResult ||
+      typeof testResult !== "object" ||
+      Array.isArray(testResult) ||
+      (testResult as Record<string, unknown>).cleanInstall !== "passed"
+    )
+      throw new BadRequestException("clean-install acceptance is required before promotion");
+    if (release.manifests.length === 0)
+      throw new BadRequestException("a signed staging runtime manifest is required before promotion");
     if (
       release.artifacts.some(
         (artifact) =>
@@ -448,6 +473,10 @@ export class RuntimeService {
       await transaction.artifact.updateMany({
         where: { id: { in: release.artifacts.map(({ id: artifactId }) => artifactId) } },
         data: { status: ArtifactStatus.production, promotedAt: new Date() },
+      });
+      await transaction.runtimeBuild.update({
+        where: { id: release.buildId },
+        data: { promotionStatus: "production" },
       });
       const promoted = await transaction.runtimeRelease.update({
         where: { id },
@@ -477,10 +506,11 @@ export class RuntimeService {
   ) {
     const prisma = this.requireDatabase();
     const [release, target] = await Promise.all([
-      prisma.runtimeRelease.findUnique({ where: { id } }),
+      prisma.runtimeRelease.findUnique({ where: { id }, include: { build: true } }),
       prisma.runtimeRelease.findUnique({
         where: { id: targetReleaseId },
         include: {
+          build: true,
           manifests: {
             where: { channel: Channel.production, status: "published" },
             take: 1,
@@ -501,6 +531,14 @@ export class RuntimeService {
       const rolledBack = await transaction.runtimeRelease.update({
         where: { id },
         data: { status: ReleaseStatus.rolled_back, rolledBackAt: new Date() },
+      });
+      await transaction.runtimeBuild.update({
+        where: { id: release.buildId },
+        data: { promotionStatus: "rolled_back" },
+      });
+      await transaction.runtimeBuild.update({
+        where: { id: target.buildId },
+        data: { promotionStatus: "production" },
       });
       await transaction.releaseRollback.create({
         data: { releaseId: id, targetReleaseId, reason, actor },

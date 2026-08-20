@@ -4,6 +4,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  IsUrl,
   Matches,
   MaxLength,
   MinLength,
@@ -19,6 +20,15 @@ export class RegisterBuildDto {
   @IsString()
   @Matches(/^[a-f0-9]{7,64}$/i)
   portsideCommit!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  workflowRunId?: string;
+
+  @IsOptional()
+  @IsUrl({ protocols: ["https"], require_protocol: true })
+  workflowURL?: string;
 
   @IsEnum(BuildStatus)
   status!: BuildStatus;
@@ -37,6 +47,10 @@ export class RegisterBuildDto {
   @IsOptional()
   @IsObject()
   sbom?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsObject()
+  testResult?: Record<string, unknown>;
 
   @IsArray()
   @IsString({ each: true })

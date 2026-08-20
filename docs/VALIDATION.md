@@ -23,6 +23,15 @@ round-tripping.
 
 ## Required graphical acceptance
 
+The reproducible operator-assisted flow is
+`./scripts/validate-clean-install.sh`, launched by the manual
+`.github/workflows/validate-clean-install.yml` workflow. It must run on a
+self-hosted Apple-silicon Mac with labels `self-hosted`, `macos`, and `arm64`,
+logged into the desktop session that will receive the Dock/window. The
+selected runner must have Accessibility permission for its runner account.
+The workflow downloads the signed runtime artifact from a selected build run;
+it does not consult an upstream URL or a native Steam installation.
+
 The following must be checked on a real macOS display for the migrated Portside
 build:
 
@@ -38,6 +47,19 @@ build:
 9. After login, a test game can be downloaded, installed, launched and closed.
 10. The required first game check is GunZ: The Duel, App ID 3139440; this does
     not imply that every Steam game is supported.
+
+The script accepts `YES` only after each visual check is performed by the
+operator. A missing signature, checksum mismatch, missing component or failed
+process step fails the run. It stores only sanitized logs and a harmless
+validation marker inside the disposable prefix. When a previous workflow
+artifact is supplied, it replaces the wrapper while retaining the same prefix
+and checks that marker before and after the replacement; the operator still
+confirms the rollback/update behavior on screen.
+
+GitHub Actions steps normally have no interactive TTY. In that case the script
+opens the candidate wrapper, leaves it running, exits without claiming success,
+and uploads the sanitized logs; the visual checks must then be performed from a
+logged-in Terminal on the self-hosted Mac with the same artifact directory.
 
 The automated monitor intentionally records only visibleButUnverified when it
 sees a managed on-screen window. It never records uiReady from process
@@ -64,6 +86,23 @@ game compatibility
 Logs are under the Portside Application Support Logs directory; diagnostics
 are sanitized and do not include passwords, cookies, tokens, Steam IDs,
 screenshots or full user paths.
+
+## Completion matrix
+
+| Acceptance item | Current evidence | Status |
+| --- | --- | --- |
+| Portside-owned wrapper and native host | local `build-wrapper.sh`, Mach-O host and Swift tests | SIM |
+| Wine engine from vendored source | local source build, archive and clean-layout validation | SIM |
+| Winetricks from vendored source | local archive and clean-layout validation | SIM |
+| Three artifacts with checksums/provenance/SBOM | local unsigned manifest validation | SIM |
+| Signed staging manifest and both buckets | requires CI signing/storage secrets and promotion records | BLOQUEADO |
+| Production manifest and rollback publication | requires protected backend/storage promotion | BLOQUEADO |
+| Clean prefix and official Valve Steam verb | script is ready; no acceptance run is claimed here | PENDENTE |
+| Login window, field interaction and Steam persistence | requires the operator on a real GUI session | BLOQUEADO |
+| Free control game launch | requires the operator after login | BLOQUEADO |
+
+Only after the operator records `testResult.cleanInstall = "passed"` against the
+successful build may the backend promote its staging release.
 
 ## Baseline evidence
 

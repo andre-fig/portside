@@ -288,11 +288,15 @@ model RuntimeBuild {
   id              String           @id @default(cuid())
   version         String
   portsideCommit  String
+  workflowRunId   String?          @unique
+  workflowURL     String?
   status          BuildStatus      @default(queued)
+  promotionStatus String           @default("not_promoted")
   environment     Json
   toolchain       Json?
   provenance      Json?
   sbom            Json?
+  testResult      Json?
   startedAt       DateTime?
   finishedAt      DateTime?
   createdAt       DateTime         @default(now())

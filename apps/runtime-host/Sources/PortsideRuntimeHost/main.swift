@@ -3,8 +3,8 @@ import Darwin
 
 /// Native launcher for a Portside runtime. It deliberately uses Foundation's
 /// Process API with an executable URL and an argument array; no command string
-/// is handed to a shell. Winetricks is itself a POSIX script, so it is invoked
-/// as a file by /bin/bash without shell interpolation.
+/// is handed to a shell. Winetricks is an executable vendored script and is
+/// launched directly so its own shebang selects the interpreter.
 @main
 struct PortsideRuntimeHost {
     struct Configuration: Decodable {
@@ -31,7 +31,6 @@ struct PortsideRuntimeHost {
     }
 
     static func run(arguments: [String], bundle: URL, configuration: Configuration) async throws -> Int32 {
-        let sharedSupport = bundle.appendingPathComponent("Contents/SharedSupport", isDirectory: true)
         let engine = bundle.appendingPathComponent(configuration.wineRelativePath)
         let prefix = bundle.appendingPathComponent(configuration.prefixRelativePath)
         let winetricks = bundle.appendingPathComponent(configuration.winetricksRelativePath)
@@ -39,7 +38,7 @@ struct PortsideRuntimeHost {
         try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: true)
         let environment = runtimeEnvironment(engine: engine, prefix: prefix, configuration: configuration)
 
-        let request = try command(arguments: arguments, bundle: bundle, sharedSupport: sharedSupport, engine: engine, winetricks: winetricks, configuration: configuration)
+        let request = try command(arguments: arguments, engine: engine, winetricks: winetricks, configuration: configuration)
         writeLog("starting \(request.label) version=\(configuration.version) renderer=WineD3D prefix=\(relative(prefix, from: bundle))")
 
         let process = Process()
@@ -68,7 +67,7 @@ struct PortsideRuntimeHost {
         let arguments: [String]
     }
 
-    static func command(arguments: [String], bundle: URL, sharedSupport: URL, engine: URL, winetricks: URL, configuration: Configuration) throws -> Command {
+    static func command(arguments: [String], engine: URL, winetricks: URL, configuration: Configuration) throws -> Command {
         let wine = try executable(in: engine, names: ["wine64", "wine"])
         if arguments.first == "--version" {
             return Command(label: "version", executable: wine, arguments: ["--version"])
@@ -81,7 +80,7 @@ struct PortsideRuntimeHost {
             guard FileManager.default.isExecutableFile(atPath: winetricks.path), arguments.count > 1 else {
                 throw HostError.missingFile("winetricks")
             }
-            return Command(label: "runtime component setup", executable: URL(fileURLWithPath: "/bin/bash"), arguments: [winetricks.path] + Array(arguments.dropFirst()))
+            return Command(label: "runtime component setup", executable: winetricks, arguments: Array(arguments.dropFirst()))
         }
         if arguments.first == "--program" {
             guard arguments.count > 1 else { throw HostError.invalidArguments }
