@@ -203,8 +203,9 @@ jobs:
           SIGNING_P12="$RUNNER_TEMP/portside-developer-id.p12"
           SIGNING_CERT="$RUNNER_TEMP/portside-developer-id.cer"
           SIGNING_PRIVATE_KEY="$RUNNER_TEMP/portside-developer-id-private.key"
+          SIGNING_EMBEDDED_CERT="$RUNNER_TEMP/portside-developer-id-embedded.cer"
           SIGNING_COMBINED_P12="$RUNNER_TEMP/portside-developer-id-combined.p12"
-          trap 'rm -f "$SIGNING_P12" "$SIGNING_CERT" "$SIGNING_PRIVATE_KEY" "$SIGNING_COMBINED_P12"' EXIT
+          trap 'rm -f "$SIGNING_P12" "$SIGNING_CERT" "$SIGNING_PRIVATE_KEY" "$SIGNING_EMBEDDED_CERT" "$SIGNING_COMBINED_P12"' EXIT
           security create-keychain -p '' "$SIGNING_KEYCHAIN"
           security set-keychain-settings -lut 21600 "$SIGNING_KEYCHAIN"
           security unlock-keychain -p '' "$SIGNING_KEYCHAIN"
@@ -234,6 +235,19 @@ jobs:
             exit 1
           fi
           private_key_hash="$(openssl pkey -in "$SIGNING_PRIVATE_KEY" -pubout -outform der 2>/dev/null | shasum -a 256 | awk '{print $1}')"
+          if openssl pkcs12 -in "$SIGNING_P12" -clcerts -nokeys \
+            -passin env:PORTSIDE_P12_PASSWORD -out "$SIGNING_EMBEDDED_CERT" 2>/dev/null \
+            && openssl x509 -in "$SIGNING_EMBEDDED_CERT" -noout >/dev/null 2>&1; then
+            embedded_certificate_key_hash="$(openssl x509 -in "$SIGNING_EMBEDDED_CERT" -pubkey -noout | openssl pkey -pubin -outform der 2>/dev/null | shasum -a 256 | awk '{print $1}')"
+            if [ "$private_key_hash" = "$embedded_certificate_key_hash" ]; then
+              cp "$SIGNING_EMBEDDED_CERT" "$SIGNING_CERT"
+              security import "$SIGNING_CERT" -A -f pemseq -t cert -k "$SIGNING_KEYCHAIN"
+              security set-key-partition-list -S apple-tool:,apple: -s -k '' "$SIGNING_KEYCHAIN"
+              if security find-identity -v -p codesigning "$SIGNING_KEYCHAIN" | grep -F "$PORTSIDE_CODESIGN_IDENTITY"; then
+                exit 0
+              fi
+            fi
+          fi
           certificate_key_hash="$(openssl x509 -in "$SIGNING_CERT" -pubkey -noout | openssl pkey -pubin -outform der 2>/dev/null | shasum -a 256 | awk '{print $1}')"
           test -n "$private_key_hash" && test -n "$certificate_key_hash"
           if [ "$private_key_hash" != "$certificate_key_hash" ]; then
