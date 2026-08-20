@@ -225,7 +225,9 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k '' "$SIGNING_KEYCHAIN"
           security list-keychains -d user -s "$SIGNING_KEYCHAIN"
           security default-keychain -s "$SIGNING_KEYCHAIN"
-          if security find-identity -v -p codesigning "$SIGNING_KEYCHAIN" | grep -F "$PORTSIDE_CODESIGN_IDENTITY"; then
+          signing_identity="$(security find-identity -v -p codesigning "$SIGNING_KEYCHAIN" | awk -F '"' '/Developer ID Application:/{print $2; exit}')"
+          if [ -n "$signing_identity" ]; then
+            printf 'PORTSIDE_CODESIGN_IDENTITY=%s\n' "$signing_identity" >> "$GITHUB_ENV"
             exit 0
           fi
           export PORTSIDE_P12_PASSWORD="$CODESIGN_P12_PASSWORD"
@@ -258,7 +260,9 @@ jobs:
             -name "$PORTSIDE_CODESIGN_IDENTITY" -passout env:PORTSIDE_P12_PASSWORD \
             -out "$SIGNING_COMBINED_P12" 2>/dev/null
           security import "$SIGNING_COMBINED_P12" -P "$CODESIGN_P12_PASSWORD" -A -f pkcs12 -k "$SIGNING_KEYCHAIN"
-          security find-identity -v -p codesigning "$SIGNING_KEYCHAIN" | grep -F "$PORTSIDE_CODESIGN_IDENTITY"
+          signing_identity="$(security find-identity -v -p codesigning "$SIGNING_KEYCHAIN" | awk -F '"' '/Developer ID Application:/{print $2; exit}')"
+          test -n "$signing_identity"
+          printf 'PORTSIDE_CODESIGN_IDENTITY=%s\n' "$signing_identity" >> "$GITHUB_ENV"
 
       - name: Build unsigned configured app
         env:
