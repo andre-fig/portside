@@ -312,8 +312,13 @@ Environment `staging` deve conter `PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX`,
 `PORTSIDE_MANIFEST_SIGNING_KEY_ID`, `PORTSIDE_MANIFEST_SIGNING_KEY`,
 `PORTSIDE_PUBLIC_BUCKET`, `PORTSIDE_SECONDARY_PUBLIC_BUCKET`,
 `PORTSIDE_S3_ACCESS_KEY_ID`, `PORTSIDE_S3_SECRET_ACCESS_KEY`,
-`PORTSIDE_S3_REGION` e, quando necessário, `PORTSIDE_S3_ENDPOINT`. Todos
-devem ficar em GitHub Environments,
+`PORTSIDE_S3_REGION`, `PORTSIDE_S3_ENDPOINT`,
+`PORTSIDE_SECONDARY_S3_ACCESS_KEY_ID`,
+`PORTSIDE_SECONDARY_S3_SECRET_ACCESS_KEY`,
+`PORTSIDE_SECONDARY_S3_REGION` e `PORTSIDE_SECONDARY_S3_ENDPOINT`. Esses
+valores são cópias das credenciais dos dois buckets S3-compatible criados no
+Railway; o runner do GitHub não lê variáveis do Railway automaticamente.
+Todos devem ficar em GitHub Environments,
 Keychain ou secret manager. O Railway hospeda API/worker/cron e PostgreSQL; os
 arquivos de runtime e releases ficam em storage de objetos primário e
 secundário. O bucket e os hosts reais ainda precisam ser configurados pelo
