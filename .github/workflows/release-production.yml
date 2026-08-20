@@ -199,7 +199,7 @@ jobs:
           security set-keychain-settings -lut 21600 "$SIGNING_KEYCHAIN"
           security unlock-keychain -p '' "$SIGNING_KEYCHAIN"
           printf '%s' "$CODESIGN_P12_BASE64" | base64 -D > "$SIGNING_P12"
-          security import "$SIGNING_P12" -P "$CODESIGN_P12_PASSWORD" -A -t cert -f pkcs12 -k "$SIGNING_KEYCHAIN"
+          security import "$SIGNING_P12" -P "$CODESIGN_P12_PASSWORD" -A -f pkcs12 -k "$SIGNING_KEYCHAIN"
           security set-key-partition-list -S apple-tool:,apple: -s -k '' "$SIGNING_KEYCHAIN"
           security list-keychains -d user -s "$SIGNING_KEYCHAIN"
           security default-keychain -s "$SIGNING_KEYCHAIN"
