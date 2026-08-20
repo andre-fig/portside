@@ -5,14 +5,17 @@ commercial control plane. The app bundle contains Portside code only. Runtime
 components are selected by a signed manifest and downloaded from Portside-owned
 HTTPS storage using short-lived URLs.
 
-There are three operational environments:
+There is one Railway operational environment plus local and logical release
+states:
 
 - `development`: local Debug builds may use the pinned official sources for
   validation. No production license bypass is compiled into Release.
-- `staging`: a separate Railway project, database, bucket prefix, update feed,
-  signing key IDs and test licenses.
-- `production`: a separate Railway project, database, bucket and key set. A
-  staging result and an authorized promotion are required before production.
+- `validation`: a logical release channel in the production Railway project,
+  object storage and database. GitHub Actions uses its protected `production`
+  Environment for secrets and approvals.
+- `production`: the promoted release state in the same Railway project,
+  database, buckets and API. An authorized promotion is still required before
+  customer distribution.
 
 The repository does not contain Railway IDs, passwords, signing keys, a
 Developer ID identity, a Sparkle private key or a license-signing private key.
@@ -25,7 +28,7 @@ Commercial release gates:
 3. macOS validation of the real Steam window with the approved runtime.
 4. Developer ID signing, Hardened Runtime, notarization and stapling.
 5. Sparkle EdDSA appcast and runtime-manifest signatures verified.
-6. Staging activation/update/rollback tests pass.
+6. Validation-channel activation/update/rollback tests pass.
 7. Manual authorized promotion to production.
 
 Local/CI command sequence (the variables are intentionally not supplied here):

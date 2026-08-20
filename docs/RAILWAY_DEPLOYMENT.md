@@ -1,7 +1,10 @@
 # Railway deployment runbook
 
-Create separate Railway projects for `staging` and `production`. In each
-project create independent services for:
+The Portside deployment uses the existing Railway `production` environment.
+Do not create or assume a separate Railway staging environment. Logical
+validation and production channels are represented by the Portside release
+state and object-storage prefixes, not by another Railway project. Create or
+maintain these services in production:
 
 1. API using `apps/backend/railway.api.json`.
 2. PostgreSQL with automated backups and a tested restore procedure.
@@ -19,7 +22,7 @@ command, inside the service network where the private PostgreSQL hostname is
 available.
 
 ```sh
-railway link --project <staging-project-id> --environment staging
+railway link --project <production-project-id> --environment production
 railway up --service api
 railway up --service sync-worker
 railway up --service upstream-cron
@@ -33,7 +36,8 @@ The sync worker additionally needs a read-only `PORTSIDE_GITHUB_TOKEN`,
 `PORTSIDE_GITHUB_REPOSITORY=andre-fig/portside` and
 `PORTSIDE_RUNTIME_WORKFLOW=build-runtime.yml` to reconcile workflow runs. It
 records workflow/test state but cannot promote or publish a release.
-Use different values and key IDs for staging and production.
+Keep release state and key rotation explicit in the production control plane;
+the repository does not assume a second Railway environment.
 Configure both primary and secondary S3-compatible credentials; a production
 deployment must never rely on Railway's ephemeral filesystem. Store the
 manifest signing private key only in the CI/administrative secret store and
@@ -52,7 +56,7 @@ promoted into Portside object storage.
 ## Runtime build secrets from Railway
 
 `Build Portside Runtime` executes on GitHub's macOS runner, so it cannot read
-Railway variables automatically. The GitHub Environment named `staging` must
+Railway variables automatically. The GitHub Environment named `production` must
 contain a copy of the Railway bucket connection values. The mapping is:
 
 | GitHub Actions secret | Railway source |

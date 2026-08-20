@@ -29,10 +29,10 @@ permissions:
 
 jobs:
   build-runtime:
-    name: Build and publish staging runtime
+    name: Build and publish validation runtime
     runs-on: macos-15
     timeout-minutes: 180
-    environment: staging
+    environment: production
     env:
       PORTSIDE_RUNTIME_VERSION: ${{ inputs.version || format('0.1.{0}', github.run_number) }}
       PORTSIDE_RUNTIME_CHANNEL: staging

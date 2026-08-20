@@ -313,7 +313,7 @@ verificado na Stripe e disponibilidade real do dispositivo/navegador.
 O CI precisa de Developer ID Application, perfil `notarytool`, chave privada
 Sparkle, chave privada do manifesto, configuração da Stripe, token admin do
 backend e credenciais dos buckets. Para o workflow automático de runtime, o
-Environment `staging` deve conter `PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX`,
+Environment `production` deve conter `PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX`,
 `PORTSIDE_MANIFEST_SIGNING_KEY_ID`, `PORTSIDE_MANIFEST_SIGNING_KEY`,
 `PORTSIDE_PUBLIC_BUCKET`, `PORTSIDE_SECONDARY_PUBLIC_BUCKET`,
 `PORTSIDE_S3_ACCESS_KEY_ID`, `PORTSIDE_S3_SECRET_ACCESS_KEY`,
@@ -323,8 +323,9 @@ Environment `staging` deve conter `PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX`,
 `PORTSIDE_SECONDARY_S3_REGION` e `PORTSIDE_SECONDARY_S3_ENDPOINT`. Esses
 valores são cópias das credenciais dos dois buckets S3-compatible criados no
 Railway; o runner do GitHub não lê variáveis do Railway automaticamente.
-No estado atual, o Environment `staging` já está configurado com esses valores
-e a última build de runtime validada publicou nos dois buckets. Todos devem
+Os valores precisam ser recadastrados no Environment `production`, porque o
+GitHub não permite ler secrets criptografados para copiá-los automaticamente.
+A última build de runtime validada publicou nos dois buckets. Todos devem
 ficar em GitHub Environments,
 Keychain ou secret manager. O Railway hospeda API/worker/cron e PostgreSQL; os
 arquivos de runtime e releases ficam em storage de objetos primário e

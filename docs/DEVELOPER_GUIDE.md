@@ -226,11 +226,11 @@ Não confunda uma atualização do app com uma atualização do runtime.
 | `ci.yml` / CI | push e PR para `main` | política de produção, Swift, Prisma, typecheck, lint, testes e build backend | corrigir/revisar e mergear |
 | `build-desktop.yml` | CI concluído com sucesso na `main` ou dispatch | ZIP, DMG e dSYM unsigned de validação | abrir/inspecionar localmente se necessário |
 | `build-landing.yml` | mudanças na landing, PR, push ou dispatch | lint, `.output` e artifact de build | deploy público do provedor |
-| `build-runtime.yml` | mudanças em fontes/runtime na `main` ou dispatch | runtime próprio, manifesto assinado, evidência e publicação em staging | validar GUI e promover |
+| `build-runtime.yml` | mudanças em fontes/runtime na `main` ou dispatch | runtime próprio, manifesto assinado, evidência e publicação no canal de validação | validar GUI e promover |
 | `sync-upstreams.yml` | diariamente às 03:17 UTC ou dispatch | PR com novos snapshots/lock/checksums | revisar licença/diff e mergear |
 | `validate-clean-install.yml` | dispatch | instalação limpa e logs de aceitação em Mac self-hosted | sessão gráfica, login e janela real |
 | `deploy-railway.yml` / Verify Railway | CI concluído na `main` | healthcheck da API | investigar se `/health` falhar |
-| `release-production.yml` | dispatch com versão | release app/runtime staging, assinatura/notarização e artifact para promoção | configurar secrets, aceitar staging e aprovar production |
+| `release-production.yml` | dispatch com versão | release app/runtime de validação, assinatura/notarização e artifact para promoção | configurar secrets e aprovar production |
 
 ### CI e desktop
 
@@ -310,9 +310,10 @@ não publica automaticamente uma release de usuário, embora mudanças em
 8. gera appcast assinado;
 9. publica staging nos dois buckets.
 
-O job `promote-production` só é elegível com `promote=true`, depende do estágio
-e usa o Environment protegido `production`. Promoção não deve ser tratada como
-consequência automática de uma build verde.
+Os jobs de publicação usam o Environment GitHub protegido `production`. O job
+`promote-production` só é elegível com `promote=true` e depende da validação
+anterior. Promoção não deve ser tratada como consequência automática de uma
+build verde.
 
 ## 6. Railway e secrets
 
@@ -328,7 +329,7 @@ manifestos, SBOM e backups precisam ficar no storage de objetos primário e na
 réplica. O backend e os workflows devem usar credenciais separadas para cada
 bucket.
 
-O GitHub Environment `staging` contém, sem expor valores no repositório, o
+O GitHub Environment `production` contém, sem expor valores no repositório, o
 prefixo de URL, key ID/chave do manifesto, nomes dos buckets e credenciais S3
 primária/secundária. A chave privada usada para assinar manifestos fica apenas
 no CI/secret manager; a API recebe a chave pública para verificação.

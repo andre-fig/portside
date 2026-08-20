@@ -130,7 +130,7 @@ explícitas.
   grave em `.env` versionado, `Info.plist`, logs, fixtures ou documentação.
 - O Railway hospeda API, worker, cron, PostgreSQL e os dois buckets S3
   compatíveis. O runner GitHub precisa receber cópias das credenciais dos
-  buckets no Environment `staging`; ele não lê variáveis do Railway sozinho.
+  buckets no Environment `production`; ele não lê variáveis do Railway sozinho.
 - A chave privada do manifesto permanece no CI/secret manager. O backend recebe
   apenas a chave pública. O mesmo princípio vale para Sparkle, Developer ID,
   notarização, Stripe e token administrativo.

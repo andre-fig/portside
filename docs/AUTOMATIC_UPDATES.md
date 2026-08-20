@@ -2,7 +2,7 @@
 
 The local `scripts/package_app.sh` path is a development/validation bundle. It intentionally leaves the commercial feed, API and public keys empty and writes `PortsideBuildChannel=development`.
 
-Customer releases use `.github/workflows/release-production.yml`. The protected `staging` environment must provide:
+Customer releases use `.github/workflows/release-production.yml`. The protected GitHub `production` Environment must provide:
 
 - `PORTSIDE_API_BASE_URL`
 - `PORTSIDE_UPDATE_FEED_URL`
@@ -13,7 +13,9 @@ Customer releases use `.github/workflows/release-production.yml`. The protected 
 - `PORTSIDE_LICENSE_KEY_ID`
 - `PORTSIDE_PUBLIC_BASE_URL`
 - `PORTSIDE_PUBLIC_BUCKET` and `PORTSIDE_SECONDARY_PUBLIC_BUCKET`
-- `PORTSIDE_CODESIGN_IDENTITY` and `PORTSIDE_NOTARY_PROFILE`
+- `PORTSIDE_CODESIGN_IDENTITY`
+- `PORTSIDE_CODESIGN_P12_BASE64` and `PORTSIDE_CODESIGN_P12_PASSWORD`
+- `PORTSIDE_NOTARY_PROFILE`
 - `PORTSIDE_SPARKLE_PRIVATE_KEY`
 - `PORTSIDE_MANIFEST_SIGNING_KEY`
 - `PORTSIDE_RUNTIME_MANIFEST_JSON`
@@ -41,7 +43,8 @@ For the first real customer release, create Sparkle keys with the `generate_keys
 tool shipped in Sparkle, register the public key as
 `PORTSIDE_SPARKLE_PUBLIC_KEY`, configure a macOS Developer ID identity and a
 `notarytool` keychain profile, then add the secrets above to the GitHub
-Environments. Railway API and dual-bucket runtime staging are configured. The
+Environments. The Railway API and dual-bucket runtime storage are configured in
+the single production environment. The
 buckets remain private and the runtime manifest now uses the stable Portside
 API `/v1/runtime/artifacts/<channel>/<fileName>` route, which returns a
 short-lived signed storage redirect. The API manifest must still be published

@@ -38,7 +38,8 @@ runtime substitutions are not accepted by the production recipe.
 
 The local macOS build has produced the Portside wrapper, Wine engine and
 Winetricks archives from checked-in sources. The clean archive layout and
-unsigned manifest checks pass. The GitHub Actions staging build is configured
+unsigned manifest checks pass. The GitHub Actions validation build uses the
+protected `production` Environment and is configured
 with the manifest key and separate primary/secondary Railway bucket
 credentials; its latest validated execution signed the manifest and replicated
 the runtime evidence to both buckets. This proves source compilation,
@@ -49,9 +50,9 @@ self-hosted Mac. The lockfile is not updated from an incomplete build.
 ## Publication
 
 `build-runtime.yml` builds on the pinned macOS runner after source/runtime
-merges on `main` (or a manual dispatch), signs the manifest and publishes only
-to staging. The protected GitHub Environment `staging` must provide the
-manifest-signing key, both bucket names, an HTTPS
+merges on `main` (or a manual dispatch), signs the manifest and publishes the
+logical validation channel. The protected GitHub Environment `production` must
+provide the manifest-signing key, both bucket names, an HTTPS
 `PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX` and
 S3-compatible credentials for both Railway buckets (`PORTSIDE_S3_ACCESS_KEY_ID`,
 `PORTSIDE_S3_SECRET_ACCESS_KEY`, `PORTSIDE_S3_REGION`,
