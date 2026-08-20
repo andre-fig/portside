@@ -17,7 +17,7 @@ Customer releases use `.github/workflows/release-production.yml`. The protected 
 - `PORTSIDE_CODESIGN_P12_BASE64` and `PORTSIDE_CODESIGN_P12_PASSWORD`
 - `PORTSIDE_NOTARY_KEY_ID`
 - `PORTSIDE_NOTARY_ISSUER_ID`
-- `PORTSIDE_NOTARY_P8_BASE64`
+- `PORTSIDE_NOTARY_P8`
 - `PORTSIDE_SPARKLE_PRIVATE_KEY`
 - `PORTSIDE_MANIFEST_SIGNING_KEY`
 - `PORTSIDE_RUNTIME_MANIFEST_JSON`
@@ -45,10 +45,11 @@ For the first real customer release, create Sparkle keys with the `generate_keys
 tool shipped in Sparkle, register the public key as
 `PORTSIDE_SPARKLE_PUBLIC_KEY`, configure a macOS Developer ID identity and a
 Team App Store Connect API Key for `notarytool`, then add the secrets above to
-the GitHub `production` Environment. `PORTSIDE_NOTARY_P8_BASE64` contains the
-Base64 encoding of the downloaded `.p8` private key; it is materialized only
-inside the ephemeral runner and removed after the job. The Railway API and
-dual-bucket runtime storage are configured in
+the GitHub `production` Environment. `PORTSIDE_NOTARY_P8` contains the
+multiline contents of the downloaded `.p8` private key; it is materialized only
+inside the ephemeral runner and removed after the job. The previous
+`PORTSIDE_NOTARY_P8_BASE64` secret remains a temporary fallback for older
+configurations. The Railway API and dual-bucket runtime storage are configured in
 the single production environment. The
 buckets remain private and the runtime manifest now uses the stable Portside
 API `/v1/runtime/artifacts/<channel>/<fileName>` route, which returns a
