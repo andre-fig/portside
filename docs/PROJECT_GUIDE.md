@@ -218,7 +218,9 @@ export PORTSIDE_LICENSE_PUBLIC_KEY=...
 export PORTSIDE_LICENSE_KEY_ID=...
 export PORTSIDE_ARTIFACT_HOSTS=artifacts.example.com
 export PORTSIDE_CODESIGN_IDENTITY='Developer ID Application: Sua Empresa (TEAMID)'
-export PORTSIDE_NOTARY_PROFILE=portside-notary
+export PORTSIDE_NOTARY_KEY_ID=<APP_STORE_CONNECT_KEY_ID>
+export PORTSIDE_NOTARY_ISSUER_ID=<APP_STORE_CONNECT_ISSUER_ID>
+export PORTSIDE_NOTARY_KEY_PATH=/fora-do-repo/AuthKey_<APP_STORE_CONNECT_KEY_ID>.p8
 
 ./scripts/build_release.sh
 PORTSIDE_MANIFEST_SIGNING_KEY_FILE=/fora-do-repo/manifest.key \
@@ -230,8 +232,9 @@ PORTSIDE_MANIFEST_SIGNING_KEY_FILE=/fora-do-repo/manifest.key \
 ```
 
 O exemplo acima é um roteiro: `build_release.sh` exige todas as variáveis
-listadas no próprio script e valores reais. O perfil `notarytool` deve ser
-criado previamente no Keychain pelo operador autorizado. O resultado esperado é
+listadas no próprio script e valores reais. A Team API Key deve ser criada no
+App Store Connect e o arquivo `.p8` deve permanecer fora do repositório. O
+resultado esperado é
 um app assinado, um ZIP notarizado e um DMG notarizado com ticket stapled no
 `.app` e no `.dmg`.
 
@@ -311,7 +314,8 @@ verificado na Stripe e disponibilidade real do dispositivo/navegador.
 
 ## Secrets e infraestrutura
 
-O CI precisa de Developer ID Application, perfil `notarytool`, chave privada
+O CI precisa de Developer ID Application, Team API Key do App Store Connect,
+chave privada
 Sparkle, chave privada do manifesto, configuração da Stripe, token admin do
 backend e credenciais dos buckets. Para o workflow automático de runtime, o
 Environment `production` deve conter `PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX`,

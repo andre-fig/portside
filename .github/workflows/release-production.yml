@@ -54,7 +54,8 @@ jobs:
       PORTSIDE_SECONDARY_S3_ENDPOINT: ${{ secrets.PORTSIDE_SECONDARY_S3_ENDPOINT }}
       PORTSIDE_PUBLIC_BASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}
       PORTSIDE_CODESIGN_IDENTITY: ${{ secrets.PORTSIDE_CODESIGN_IDENTITY }}
-      PORTSIDE_NOTARY_PROFILE: ${{ secrets.PORTSIDE_NOTARY_PROFILE }}
+      PORTSIDE_NOTARY_KEY_ID: ${{ secrets.PORTSIDE_NOTARY_KEY_ID }}
+      PORTSIDE_NOTARY_ISSUER_ID: ${{ secrets.PORTSIDE_NOTARY_ISSUER_ID }}
       PORTSIDE_CONFIRM_PRODUCTION: "NO"
     steps:
       - name: Check out tested sources
@@ -162,10 +163,23 @@ jobs:
           printf '%s' "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/portside-sparkle-ed25519.key"
           printf '%s' "$MANIFEST_PRIVATE_KEY" > "$RUNNER_TEMP/portside-manifest-ed25519.key"
 
+      - name: Materialize App Store Connect notary key
+        env:
+          NOTARY_P8_BASE64: ${{ secrets.PORTSIDE_NOTARY_P8_BASE64 }}
+        run: |
+          set -eu
+          umask 077
+          test -n "$NOTARY_P8_BASE64"
+          notary_key_path="$RUNNER_TEMP/portside-notary-key.p8"
+          printf '%s' "$NOTARY_P8_BASE64" | base64 -D > "$notary_key_path"
+          test -s "$notary_key_path"
+          openssl pkey -in "$notary_key_path" -noout
+          printf 'PORTSIDE_NOTARY_KEY_PATH=%s\n' "$notary_key_path" >> "$GITHUB_ENV"
+
       - name: Validate release inputs without printing secrets
         run: |
           set -eu
-          for value in "$PORTSIDE_VERSION" "$PORTSIDE_API_BASE_URL" "$PORTSIDE_UPDATE_FEED_URL" "$PORTSIDE_SPARKLE_PUBLIC_KEY" "$PORTSIDE_RUNTIME_MANIFEST_PUBLIC_KEY" "$PORTSIDE_LICENSE_PUBLIC_KEY" "$PORTSIDE_LICENSE_KEY_ID" "$PORTSIDE_ARTIFACT_HOSTS" "$PORTSIDE_PUBLIC_BASE_URL" "$PORTSIDE_CODESIGN_IDENTITY" "$PORTSIDE_NOTARY_PROFILE"; do
+          for value in "$PORTSIDE_VERSION" "$PORTSIDE_API_BASE_URL" "$PORTSIDE_UPDATE_FEED_URL" "$PORTSIDE_SPARKLE_PUBLIC_KEY" "$PORTSIDE_RUNTIME_MANIFEST_PUBLIC_KEY" "$PORTSIDE_LICENSE_PUBLIC_KEY" "$PORTSIDE_LICENSE_KEY_ID" "$PORTSIDE_ARTIFACT_HOSTS" "$PORTSIDE_PUBLIC_BASE_URL" "$PORTSIDE_CODESIGN_IDENTITY" "$PORTSIDE_NOTARY_KEY_ID" "$PORTSIDE_NOTARY_ISSUER_ID" "$PORTSIDE_NOTARY_KEY_PATH"; do
             test -n "$value"
             case "$value" in *example.invalid*) echo "placeholder release value" >&2; exit 1;; esac
           done
@@ -240,6 +254,14 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: ${{ runner.temp }}/portside-release
+
+      - name: Remove CI-only private keys
+        if: ${{ always() }}
+        run: |
+          set -eu
+          rm -f "$RUNNER_TEMP/portside-notary-key.p8" \
+            "$RUNNER_TEMP/portside-sparkle-ed25519.key" \
+            "$RUNNER_TEMP/portside-manifest-ed25519.key"
 
   promote-production:
     name: Promote reviewed staging release to production

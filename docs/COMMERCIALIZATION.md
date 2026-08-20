@@ -50,7 +50,10 @@ PORTSIDE_RUNTIME_MANIFEST_INPUT=/secure/unsigned-runtime-manifest.json \
 PORTSIDE_MANIFEST_SIGNING_KEY_FILE=/secure/manifest-signing-key.pem \
 ./scripts/sign_release.sh
 
-PORTSIDE_VERSION=1.0.0 PORTSIDE_NOTARY_PROFILE=portside-notary \
+PORTSIDE_VERSION=1.0.0 \
+PORTSIDE_NOTARY_KEY_ID=<APP_STORE_CONNECT_KEY_ID> \
+PORTSIDE_NOTARY_ISSUER_ID=<APP_STORE_CONNECT_ISSUER_ID> \
+PORTSIDE_NOTARY_KEY_PATH=/secure/AuthKey_<APP_STORE_CONNECT_KEY_ID>.p8 \
 ./scripts/notarize_release.sh
 
 SPARKLE_BIN="$PWD/.build/artifacts/sparkle/Sparkle/bin" \

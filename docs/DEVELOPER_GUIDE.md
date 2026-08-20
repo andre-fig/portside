@@ -433,7 +433,8 @@ Esse DMG não é para clientes.
 ### Release distribuível
 
 Use `release-production.yml` ou o conjunto de scripts com Developer ID,
-Sparkle, manifesto e perfil `notarytool` configurados fora do Git. A sequência
+Sparkle, manifesto e Team API Key do App Store Connect configurados fora do
+Git. A sequência
 é `build_release.sh` → `sign_release.sh` → `notarize_release.sh` →
 `validate_release_bundle.sh` → `generate_appcast.sh` → `publish_release.sh`.
 
