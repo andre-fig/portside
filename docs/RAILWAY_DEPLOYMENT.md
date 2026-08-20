@@ -68,22 +68,22 @@ contain a copy of the Railway bucket connection values. The mapping is:
 | `PORTSIDE_SECONDARY_S3_REGION` | secondary `region` |
 | `PORTSIDE_SECONDARY_S3_ENDPOINT` | secondary `endpoint` |
 
-`PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX` is the HTTPS virtual-host URL of the
-primary bucket followed by `runtime/staging/`, for example
-`https://<bucketName>.t3.storageapi.dev/runtime/staging/`. The bucket remains
-the Railway S3-compatible service; the GitHub secrets only grant the runner
-temporary access to publish there. The runtime workflow uses separate primary
-and secondary credentials and never writes to Railway's ephemeral service
-filesystem.
+`PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX` is the stable HTTPS API route used in
+the signed runtime manifest. For staging, it has the form
+`https://<api-host>/v1/runtime/artifacts/staging/`; the production GitHub
+Environment uses the same route with `/production/`. The backend maps the
+filename to `runtime/<channel>/<fileName>` and returns a short-lived signed
+redirect from the private primary bucket. The bucket remains the Railway
+S3-compatible service; GitHub secrets only grant the runner temporary
+publication access. The runtime workflow uses separate primary and secondary
+credentials and never writes to Railway's ephemeral service filesystem.
 
-The Railway buckets are private. Therefore, the virtual-host URL above is a
-storage identity used by the signed manifest, not an anonymously downloadable
-client URL; an unauthenticated request currently returns `403`. Before a
-desktop rollout, either expose a stable Portside API route that generates a
-short-lived signed object URL/redirect, or intentionally configure a public
-read policy and review its security impact. The successful runtime workflow
-proves source build, manifest signature and dual-bucket replication, but does
-not by itself prove an end-user desktop download.
+The Railway buckets are intentionally private. The desktop must allow the API
+host and the storage host used by the signed redirect; it still verifies the
+manifest signature, HTTPS host, size and SHA-256 after the redirect. The
+runtime workflow proves source build, manifest signature and dual-bucket
+replication. A client download is considered ready only after the API manifest
+is published for the channel and clean-install validation passes.
 
 The private `PORTSIDE_MANIFEST_SIGNING_KEY` exists only in GitHub Actions. Its
 matching public key is `MANIFEST_SIGNING_PUBLIC_KEY` in the Railway API. Do

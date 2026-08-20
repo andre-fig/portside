@@ -20,7 +20,7 @@ on:
         required: true
         type: string
       artifact_url_prefix:
-        description: "HTTPS staging object URL prefix, including the runtime channel path"
+        description: "HTTPS Portside API runtime download URL prefix, including the runtime channel path"
         required: true
         type: string
 
@@ -36,7 +36,7 @@ jobs:
     env:
       PORTSIDE_RUNTIME_VERSION: ${{ inputs.version || format('0.1.{0}', github.run_number) }}
       PORTSIDE_RUNTIME_CHANNEL: staging
-      PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX: ${{ inputs.artifact_url_prefix || secrets.PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX }}
+      PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX: ${{ inputs.artifact_url_prefix || secrets.PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX }}
       PORTSIDE_MANIFEST_SIGNING_KEY_ID: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY_ID }}
       PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
       PORTSIDE_SECONDARY_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_SECONDARY_PUBLIC_BUCKET }}
@@ -81,7 +81,7 @@ jobs:
             fi
           }
           for variable in \
-            PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX \
+            PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX \
             PORTSIDE_MANIFEST_SIGNING_KEY_ID \
             PORTSIDE_PUBLIC_BUCKET \
             PORTSIDE_SECONDARY_PUBLIC_BUCKET \
@@ -95,7 +95,10 @@ jobs:
             PORTSIDE_SECONDARY_S3_ENDPOINT; do
             require_env "$variable"
           done
-          case "$PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX" in https://*) ;; *) echo "artifact prefix must be HTTPS" >&2; exit 1;; esac
+          case "$PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX" in
+            https://*/v1/runtime/artifacts/staging/) ;;
+            *) echo "runtime download prefix must use the Portside signed-download route" >&2; exit 1;;
+          esac
 
       - name: Build wrapper, engine and winetricks from local sources
         run: ./scripts/build-runtime/build.sh

@@ -82,5 +82,6 @@ the staging runtime workflow has produced signed evidence in both buckets.
 This does not claim a customer release: Developer ID signature, notarization,
 production promotion, real-Mac GUI acceptance and an end-to-end desktop
 download still require their external result to be produced and recorded. The
-current buckets are private, so the desktop download proxy/redirect remains a
-required infrastructure step before rollout.
+current buckets are private; the backend now exposes the short-lived signed
+redirect used by runtime manifests, but the selected API manifest still needs
+to be published and validated end to end before rollout.

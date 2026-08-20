@@ -307,18 +307,19 @@ prefixo de URL, key ID/chave do manifesto, nomes dos buckets e credenciais S3
 primária/secundária. A chave privada usada para assinar manifestos fica apenas
 no CI/secret manager; a API recebe a chave pública para verificação.
 
-### Limitação atual importante
+### Acesso aos buckets privados
 
-Os buckets Railway estão privados. Portanto, o endereço virtual-host do bucket
-é uma identidade de armazenamento e não uma URL pública para o cliente; um
-download anônimo do manifesto pode responder `403`. O workflow já comprova
-build, assinatura e replicação em staging, mas isso ainda não é prova de que
-uma instalação limpa do desktop consegue baixar o runtime.
+Os buckets Railway continuam privados. Os manifestos novos devem apontar para
+`/v1/runtime/artifacts/<channel>/<fileName>` na API Portside. O backend valida
+o canal e o nome do archive, cria uma URL S3 temporária para
+`runtime/<channel>/<fileName>` no bucket primário e responde com redirect; as
+credenciais do bucket nunca chegam ao desktop.
 
-Antes do rollout do cliente, implemente e valide uma rota estável do backend
-que gere URL temporária/redirect assinado para o objeto, ou aprove uma política
-de leitura pública com revisão de segurança. Depois disso, atualize o host
-allowlist, o manifesto e a validação de instalação limpa. O detalhe operacional
+O desktop precisa ter na allowlist o host da API e o host de storage usado pelo
+redirect, mas continua verificando assinatura do manifesto, HTTPS, tamanho e
+SHA-256 após o download. A rota resolve o `403` do acesso direto ao bucket; a
+API ainda precisa ter um manifesto publicado para o canal escolhido e a
+instalação limpa precisa ser validada antes do rollout. O detalhe operacional
 está em [`RAILWAY_DEPLOYMENT.md`](RAILWAY_DEPLOYMENT.md).
 
 Nunca documente ou comite valores de `PORTSIDE_*_SECRET_*`, chaves privadas,

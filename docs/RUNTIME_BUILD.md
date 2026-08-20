@@ -17,12 +17,14 @@ Install the exact toolchain versions in `upstream/dependencies.json`, then run:
 ```sh
 PORTSIDE_RUNTIME_VERSION=0.1.0 \
 PORTSIDE_RUNTIME_CHANNEL=staging \
-PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX=https://artifacts.example.invalid/staging/runtime/ \
+PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX=https://api.example.invalid/v1/runtime/artifacts/staging/ \
 ./scripts/build-runtime/build.sh
 ```
 
-The URL is used only to construct the unsigned staging manifest. The build
-does not download a compiled wrapper, engine or Steam installer. Steam remains
+The URL is used only to construct the unsigned staging manifest. It must be the
+Portside API route, not the private bucket URL; the API redirects to a
+short-lived S3-signed URL for `runtime/<channel>/<fileName>`. The build does not
+download a compiled wrapper, engine or Steam installer. Steam remains
 an end-user installation performed by the `steam` winetricks verb.
 
 The engine recipe defaults to the host architecture (`arm64` on Apple silicon)
@@ -49,18 +51,19 @@ self-hosted Mac. The lockfile is not updated from an incomplete build.
 `build-runtime.yml` builds on the pinned macOS runner after source/runtime
 merges on `main` (or a manual dispatch), signs the manifest and publishes only
 to staging. The protected GitHub Environment `staging` must provide the
-manifest-signing key, both bucket names, an HTTPS artifact URL prefix and
+manifest-signing key, both bucket names, an HTTPS
+`PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX` and
 S3-compatible credentials for both Railway buckets (`PORTSIDE_S3_ACCESS_KEY_ID`,
 `PORTSIDE_S3_SECRET_ACCESS_KEY`, `PORTSIDE_S3_REGION`,
 `PORTSIDE_S3_ENDPOINT` and the corresponding `PORTSIDE_SECONDARY_S3_*`
 values). `publish_runtime_staging.sh` writes the archives,
 manifest, provenance and SBOM to the primary and secondary object stores.
-The Railway buckets are private, so the virtual-host URL in the manifest is
-not an anonymous client download URL. Before desktop rollout, the backend must
-provide a stable Portside proxy/redirect that creates a short-lived signed
-object URL, or an explicitly reviewed public bucket policy must be enabled.
-This workflow proves source build, manifest signature and dual-bucket
-replication; it does not by itself prove end-user desktop download.
+The Railway buckets remain private. The manifest now points to the stable
+Portside API route; the backend creates a short-lived signed object URL and
+returns a redirect without exposing bucket credentials. This workflow proves
+source build, manifest signature and dual-bucket replication. End-user desktop
+download still requires the API manifest to be published for the selected
+channel and a clean-install validation.
 Production requires a separate explicit promotion and retains prior versions
 for rollback. The backend rejects a production component without source
 provenance, a Portside build ID, successful validation and promotion state.

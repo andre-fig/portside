@@ -92,7 +92,7 @@ Para alterações no runtime, também execute no macOS com a toolchain de
 ```sh
 PORTSIDE_RUNTIME_VERSION=0.1.0 \
 PORTSIDE_RUNTIME_CHANNEL=staging \
-PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX=https://artifacts.example.invalid/runtime/staging/ \
+PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX=https://api.example.invalid/v1/runtime/artifacts/staging/ \
 ./scripts/build-runtime/build.sh
 ```
 

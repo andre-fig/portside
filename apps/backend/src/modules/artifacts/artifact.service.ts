@@ -1,4 +1,8 @@
-import { Injectable, ServiceUnavailableException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  ServiceUnavailableException,
+} from "@nestjs/common";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { ArtifactStatus, Channel } from "@prisma/client";
@@ -54,6 +58,36 @@ export class ArtifactService {
       sha256: artifact.sha256,
       size: artifact.size.toString(),
     };
+  }
+
+  async signedRuntimeDownload(
+    channel: string,
+    fileName: string,
+  ): Promise<{ url: string; expiresIn: number }> {
+    if (channel !== Channel.staging && channel !== Channel.production) {
+      throw new BadRequestException("runtime channel is invalid");
+    }
+    if (
+      !/^(PortsideWrapper|PortsideWineEngine|PortsideWinetricks)-[A-Za-z0-9][A-Za-z0-9._-]*\.tar\.xz$/.test(
+        fileName,
+      )
+    ) {
+      throw new BadRequestException("runtime artifact name is invalid");
+    }
+    if (!this.s3 || !this.config.s3.bucket) {
+      throw new ServiceUnavailableException(
+        "artifact storage is not configured",
+      );
+    }
+
+    const key = validateStorageKey(`runtime/${channel}/${fileName}`);
+    const expiresIn = this.config.runtimeSignedURLTtlSeconds;
+    const url = await getSignedUrl(
+      this.s3,
+      new GetObjectCommand({ Bucket: this.config.s3.bucket, Key: key }),
+      { expiresIn },
+    );
+    return { url, expiresIn };
   }
 
   async production(component: string, channel: Channel): Promise<unknown> {

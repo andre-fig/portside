@@ -41,9 +41,10 @@ For the first real customer release, create Sparkle keys with the `generate_keys
 tool shipped in Sparkle, register the public key as
 `PORTSIDE_SPARKLE_PUBLIC_KEY`, configure a macOS Developer ID identity and a
 `notarytool` keychain profile, then add the secrets above to the GitHub
-Environments. Railway API and dual-bucket runtime staging are configured, but
-the buckets are private: the desktop still needs a stable Portside API
-proxy/redirect that returns a short-lived signed object URL, or an explicitly
-reviewed public read policy, before an end-to-end customer update can be
-claimed. Apple signing, notarization, production promotion and final appcast
-inspection remain separate release gates.
+Environments. Railway API and dual-bucket runtime staging are configured. The
+buckets remain private and the runtime manifest now uses the stable Portside
+API `/v1/runtime/artifacts/<channel>/<fileName>` route, which returns a
+short-lived signed storage redirect. The API manifest must still be published
+for the selected channel and a clean-install run must pass before an end-to-end
+customer update can be claimed. Apple signing, notarization, production
+promotion and final appcast inspection remain separate release gates.

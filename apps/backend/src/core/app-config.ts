@@ -15,6 +15,13 @@ export class AppConfig {
   readonly maxDownloadBytes = Number(
     process.env.MAX_DOWNLOAD_BYTES ?? 2_147_483_648,
   );
+  readonly runtimeSignedURLTtlSeconds = Math.min(
+    Math.max(
+      Number(process.env.PORTSIDE_RUNTIME_SIGNED_URL_TTL_SECONDS ?? 300),
+      60,
+    ),
+    900,
+  );
   readonly allowedSourceHosts = new Set(
     (process.env.ALLOWED_SOURCE_HOSTS ?? "")
       .split(",")

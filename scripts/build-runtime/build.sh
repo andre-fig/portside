@@ -5,7 +5,7 @@ ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 BUILD_DIR="${PORTSIDE_RUNTIME_BUILD_DIR:-$ROOT_DIR/build/runtime}"
 VERSION="${PORTSIDE_RUNTIME_VERSION:?Set PORTSIDE_RUNTIME_VERSION}"
 CHANNEL="${PORTSIDE_RUNTIME_CHANNEL:-staging}"
-URL_PREFIX="${PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX:-}"
+DOWNLOAD_URL_PREFIX="${PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX:-${PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX:-}}"
 PORTSIDE_COMMIT="${PORTSIDE_COMMIT:-$(git -C "$ROOT_DIR" rev-parse HEAD)}"
 
 case "$CHANNEL" in staging|production) ;; *) echo "runtime channel must be staging or production" >&2; exit 1 ;; esac
@@ -62,7 +62,7 @@ cat > "$BUILD_DIR/provenance.json" <<EOF
 EOF
 
 url_for() {
-    case "$URL_PREFIX" in */) printf '%s%s' "$URL_PREFIX" "$1" ;; *) printf '%s/%s' "$URL_PREFIX" "$1" ;; esac
+    case "$DOWNLOAD_URL_PREFIX" in */) printf '%s%s' "$DOWNLOAD_URL_PREFIX" "$1" ;; *) printf '%s/%s' "$DOWNLOAD_URL_PREFIX" "$1" ;; esac
 }
 wrapper_url="$(url_for "$wrapper_file")"
 engine_url="$(url_for "$engine_file")"
@@ -94,10 +94,10 @@ jq -n \
     {SPDXID: "SPDXRef-winetricks", name: "Winetricks", versionInfo: $version, downloadLocation: "NOASSERTION", licenseConcluded: "LGPL-2.1-or-later", supplier: "Portside", checksums: [{algorithm: "SHA256", checksumValue: $winetricksSHA}], externalRefs: [{referenceType: "source-commit", referenceLocator: $winetricksCommit}, {referenceType: "source-snapshot-sha256", referenceLocator: $winetricksChecksum}]}
   ]}' > "$BUILD_DIR/sbom.spdx.json"
 
-if [ -z "$URL_PREFIX" ]; then
-    echo "Runtime archives were built, but PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX is required to create a publishable manifest." >&2
+if [ -z "$DOWNLOAD_URL_PREFIX" ]; then
+    echo "Runtime archives were built, but PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX is required to create a publishable manifest." >&2
     exit 2
 fi
-case "$URL_PREFIX" in https://*) ;; *) echo "runtime artifact URL prefix must use HTTPS" >&2; exit 1 ;; esac
+case "$DOWNLOAD_URL_PREFIX" in https://*) ;; *) echo "runtime download URL prefix must use HTTPS" >&2; exit 1 ;; esac
 "$ROOT_DIR/scripts/build-runtime/validate-manifest.sh" "$BUILD_DIR/runtime-manifest-unsigned.json"
 echo "Built Portside runtime artifacts and unsigned staging manifest in $BUILD_DIR."

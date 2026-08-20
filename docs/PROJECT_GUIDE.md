@@ -313,7 +313,7 @@ verificado na Stripe e disponibilidade real do dispositivo/navegador.
 O CI precisa de Developer ID Application, perfil `notarytool`, chave privada
 Sparkle, chave privada do manifesto, configuração da Stripe, token admin do
 backend e credenciais dos buckets. Para o workflow automático de runtime, o
-Environment `staging` deve conter `PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX`,
+Environment `staging` deve conter `PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX`,
 `PORTSIDE_MANIFEST_SIGNING_KEY_ID`, `PORTSIDE_MANIFEST_SIGNING_KEY`,
 `PORTSIDE_PUBLIC_BUCKET`, `PORTSIDE_SECONDARY_PUBLIC_BUCKET`,
 `PORTSIDE_S3_ACCESS_KEY_ID`, `PORTSIDE_S3_SECRET_ACCESS_KEY`,
@@ -328,11 +328,11 @@ e a última build de runtime validada publicou nos dois buckets. Todos devem
 ficar em GitHub Environments,
 Keychain ou secret manager. O Railway hospeda API/worker/cron e PostgreSQL; os
 arquivos de runtime e releases ficam em storage de objetos primário e
-secundário. Os buckets continuam privados: antes de um rollout do desktop, o
-backend precisa fornecer uma rota Portside para URL temporária/redirect
-assinado, ou uma política pública deve ser aprovada explicitamente. Publicar
-em staging e assinar o manifesto não prova, por si só, o download anônimo pelo
-cliente.
+secundário. Os buckets continuam privados. O manifesto deve apontar para
+`/v1/runtime/artifacts/<channel>/<fileName>` na API; essa rota gera uma URL S3
+temporária e responde com redirect. Publicar em staging e assinar o manifesto
+não prova, por si só, o download pelo cliente: a API precisa ter o manifesto
+publicado para o canal e a instalação limpa precisa ser validada.
 
 Arquivos `.env`, chaves, certificados, DMGs, ZIPs, `node_modules`, `.build` e
 `build/` são ignorados. Confirme `git status` antes de adicionar qualquer

@@ -84,7 +84,7 @@ jobs:
           PORTSIDE_RUNTIME_BUILD_DIR: ${{ runner.temp }}/portside-release
           PORTSIDE_RUNTIME_VERSION: ${{ inputs.version }}
           PORTSIDE_RUNTIME_CHANNEL: staging
-          PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/runtime/staging/
+          PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX: ${{ secrets.PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX }}
         run: ./scripts/build-runtime/build.sh
 
       - name: Materialize CI-only signing inputs
@@ -211,13 +211,13 @@ jobs:
           PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
           PORTSIDE_RUNTIME_BUILD_DIR: ${{ runner.temp }}/portside-release
           PORTSIDE_RUNTIME_VERSION: ${{ inputs.version }}
-          PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/runtime/production/
+          PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX: ${{ secrets.PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX }}
           PORTSIDE_RUNTIME_MANIFEST_INPUT: ${{ runner.temp }}/portside-release/runtime-manifest-production-unsigned.json
           PORTSIDE_MANIFEST_SIGNING_KEY_FILE: ${{ runner.temp }}/portside-runtime-manifest.key
           PORTSIDE_MANIFEST_OUTPUT: ${{ runner.temp }}/portside-release/runtime-manifest.json
         run: |
           set -eu
-          INPUT="$PORTSIDE_RUNTIME_BUILD_DIR/runtime-manifest-unsigned.json" OUTPUT="$PORTSIDE_RUNTIME_MANIFEST_INPUT" PREFIX="$PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX" node --input-type=module <<'NODE'
+          INPUT="$PORTSIDE_RUNTIME_BUILD_DIR/runtime-manifest-unsigned.json" OUTPUT="$PORTSIDE_RUNTIME_MANIFEST_INPUT" PREFIX="$PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX" node --input-type=module <<'NODE'
           import { readFileSync, writeFileSync } from 'node:fs';
           const input = JSON.parse(readFileSync(process.env.INPUT, 'utf8'));
           const prefix = process.env.PREFIX.endsWith('/') ? process.env.PREFIX : `${process.env.PREFIX}/`;
