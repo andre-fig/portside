@@ -101,8 +101,9 @@ Dependências Swift vêm de `apps/desktop/Package.swift` e são resolvidas em
 `apps/backend/package.json` e `package-lock.json`, instaladas com `npm ci`.
 Dependências da landing vêm de `apps/landing/package.json` e `bun.lock`,
 instaladas com `bun install --frozen-lockfile`. Dependências de compilação do
-Wine (bison, mingw-w64, LLVM, lld, freetype e pkgconf) têm versão, origem,
-checksum, licença e papel registrados em `upstream/dependencies.json`.
+Wine (bison, mingw-w64, LLVM, lld, freetype e pkgconf) têm versão-base, origem,
+checksum, licença e papel registrados em `upstream/dependencies.json`; o runner
+também registra as revisões efetivamente instaladas no log da build.
 
 Steam não é empacotada no Portside. O runtime instala a Steam pelo verbo
 `steam` do winetricks durante a preparação do prefixo e a obtém diretamente
