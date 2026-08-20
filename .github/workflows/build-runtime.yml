@@ -40,11 +40,14 @@ jobs:
       PORTSIDE_MANIFEST_SIGNING_KEY_ID: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY_ID }}
       PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
       PORTSIDE_SECONDARY_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_SECONDARY_PUBLIC_BUCKET }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.PORTSIDE_S3_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.PORTSIDE_S3_SECRET_ACCESS_KEY }}
-      AWS_REGION: ${{ secrets.PORTSIDE_S3_REGION }}
-      AWS_DEFAULT_REGION: ${{ secrets.PORTSIDE_S3_REGION }}
-      AWS_ENDPOINT_URL: ${{ secrets.PORTSIDE_S3_ENDPOINT }}
+      PORTSIDE_S3_ACCESS_KEY_ID: ${{ secrets.PORTSIDE_S3_ACCESS_KEY_ID }}
+      PORTSIDE_S3_SECRET_ACCESS_KEY: ${{ secrets.PORTSIDE_S3_SECRET_ACCESS_KEY }}
+      PORTSIDE_S3_REGION: ${{ secrets.PORTSIDE_S3_REGION }}
+      PORTSIDE_S3_ENDPOINT: ${{ secrets.PORTSIDE_S3_ENDPOINT }}
+      PORTSIDE_SECONDARY_S3_ACCESS_KEY_ID: ${{ secrets.PORTSIDE_SECONDARY_S3_ACCESS_KEY_ID }}
+      PORTSIDE_SECONDARY_S3_SECRET_ACCESS_KEY: ${{ secrets.PORTSIDE_SECONDARY_S3_SECRET_ACCESS_KEY }}
+      PORTSIDE_SECONDARY_S3_REGION: ${{ secrets.PORTSIDE_SECONDARY_S3_REGION }}
+      PORTSIDE_SECONDARY_S3_ENDPOINT: ${{ secrets.PORTSIDE_SECONDARY_S3_ENDPOINT }}
     steps:
       - name: Check out Portside sources
         uses: actions/checkout@v7
@@ -61,20 +64,38 @@ jobs:
 
       - name: Install pinned runtime toolchain
         run: |
-          for formula in bison mingw-w64 llvm lld freetype pkgconf; do brew list "$formula" >/dev/null 2>&1 || brew install "$formula"; done
+          for formula in awscli bison mingw-w64 llvm lld freetype pkgconf; do brew list "$formula" >/dev/null 2>&1 || brew install "$formula"; done
+          aws --version
           printf 'bison: '; "$(brew --prefix bison)/bin/bison" --version | awk 'NR==1 {print}'
           for formula in mingw-w64 llvm lld freetype pkgconf; do brew list --versions "$formula"; done
 
       - name: Validate staging publication inputs
         run: |
           set -eu
-          test -n "$PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX"
+          require_env() {
+            variable="$1"
+            eval "value=\${$variable-}"
+            if [ -z "$value" ]; then
+              echo "missing required staging secret: $variable" >&2
+              exit 1
+            fi
+          }
+          for variable in \
+            PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX \
+            PORTSIDE_MANIFEST_SIGNING_KEY_ID \
+            PORTSIDE_PUBLIC_BUCKET \
+            PORTSIDE_SECONDARY_PUBLIC_BUCKET \
+            PORTSIDE_S3_ACCESS_KEY_ID \
+            PORTSIDE_S3_SECRET_ACCESS_KEY \
+            PORTSIDE_S3_REGION \
+            PORTSIDE_S3_ENDPOINT \
+            PORTSIDE_SECONDARY_S3_ACCESS_KEY_ID \
+            PORTSIDE_SECONDARY_S3_SECRET_ACCESS_KEY \
+            PORTSIDE_SECONDARY_S3_REGION \
+            PORTSIDE_SECONDARY_S3_ENDPOINT; do
+            require_env "$variable"
+          done
           case "$PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX" in https://*) ;; *) echo "artifact prefix must be HTTPS" >&2; exit 1;; esac
-          test -n "$PORTSIDE_MANIFEST_SIGNING_KEY_ID"
-          test -n "$PORTSIDE_PUBLIC_BUCKET"
-          test -n "$PORTSIDE_SECONDARY_PUBLIC_BUCKET"
-          test -n "$AWS_ACCESS_KEY_ID"
-          test -n "$AWS_SECRET_ACCESS_KEY"
 
       - name: Build wrapper, engine and winetricks from local sources
         run: ./scripts/build-runtime/build.sh
@@ -112,7 +133,7 @@ jobs:
           test -s "build/runtime/provenance.json"
 
       - name: Upload staging evidence
-        if: always()
+        if: ${{ always() && hashFiles('build/runtime/**') != '' }}
         uses: actions/upload-artifact@v7
         with:
           name: portside-runtime-staging-${{ env.PORTSIDE_RUNTIME_VERSION }}

@@ -49,9 +49,10 @@ updated from an incomplete build.
 merges on `main` (or a manual dispatch), signs the manifest and publishes only
 to staging. The protected GitHub Environment `staging` must provide the
 manifest-signing key, both bucket names, an HTTPS artifact URL prefix and
-S3-compatible credentials (`PORTSIDE_S3_ACCESS_KEY_ID`,
-`PORTSIDE_S3_SECRET_ACCESS_KEY`, `PORTSIDE_S3_REGION`, and optionally
-`PORTSIDE_S3_ENDPOINT`). `publish_runtime_staging.sh` writes the archives,
+S3-compatible credentials for both Railway buckets (`PORTSIDE_S3_ACCESS_KEY_ID`,
+`PORTSIDE_S3_SECRET_ACCESS_KEY`, `PORTSIDE_S3_REGION`,
+`PORTSIDE_S3_ENDPOINT` and the corresponding `PORTSIDE_SECONDARY_S3_*`
+values). `publish_runtime_staging.sh` writes the archives,
 manifest, provenance and SBOM to the primary and secondary object stores.
 Production requires a separate explicit promotion and retains prior versions
 for rollback. The backend rejects a production component without source
