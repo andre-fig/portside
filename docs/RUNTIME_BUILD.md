@@ -54,6 +54,12 @@ S3-compatible credentials for both Railway buckets (`PORTSIDE_S3_ACCESS_KEY_ID`,
 `PORTSIDE_S3_ENDPOINT` and the corresponding `PORTSIDE_SECONDARY_S3_*`
 values). `publish_runtime_staging.sh` writes the archives,
 manifest, provenance and SBOM to the primary and secondary object stores.
+The Railway buckets are private, so the virtual-host URL in the manifest is
+not an anonymous client download URL. Before desktop rollout, the backend must
+provide a stable Portside proxy/redirect that creates a short-lived signed
+object URL, or an explicitly reviewed public bucket policy must be enabled.
+This workflow proves source build, manifest signature and dual-bucket
+replication; it does not by itself prove end-user desktop download.
 Production requires a separate explicit promotion and retains prior versions
 for rollback. The backend rejects a production component without source
 provenance, a Portside build ID, successful validation and promotion state.
