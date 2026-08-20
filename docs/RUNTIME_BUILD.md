@@ -78,9 +78,9 @@ provenance, a Portside build ID, successful validation and promotion state.
 ## Reusing a validated runtime
 
 `release-production.yml` does not compile Wine or the wrapper. It selects the
-latest successful `Build Portside Runtime` run on `main` (or accepts an
-explicit `runtime_run_id` and `runtime_artifact_name`), downloads its signed
+latest successful `Build Portside Runtime` run on `main`, downloads its signed
 evidence and reuses those archives for the app release. The runtime version is
-read from `runtime-manifest-unsigned.json`, so the app version and runtime
-version do not have to be identical. A source/runtime change still requires a
-new runtime build before the next commercial release.
+read from `runtime-manifest-unsigned.json`. The release workflow uses that
+validated runtime version automatically for the app release, so no version
+input is required. A source/runtime change still requires a new runtime build
+before the next commercial release.

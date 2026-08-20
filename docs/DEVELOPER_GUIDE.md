@@ -230,7 +230,7 @@ Não confunda uma atualização do app com uma atualização do runtime.
 | `sync-upstreams.yml` | diariamente às 03:17 UTC ou dispatch | PR com novos snapshots/lock/checksums | revisar licença/diff e mergear |
 | `validate-clean-install.yml` | dispatch | instalação limpa e logs de aceitação em Mac self-hosted | sessão gráfica, login e janela real |
 | `deploy-railway.yml` / Verify Railway | CI concluído na `main` | healthcheck da API | investigar se `/health` falhar |
-| `release-production.yml` | dispatch com versão | release app/runtime de validação, assinatura/notarização e artifact para promoção | configurar secrets e aprovar production |
+| `release-production.yml` | dispatch com destino staging/production | release app/runtime de validação, assinatura/notarização e artifact para promoção | configurar secrets e aprovar production |
 
 ### CI e desktop
 
@@ -283,9 +283,8 @@ o artefato aparecer no GitHub Actions.
 
 A versão comercial do app é separada: não existe uma versão comercial atual
 enquanto não houver uma release notarizada e promovida. O workflow
-`release-production.yml` recebe a versão manualmente no campo `version`; ele
-usa esse valor para o app, o DMG e o ZIP, e reutiliza a versão do runtime
-registrada no manifesto selecionado. O `0.1.0` presente no `Info.plist` é
+`release-production.yml` usa automaticamente a versão do runtime validado
+selecionado para o app, o DMG e o ZIP. O `0.1.0` presente no `Info.plist` é
 apenas o valor padrão de desenvolvimento e não representa a última versão
 publicada.
 
@@ -302,10 +301,10 @@ merge.
 
 ### Release do app
 
-`release-production.yml` é manual e recebe `version` e `promote`. Ele seleciona
-automaticamente o último runtime validado com sucesso; também aceita
-`runtime_run_id` e `runtime_artifact_name` explícitos quando a release precisa
-fixar uma execução. O estágio:
+`release-production.yml` é manual e recebe apenas o destino `staging` ou
+`production`. Ele seleciona o último runtime validado com sucesso, usa a
+versão do manifesto desse runtime para o app e escolhe o artifact
+correspondente. O estágio:
 
 1. testa Swift e backend;
 2. valida a política de fontes;
@@ -318,9 +317,9 @@ fixar uma execução. O estágio:
 9. publica staging nos dois buckets.
 
 Os jobs de publicação usam o Environment GitHub protegido `production`. O job
-`promote-production` só é elegível com `promote=true` e depende da validação
-anterior. Promoção não deve ser tratada como consequência automática de uma
-build verde.
+`promote-production` só é elegível quando o destino escolhido é `production` e
+depende da validação anterior. A aprovação do Environment `production` continua
+sendo obrigatória; uma build verde não publica produção sem essa proteção.
 
 ## 6. Railway e secrets
 

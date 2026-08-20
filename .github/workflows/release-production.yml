@@ -3,23 +3,14 @@ name: Release Portside
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: "Portside version to build"
+      target:
+        description: "Release destination"
         required: true
-        type: string
-      runtime_run_id:
-        description: "Optional successful Build Portside Runtime run ID; latest successful run is selected when empty"
-        required: false
-        type: string
-      runtime_artifact_name:
-        description: "Optional runtime artifact name from that run; selected automatically when empty"
-        required: false
-        type: string
-      promote:
-        description: "After staging validation, request the protected production promotion job"
-        required: true
-        default: false
-        type: boolean
+        default: staging
+        type: choice
+        options:
+          - staging
+          - production
 
 permissions:
   contents: read
@@ -31,8 +22,9 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 90
     environment: production
+    outputs:
+      version: ${{ steps.release-version.outputs.version }}
     env:
-      PORTSIDE_VERSION: ${{ inputs.version }}
       PORTSIDE_UPDATE_CHANNEL: staging
       PORTSIDE_API_BASE_URL: ${{ secrets.PORTSIDE_API_BASE_URL }}
       PORTSIDE_UPDATE_FEED_URL: ${{ secrets.PORTSIDE_UPDATE_FEED_URL }}
@@ -70,21 +62,13 @@ jobs:
         id: runtime
         env:
           GH_TOKEN: ${{ github.token }}
-          REQUESTED_RUNTIME_RUN_ID: ${{ inputs.runtime_run_id }}
-          REQUESTED_RUNTIME_ARTIFACT_NAME: ${{ inputs.runtime_artifact_name }}
         run: |
           set -eu
-          run_id="$REQUESTED_RUNTIME_RUN_ID"
-          if [ -z "$run_id" ]; then
-            run_id="$(gh run list --workflow build-runtime.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
-          fi
+          run_id="$(gh run list --workflow build-runtime.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
           test -n "$run_id" && test "$run_id" != null
           gh run view "$run_id" --json workflowName,status,conclusion,headBranch \
             | jq -e '(.workflowName == "Build Portside Runtime" and .status == "completed" and .conclusion == "success" and .headBranch == "main")' >/dev/null
-          artifact_name="$REQUESTED_RUNTIME_ARTIFACT_NAME"
-          if [ -z "$artifact_name" ]; then
-            artifact_name="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" --jq '.artifacts[] | select(.expired == false and (.name | startswith("portside-runtime-staging-"))) | .name' | head -n 1)"
-          fi
+          artifact_name="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" --jq '.artifacts[] | select(.expired == false and (.name | startswith("portside-runtime-staging-"))) | .name' | head -n 1)"
           test -n "$artifact_name"
           case "$artifact_name" in
             portside-runtime-staging-*) ;;
@@ -150,6 +134,16 @@ jobs:
             PORTSIDE_RUNTIME_BUILD_DIR="$PORTSIDE_RUNTIME_BUILD_DIR" \
             ./scripts/build-runtime/validate-clean-layout.sh
           printf 'runtime_version=%s\n' "$runtime_version" >> "$GITHUB_OUTPUT"
+
+      - name: Set release version from validated runtime
+        id: release-version
+        env:
+          VALIDATED_RUNTIME_VERSION: ${{ steps.runtime-evidence.outputs.runtime_version }}
+        run: |
+          set -eu
+          printf '%s\n' "$VALIDATED_RUNTIME_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+          printf 'PORTSIDE_VERSION=%s\n' "$VALIDATED_RUNTIME_VERSION" >> "$GITHUB_ENV"
+          printf 'version=%s\n' "$VALIDATED_RUNTIME_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Materialize CI-only signing inputs
         env:
@@ -250,7 +244,7 @@ jobs:
       - name: Upload signed staging release for protected promotion
         uses: actions/upload-artifact@v7
         with:
-          name: portside-release-${{ inputs.version }}
+          name: portside-release-${{ steps.release-version.outputs.version }}
           retention-days: 14
           if-no-files-found: error
           path: ${{ runner.temp }}/portside-release
@@ -266,12 +260,12 @@ jobs:
   promote-production:
     name: Promote reviewed staging release to production
     needs: build-stage-and-publish
-    if: ${{ inputs.promote == true }}
+    if: ${{ inputs.target == 'production' }}
     runs-on: macos-15
     timeout-minutes: 20
     environment: production
     env:
-      PORTSIDE_VERSION: ${{ inputs.version }}
+      PORTSIDE_VERSION: ${{ needs.build-stage-and-publish.outputs.version }}
       PORTSIDE_UPDATE_CHANNEL: production
       PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
       PORTSIDE_SECONDARY_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_SECONDARY_PUBLIC_BUCKET }}
@@ -299,7 +293,7 @@ jobs:
       - name: Download staged release
         uses: actions/download-artifact@v7
         with:
-          name: portside-release-${{ inputs.version }}
+          name: portside-release-${{ needs.build-stage-and-publish.outputs.version }}
           path: ${{ runner.temp }}/portside-release
 
       - name: Materialize Sparkle signing key
@@ -373,7 +367,7 @@ jobs:
           PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
           API_URL: ${{ secrets.PORTSIDE_API_BASE_URL }}
           ADMIN_TOKEN: ${{ secrets.PORTSIDE_ADMIN_BEARER_TOKEN }}
-          RELEASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/app/production/Portside-${{ inputs.version }}.zip
+          RELEASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/app/production/Portside-${{ needs.build-stage-and-publish.outputs.version }}.zip
         run: |
           set -eu
           test -n "$API_URL"
