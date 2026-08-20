@@ -211,12 +211,13 @@ jobs:
           else
             printf '%s' "$CODESIGN_CERT_BASE64" | base64 -D > "$SIGNING_CERT"
           fi
-          security import "$SIGNING_P12" -P "$CODESIGN_P12_PASSWORD" -A -f pkcs12 -k "$SIGNING_KEYCHAIN"
           if [ -n "$CODESIGN_CERT_PEM" ]; then
-            security import "$SIGNING_CERT" -A -f pemseq -t cert -k "$SIGNING_KEYCHAIN"
+            openssl x509 -in "$SIGNING_CERT" -noout
           else
-            security import "$SIGNING_CERT" -A -k "$SIGNING_KEYCHAIN"
+            openssl x509 -inform der -in "$SIGNING_CERT" -noout
           fi
+          security import "$SIGNING_P12" -P "$CODESIGN_P12_PASSWORD" -A -f pkcs12 -k "$SIGNING_KEYCHAIN"
+          security add-certificates -k "$SIGNING_KEYCHAIN" "$SIGNING_CERT"
           security set-key-partition-list -S apple-tool:,apple: -s -k '' "$SIGNING_KEYCHAIN"
           security list-keychains -d user -s "$SIGNING_KEYCHAIN"
           security default-keychain -s "$SIGNING_KEYCHAIN"
