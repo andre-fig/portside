@@ -30,7 +30,7 @@ não captura senha, cookie, token, Steam ID ou conteúdo de janela.
 
 ### Estado operacional registrado em 20/08/2026
 
-- `main` estava sincronizada com `origin/main` no commit `146c864` quando esta
+- `main` estava sincronizada com `origin/main` no commit `2ee0dc1` quando esta
   documentação foi escrita.
 - A execução [`Build Portside Runtime`](https://github.com/andre-fig/portside/actions/runs/32325605325)
   terminou com sucesso em staging: runtime `0.1.6`, build ID
@@ -38,9 +38,11 @@ não captura senha, cookie, token, Steam ID ou conteúdo de janela.
   primário e secundário.
 - A API Railway respondia em `/health`; os buckets eram privados e o acesso
   anônimo direto ao objeto do manifesto retornava `403`.
-- A publicação de staging não substitui a aceitação visual em um Mac
-  self-hosted, a criação de uma rota de download assinada para o desktop, a
-  notarização de uma release de cliente ou a promoção para production.
+- A publicação de runtime não substitui a aceitação visual em um Mac
+  self-hosted, a publicação do manifesto no backend, a notarização de uma
+  release de cliente ou a promoção para production. A rota de download
+  assinada para os artefatos de runtime já existe, mas o manifesto ainda
+  precisa ser publicado para o cliente conseguir descobrir a versão.
 
 Esse bloco é um retrato de operação, não um valor permanente: após mudanças de
 infraestrutura ou release, atualize a data e a evidência correspondente.
@@ -259,6 +261,30 @@ O artifact de runtime contém arquivos necessários para auditoria, incluindo:
 
 O workflow não baixa um engine pronto do Sikarugir nem publica a Steam. A build
 é rejeitada se não conseguir usar as fontes registradas.
+
+### Como consultar a versão atual
+
+A versão do runtime não deve ser deduzida pelo commit ou pelo valor padrão do
+`Info.plist`. Para consultar a versão validada:
+
+1. Abra o workflow [`Build Portside Runtime`](https://github.com/andre-fig/portside/actions/workflows/build-runtime.yml).
+2. Abra a execução mais recente com status verde.
+3. Role até a seção `Artifacts`.
+4. Leia a versão no nome do artefato, por exemplo
+   `portside-runtime-staging-0.1.6`.
+
+O último runtime confirmado no registro operacional desta documentação é o
+`0.1.6`. A execução seguinte usa a versão automática `0.1.<run_number>`; por
+isso, a execução número 7 está configurada para produzir `0.1.7`, mas essa
+versão só deve ser considerada existente se a execução terminar com sucesso e
+o artefato aparecer no GitHub Actions.
+
+A versão comercial do app é separada: não existe uma versão comercial atual
+enquanto não houver uma release notarizada e promovida. O workflow
+`release-production.yml` recebe a versão manualmente no campo `version`; ele
+usa esse valor para o app, o DMG, o ZIP e os artefatos de runtime daquela
+release. O `0.1.0` presente no `Info.plist` é apenas o valor padrão de
+desenvolvimento e não representa a última versão publicada.
 
 ### Sincronização upstream
 
