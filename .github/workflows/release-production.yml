@@ -202,6 +202,9 @@ jobs:
           SIGNING_KEYCHAIN="$RUNNER_TEMP/portside-signing.keychain-db"
           SIGNING_P12="$RUNNER_TEMP/portside-developer-id.p12"
           SIGNING_CERT="$RUNNER_TEMP/portside-developer-id.cer"
+          SIGNING_PRIVATE_KEY="$RUNNER_TEMP/portside-developer-id-private.key"
+          SIGNING_COMBINED_P12="$RUNNER_TEMP/portside-developer-id-combined.p12"
+          trap 'rm -f "$SIGNING_P12" "$SIGNING_CERT" "$SIGNING_PRIVATE_KEY" "$SIGNING_COMBINED_P12"' EXIT
           security create-keychain -p '' "$SIGNING_KEYCHAIN"
           security set-keychain-settings -lut 21600 "$SIGNING_KEYCHAIN"
           security unlock-keychain -p '' "$SIGNING_KEYCHAIN"
@@ -216,8 +219,20 @@ jobs:
           else
             openssl x509 -inform der -in "$SIGNING_CERT" -noout
           fi
-          security import "$SIGNING_P12" -P "$CODESIGN_P12_PASSWORD" -A -f pkcs12 -k "$SIGNING_KEYCHAIN"
-          security import "$SIGNING_CERT" -A -f pemseq -t cert -k "$SIGNING_KEYCHAIN"
+          export PORTSIDE_P12_PASSWORD="$CODESIGN_P12_PASSWORD"
+          openssl pkcs12 -in "$SIGNING_P12" -nocerts -nodes \
+            -passin env:PORTSIDE_P12_PASSWORD -out "$SIGNING_PRIVATE_KEY" 2>/dev/null
+          private_key_hash="$(openssl pkey -in "$SIGNING_PRIVATE_KEY" -pubout -outform der 2>/dev/null | shasum -a 256 | awk '{print $1}')"
+          certificate_key_hash="$(openssl x509 -in "$SIGNING_CERT" -pubkey -noout | openssl pkey -pubin -outform der 2>/dev/null | shasum -a 256 | awk '{print $1}')"
+          test -n "$private_key_hash" && test -n "$certificate_key_hash"
+          if [ "$private_key_hash" != "$certificate_key_hash" ]; then
+            echo "Developer ID certificate does not match the exported private key" >&2
+            exit 1
+          fi
+          openssl pkcs12 -export -inkey "$SIGNING_PRIVATE_KEY" -in "$SIGNING_CERT" \
+            -name "$PORTSIDE_CODESIGN_IDENTITY" -passout env:PORTSIDE_P12_PASSWORD \
+            -out "$SIGNING_COMBINED_P12" 2>/dev/null
+          security import "$SIGNING_COMBINED_P12" -P "$CODESIGN_P12_PASSWORD" -A -f pkcs12 -k "$SIGNING_KEYCHAIN"
           security set-key-partition-list -S apple-tool:,apple: -s -k '' "$SIGNING_KEYCHAIN"
           security list-keychains -d user -s "$SIGNING_KEYCHAIN"
           security default-keychain -s "$SIGNING_KEYCHAIN"
