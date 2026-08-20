@@ -76,6 +76,15 @@ temporary access to publish there. The runtime workflow uses separate primary
 and secondary credentials and never writes to Railway's ephemeral service
 filesystem.
 
+The Railway buckets are private. Therefore, the virtual-host URL above is a
+storage identity used by the signed manifest, not an anonymously downloadable
+client URL; an unauthenticated request currently returns `403`. Before a
+desktop rollout, either expose a stable Portside API route that generates a
+short-lived signed object URL/redirect, or intentionally configure a public
+read policy and review its security impact. The successful runtime workflow
+proves source build, manifest signature and dual-bucket replication, but does
+not by itself prove an end-user desktop download.
+
 The private `PORTSIDE_MANIFEST_SIGNING_KEY` exists only in GitHub Actions. Its
 matching public key is `MANIFEST_SIGNING_PUBLIC_KEY` in the Railway API. Do
 not put either private signing key or bucket secret in Git, logs, or a chat
