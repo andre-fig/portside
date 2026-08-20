@@ -49,11 +49,11 @@ jobs:
           for formula in bison mingw-w64 llvm lld freetype pkgconf; do brew list "$formula" >/dev/null 2>&1 || brew install "$formula"; done
           bison_bin="$(brew --prefix bison)/bin/bison"
           test "$("$bison_bin" --version | awk 'NR==1 {print $4}')" = "3.8.2"
-          test "$(brew list --versions mingw-w64 | awk '{print $2}')" = "14.0.0_3"
-          test "$(brew list --versions llvm | awk '{print $2}')" = "22.1.8_2"
-          test "$(brew list --versions lld | awk '{print $2}')" = "22.1.8"
-          test "$(brew list --versions freetype | awk '{print $2}')" = "2.14.3"
-          test "$(brew list --versions pkgconf | awk '{print $2}')" = "3.0.5"
+          test "$(brew list --versions mingw-w64 | awk '{print $2}' | sed 's/_.*//')" = "14.0.0"
+          test "$(brew list --versions llvm | awk '{print $2}' | sed 's/_.*//')" = "22.1.8"
+          test "$(brew list --versions lld | awk '{print $2}' | sed 's/_.*//')" = "22.1.8"
+          test "$(brew list --versions freetype | awk '{print $2}' | sed 's/_.*//')" = "2.14.3"
+          test "$(brew list --versions pkgconf | awk '{print $2}' | sed 's/_.*//')" = "3.0.5"
 
       - name: Resolve and build Swift dependencies
         run: |

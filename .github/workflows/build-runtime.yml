@@ -36,7 +36,7 @@ jobs:
     env:
       PORTSIDE_RUNTIME_VERSION: ${{ inputs.version || github.sha }}
       PORTSIDE_RUNTIME_CHANNEL: staging
-      PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX: ${{ inputs.artifact_url_prefix || secrets.PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX }}
+      PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX: ${{ inputs.artifact_url_prefix || secrets.PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX || 'https://ci.portside.invalid/runtime/staging/' }}
       PORTSIDE_MANIFEST_SIGNING_KEY_ID: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY_ID }}
       PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
       PORTSIDE_SECONDARY_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_SECONDARY_PUBLIC_BUCKET }}
@@ -58,13 +58,14 @@ jobs:
         run: |
           for formula in bison mingw-w64 llvm lld freetype pkgconf; do brew list "$formula" >/dev/null 2>&1 || brew install "$formula"; done
           test "$("$(brew --prefix bison)/bin/bison" --version | awk 'NR==1 {print $4}')" = "3.8.2"
-          test "$(brew list --versions mingw-w64 | awk '{print $2}')" = "14.0.0_3"
-          test "$(brew list --versions llvm | awk '{print $2}')" = "22.1.8_2"
-          test "$(brew list --versions lld | awk '{print $2}')" = "22.1.8"
-          test "$(brew list --versions freetype | awk '{print $2}')" = "2.14.3"
-          test "$(brew list --versions pkgconf | awk '{print $2}')" = "3.0.5"
+          test "$(brew list --versions mingw-w64 | awk '{print $2}' | sed 's/_.*//')" = "14.0.0"
+          test "$(brew list --versions llvm | awk '{print $2}' | sed 's/_.*//')" = "22.1.8"
+          test "$(brew list --versions lld | awk '{print $2}' | sed 's/_.*//')" = "22.1.8"
+          test "$(brew list --versions freetype | awk '{print $2}' | sed 's/_.*//')" = "2.14.3"
+          test "$(brew list --versions pkgconf | awk '{print $2}' | sed 's/_.*//')" = "3.0.5"
 
       - name: Validate staging publication inputs
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           set -eu
           test -n "$PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX"
@@ -77,6 +78,7 @@ jobs:
         run: ./scripts/build-runtime/build.sh
 
       - name: Materialize staging manifest signing key
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
           MANIFEST_PRIVATE_KEY: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY }}
         run: |
@@ -86,6 +88,7 @@ jobs:
           printf '%s' "$MANIFEST_PRIVATE_KEY" > "$RUNNER_TEMP/portside-runtime-manifest.key"
 
       - name: Sign and validate staging manifest
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
           PORTSIDE_RUNTIME_MANIFEST_INPUT: ${{ github.workspace }}/build/runtime/runtime-manifest-unsigned.json
           PORTSIDE_MANIFEST_SIGNING_KEY_FILE: ${{ runner.temp }}/portside-runtime-manifest.key
@@ -95,6 +98,7 @@ jobs:
           ./scripts/build-runtime/validate-manifest.sh "$PORTSIDE_MANIFEST_OUTPUT"
 
       - name: Publish staging runtime to both buckets
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
           PORTSIDE_RUNTIME_BUILD_DIR: ${{ github.workspace }}/build/runtime
         run: ./scripts/publish_runtime_staging.sh

@@ -286,8 +286,9 @@ verificado na Stripe e disponibilidade real do dispositivo/navegador.
 - `ci.yml`: política de fontes, testes Swift e checks do backend.
 - `build-landing.yml`: lint, build e artifact da landing.
 - `build-desktop.yml`: bundle e DMG de validação não comercial após CI.
-- `build-runtime.yml`: build próprio do runtime no macOS fixado e publicação
-  em staging.
+- `build-runtime.yml`: build próprio do runtime no macOS fixado. Pushes fazem
+  build source-only e guardam evidência; `workflow_dispatch` com secrets e
+  buckets configurados também assina e publica em staging.
 - `sync-upstreams.yml`: sincronização diária/manual, sem merge automático.
 - `release-production.yml`: release staging, notarização e promoção protegida.
 - `deploy-railway.yml`: verificação de health do backend já publicado no
