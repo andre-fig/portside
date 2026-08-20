@@ -27,6 +27,10 @@ Do not paste IDs or tokens into the repository. Required variables are listed
 in `apps/backend/.env.example`: database URL, public API URL, S3 endpoint/bucket
 credentials, allowlists, HMAC secret, license signing key pair and IDs,
 manifest public key, Sparkle public key, offline grace period and size limits.
+The sync worker additionally needs a read-only `PORTSIDE_GITHUB_TOKEN`,
+`PORTSIDE_GITHUB_REPOSITORY=andre-fig/portside` and
+`PORTSIDE_RUNTIME_WORKFLOW=build-runtime.yml` to reconcile workflow runs. It
+records workflow/test state but cannot promote or publish a release.
 Use different values and key IDs for staging and production.
 Configure both primary and secondary S3-compatible credentials; a production
 deployment must never rely on Railway's ephemeral filesystem. Store the

@@ -34,12 +34,17 @@ jobs:
     timeout-minutes: 180
     environment: staging
     env:
-      PORTSIDE_RUNTIME_VERSION: ${{ inputs.version || github.sha }}
+      PORTSIDE_RUNTIME_VERSION: ${{ inputs.version || format('0.1.{0}', github.run_number) }}
       PORTSIDE_RUNTIME_CHANNEL: staging
-      PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX: ${{ inputs.artifact_url_prefix || secrets.PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX || 'https://ci.portside.invalid/runtime/staging/' }}
+      PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX: ${{ inputs.artifact_url_prefix || secrets.PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX }}
       PORTSIDE_MANIFEST_SIGNING_KEY_ID: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY_ID }}
       PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
       PORTSIDE_SECONDARY_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_SECONDARY_PUBLIC_BUCKET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.PORTSIDE_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.PORTSIDE_S3_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.PORTSIDE_S3_REGION }}
+      AWS_DEFAULT_REGION: ${{ secrets.PORTSIDE_S3_REGION }}
+      AWS_ENDPOINT_URL: ${{ secrets.PORTSIDE_S3_ENDPOINT }}
     steps:
       - name: Check out Portside sources
         uses: actions/checkout@v7
@@ -61,7 +66,6 @@ jobs:
           for formula in mingw-w64 llvm lld freetype pkgconf; do brew list --versions "$formula"; done
 
       - name: Validate staging publication inputs
-        if: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           set -eu
           test -n "$PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX"
@@ -69,12 +73,13 @@ jobs:
           test -n "$PORTSIDE_MANIFEST_SIGNING_KEY_ID"
           test -n "$PORTSIDE_PUBLIC_BUCKET"
           test -n "$PORTSIDE_SECONDARY_PUBLIC_BUCKET"
+          test -n "$AWS_ACCESS_KEY_ID"
+          test -n "$AWS_SECRET_ACCESS_KEY"
 
       - name: Build wrapper, engine and winetricks from local sources
         run: ./scripts/build-runtime/build.sh
 
       - name: Materialize staging manifest signing key
-        if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
           MANIFEST_PRIVATE_KEY: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY }}
         run: |
@@ -84,7 +89,6 @@ jobs:
           printf '%s' "$MANIFEST_PRIVATE_KEY" > "$RUNNER_TEMP/portside-runtime-manifest.key"
 
       - name: Sign and validate staging manifest
-        if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
           PORTSIDE_RUNTIME_MANIFEST_INPUT: ${{ github.workspace }}/build/runtime/runtime-manifest-unsigned.json
           PORTSIDE_MANIFEST_SIGNING_KEY_FILE: ${{ runner.temp }}/portside-runtime-manifest.key
@@ -94,7 +98,6 @@ jobs:
           ./scripts/build-runtime/validate-manifest.sh "$PORTSIDE_MANIFEST_OUTPUT"
 
       - name: Publish staging runtime to both buckets
-        if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
           PORTSIDE_RUNTIME_BUILD_DIR: ${{ github.workspace }}/build/runtime
         run: ./scripts/publish_runtime_staging.sh
@@ -113,6 +116,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: portside-runtime-staging-${{ env.PORTSIDE_RUNTIME_VERSION }}
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
           path: build/runtime/

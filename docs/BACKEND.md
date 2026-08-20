@@ -64,11 +64,19 @@ production build.
 
 The source synchronization workflow owns source cloning and opens a pull
 request; Railway does not clone upstream source into ephemeral storage. The
-worker reconciles stale synchronization, source-snapshot and build records.
+worker reconciles stale synchronization, source-snapshot and build records and
+polls the authorized Portside runtime workflow when `PORTSIDE_GITHUB_TOKEN` is
+configured. Each observed run is upserted as a `RuntimeBuild` with the
+Portside commit, workflow URL/ID, environment, test result and build status.
+It never promotes a release; promotion and rollback remain authenticated
+operations.
 The release sequence is `register source snapshot` → `register successful
-build` → `register staging release` → `promote release` → `publish signed
-manifest`. The manifest endpoint verifies the Ed25519 signature and requires
-the release record for the selected channel. A production manifest cannot be
-published from a staging or failed release.
+build` → `register staging release` → `publish signed staging manifest` →
+`record clean-install acceptance` → `promote release` → `publish signed
+production manifest`. Promotion rejects a build without `testResult.cleanInstall
+== "passed"` or without a published staging manifest. The manifest endpoint
+verifies the Ed25519 signature and requires the release record for the selected
+channel. A production manifest cannot be published from a staging or failed
+release.
 The example environment is intentionally nonfunctional. PostgreSQL, both
 object-storage locations and all signing secrets must be supplied separately.

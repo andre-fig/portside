@@ -1,0 +1,80 @@
+name: Validate Clean Portside Runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_run_id:
+        description: "Build Portside Runtime workflow run ID containing the signed staging artifact"
+        required: true
+        type: string
+      runtime_artifact_name:
+        description: "Artifact name from that run, for example portside-runtime-staging-1.0.0"
+        required: true
+        type: string
+      runtime_version:
+        description: "Version recorded in runtime-manifest.json"
+        required: true
+        type: string
+      previous_runtime_run_id:
+        description: "Optional earlier runtime workflow run ID for update/rollback preservation checks"
+        required: false
+        type: string
+      previous_runtime_artifact_name:
+        description: "Optional earlier runtime artifact name"
+        required: false
+        type: string
+      previous_runtime_version:
+        description: "Optional earlier runtime version"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  clean-install-gui:
+    name: Clean install and real Steam GUI acceptance
+    # Register the selected self-hosted macOS runner only after it has a
+    # logged-in desktop session and Accessibility permission for the runner
+    # account. GitHub's standard labels keep this workflow lintable.
+    runs-on: [self-hosted, macos, arm64]
+    timeout-minutes: 180
+    steps:
+      - name: Check out validation scripts
+        uses: actions/checkout@v7
+
+      - name: Download candidate runtime workflow artifact
+        uses: actions/download-artifact@v7
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.runtime_run_id }}
+          name: ${{ inputs.runtime_artifact_name }}
+          path: ${{ runner.temp }}/portside-runtime-candidate
+
+      - name: Download previous runtime workflow artifact
+        if: ${{ inputs.previous_runtime_run_id != '' && inputs.previous_runtime_artifact_name != '' }}
+        uses: actions/download-artifact@v7
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.previous_runtime_run_id }}
+          name: ${{ inputs.previous_runtime_artifact_name }}
+          path: ${{ runner.temp }}/portside-runtime-previous
+
+      - name: Run operator-assisted clean GUI acceptance
+        env:
+          PORTSIDE_RUNTIME_ARTIFACTS_DIR: ${{ runner.temp }}/portside-runtime-candidate
+          PORTSIDE_RUNTIME_VERSION: ${{ inputs.runtime_version }}
+          PORTSIDE_CLEAN_ROOT: ${{ runner.temp }}/portside-clean-install
+          PORTSIDE_PREVIOUS_RUNTIME_ARTIFACTS_DIR: ${{ inputs.previous_runtime_run_id != '' && inputs.previous_runtime_artifact_name != '' && format('{0}/portside-runtime-previous', runner.temp) || '' }}
+          PORTSIDE_PREVIOUS_RUNTIME_VERSION: ${{ inputs.previous_runtime_version }}
+        run: ./scripts/validate-clean-install.sh
+
+      - name: Upload sanitized acceptance logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: portside-clean-install-logs-${{ inputs.runtime_version }}
+          if-no-files-found: warn
+          retention-days: 30
+          path: ${{ runner.temp }}/portside-clean-install/logs/

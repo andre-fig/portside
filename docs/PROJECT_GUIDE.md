@@ -158,6 +158,9 @@ nos buckets do Portside.
   verbo winetricks.
 - `scripts/build-runtime/validate-manifest.sh`: valida schema, canal,
   componentes, URLs HTTPS aprovadas, tamanho, SHA-256 e proveniência.
+- `scripts/validate-clean-install.sh`: prepara um prefixo descartável a partir
+  de um artifact assinado, instala Steam pelo verbo vendorizado e exige
+  confirmações manuais da janela, login, persistência e jogo de controle.
 - `scripts/validate-production-policy.sh`: impede URLs de release do upstream,
   nomes legados em código de produção, fontes vendorizados inválidos e runtime
   compilado dentro de `vendor/`.
@@ -234,9 +237,11 @@ um app assinado, um ZIP notarizado e um DMG notarizado com ticket stapled no
 2. Para runtime, execute `scripts/build-runtime/build.sh` no macOS fixado. A
    saída começa em `staging`; cada componente recebe SHA-256, tamanho, commit
    fonte, proveniência e SBOM.
-3. O workflow `build-runtime.yml` publica somente staging depois de testes e
-   validações. O app consulta o manifesto assinado e baixa somente hosts
-   Portside autorizados.
+3. O workflow `build-runtime.yml` é disparado após um merge de fontes/runtime
+   na `main` e, com o ambiente `staging` configurado, compila, assina e publica
+   automaticamente somente em staging. Um `workflow_dispatch` também permite
+   repetir a build com uma versão explícita. O app consulta o manifesto
+   assinado e baixa somente hosts Portside autorizados.
 4. Para o app macOS, `release-production.yml` compila, assina, notariza,
    publica staging e aguarda revisão. O job de produção requer promoção
    explícita e ambiente protegido.
@@ -287,10 +292,13 @@ verificado na Stripe e disponibilidade real do dispositivo/navegador.
 - `ci.yml`: política de fontes, testes Swift e checks do backend.
 - `build-landing.yml`: lint, build e artifact da landing.
 - `build-desktop.yml`: bundle e DMG de validação não comercial após CI.
-- `build-runtime.yml`: build próprio do runtime no macOS fixado. Pushes fazem
-  build source-only e guardam evidência; `workflow_dispatch` com secrets e
-  buckets configurados também assina e publica em staging.
+- `build-runtime.yml`: build próprio do runtime no macOS fixado. Pushes na
+  `main` e `workflow_dispatch` compilam, assinam e publicam automaticamente
+  somente em staging; promoção para production continua explícita.
 - `sync-upstreams.yml`: sincronização diária/manual, sem merge automático.
+- `validate-clean-install.yml`: baixa artefatos de uma execução selecionada e
+  executa a aceitação manual de prefixo novo, Steam e GUI em um Mac self-hosted
+  com sessão gráfica; exige manifesto assinado e não usa upstream como fallback.
 - `release-production.yml`: release staging, notarização e promoção protegida.
 - `deploy-railway.yml`: verificação de health do backend já publicado no
   Railway; não usa o filesystem efêmero para artefatos.
@@ -299,7 +307,13 @@ verificado na Stripe e disponibilidade real do dispositivo/navegador.
 
 O CI precisa de Developer ID Application, perfil `notarytool`, chave privada
 Sparkle, chave privada do manifesto, configuração da Stripe, token admin do
-backend e credenciais dos buckets. Todos devem ficar em GitHub Environments,
+backend e credenciais dos buckets. Para o workflow automático de runtime, o
+Environment `staging` deve conter `PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX`,
+`PORTSIDE_MANIFEST_SIGNING_KEY_ID`, `PORTSIDE_MANIFEST_SIGNING_KEY`,
+`PORTSIDE_PUBLIC_BUCKET`, `PORTSIDE_SECONDARY_PUBLIC_BUCKET`,
+`PORTSIDE_S3_ACCESS_KEY_ID`, `PORTSIDE_S3_SECRET_ACCESS_KEY`,
+`PORTSIDE_S3_REGION` e, quando necessário, `PORTSIDE_S3_ENDPOINT`. Todos
+devem ficar em GitHub Environments,
 Keychain ou secret manager. O Railway hospeda API/worker/cron e PostgreSQL; os
 arquivos de runtime e releases ficam em storage de objetos primário e
 secundário. O bucket e os hosts reais ainda precisam ser configurados pelo

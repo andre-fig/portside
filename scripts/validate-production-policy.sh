@@ -11,6 +11,7 @@ for path in \
     "$ROOT_DIR/apps/desktop/Sources" \
     "$ROOT_DIR/apps/backend/src" \
     "$ROOT_DIR/.github/workflows" \
+    "$ROOT_DIR/scripts/validate-clean-install.sh" \
     "$ROOT_DIR/docs/runtime-manifest.json"; do
     if rg -n "$pattern" "$path"; then
         echo "direct upstream release dependency found in $path" >&2
