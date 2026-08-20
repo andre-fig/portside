@@ -241,7 +241,7 @@ jobs:
             embedded_certificate_key_hash="$(openssl x509 -in "$SIGNING_EMBEDDED_CERT" -pubkey -noout | openssl pkey -pubin -outform der 2>/dev/null | shasum -a 256 | awk '{print $1}')"
             if [ "$private_key_hash" = "$embedded_certificate_key_hash" ]; then
               cp "$SIGNING_EMBEDDED_CERT" "$SIGNING_CERT"
-              security import "$SIGNING_CERT" -A -f pemseq -t cert -k "$SIGNING_KEYCHAIN"
+              security import "$SIGNING_CERT" -A -f pemseq -t cert -k "$SIGNING_KEYCHAIN" || true
               security set-key-partition-list -S apple-tool:,apple: -s -k '' "$SIGNING_KEYCHAIN"
               if security find-identity -v -p codesigning "$SIGNING_KEYCHAIN" | grep -F "$PORTSIDE_CODESIGN_IDENTITY"; then
                 exit 0
