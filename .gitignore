@@ -25,3 +25,6 @@ build/releases/
 # Local Portside runtime and user data
 PortsideRuntime/
 *.dmg
+
+# Local editor preferences; shared launch configurations remain versioned
+.vscode/settings.json
