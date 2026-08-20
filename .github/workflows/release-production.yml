@@ -217,7 +217,7 @@ jobs:
             openssl x509 -inform der -in "$SIGNING_CERT" -noout
           fi
           security import "$SIGNING_P12" -P "$CODESIGN_P12_PASSWORD" -A -f pkcs12 -k "$SIGNING_KEYCHAIN"
-          security add-certificates -k "$SIGNING_KEYCHAIN" "$SIGNING_CERT"
+          security import "$SIGNING_CERT" -A -f pemseq -t cert -k "$SIGNING_KEYCHAIN"
           security set-key-partition-list -S apple-tool:,apple: -s -k '' "$SIGNING_KEYCHAIN"
           security list-keychains -d user -s "$SIGNING_KEYCHAIN"
           security default-keychain -s "$SIGNING_KEYCHAIN"
