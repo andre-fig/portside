@@ -21,8 +21,8 @@ remains a Valve official download performed by the approved `steam` verb;
 Portside does not mirror it.
 
 Production clients use only the Portside API host and signed temporary object
-URLs. GitHub/Sikarugir URLs remain provenance and development-only source data,
-not a runtime dependency of a commercial installation.
+Upstream source URLs remain provenance and development-only source data, not a
+runtime dependency of a commercial installation.
 
 Replicate approved objects to a second S3-compatible location. If that backup
 is unavailable, keep the primary installation path working and create an

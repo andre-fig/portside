@@ -47,8 +47,8 @@ final class PortsideModel: ObservableObject {
 
     private let store = EnvironmentStore()
     private let logger = PortsideLogger()
-    private let updateService: SikarugirUpdateService
-    private let wrapperInstaller: SikarugirWrapperInstaller
+    private let updateService: PortsideUpdateService
+    private let wrapperInstaller: PortsideRuntimeInstaller
     private let steamLauncher: SteamProcessLauncher
     private let readinessMonitor: SteamReadinessMonitor
     private let agentLauncher = PortsideAgentLauncher()
@@ -67,12 +67,12 @@ final class PortsideModel: ObservableObject {
         self.requiresCommercialLicense = backendConfiguration.isConfigured
         #endif
         self.licenseClient = backendConfiguration.isConfigured ? PortsideLicenseClient(configuration: backendConfiguration) : nil
-        self.updateService = SikarugirUpdateService(
-            logger: PortsideLogger(logFileName: "sikarugir-update.log"),
+        self.updateService = PortsideUpdateService(
+            logger: PortsideLogger(logFileName: "portside-update.log"),
             backendConfiguration: PortsideBackendConfiguration.fromBundle(),
             currentVersion: (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.1.0"
         )
-        self.wrapperInstaller = SikarugirWrapperInstaller(logger: PortsideLogger(logFileName: "sikarugir-install.log"))
+        self.wrapperInstaller = PortsideRuntimeInstaller(logger: PortsideLogger(logFileName: "runtime-install.log"))
         self.steamLauncher = SteamProcessLauncher()
         self.readinessMonitor = SteamReadinessMonitor()
         try? store.prepareDirectories()
@@ -210,8 +210,8 @@ final class PortsideModel: ObservableObject {
                 state.runtimeRecord = installed.runtimeRecord
                 state.runtimeManifestVersion = updateService.lastManifestVersion
                 state.runtime = RuntimeDescriptor(
-                    name: SikarugirBaselineConfiguration.engineName,
-                    version: SikarugirBaselineConfiguration.engineVersion,
+                    name: "Portside Wine Engine",
+                    version: "Portside source build",
                     executablePath: installed.validation.launcher.path,
                     redistributable: true,
                     licenseNote: installed.runtimeRecord.manifest.license
@@ -219,18 +219,18 @@ final class PortsideModel: ObservableObject {
                 state.phase = .prefixCreating
                 persist()
 
-                let steamExecutable = SikarugirSteamFlow.steamExecutable(prefix: installed.validation.prefix)
+                let steamExecutable = PortsideSteamFlow.steamExecutable(prefix: installed.validation.prefix)
                 if !FileManager.default.fileExists(atPath: steamExecutable.path) {
                     message = "Installing Steam securely…"
                     diagnostics.breadcrumb("steam_install_started", context: context(stage: "steam_install"))
                     let result = try await steamLauncher.installSteam(using: installed.validation.wrapper)
-                    guard result.status == 0 else { throw PortsideError.processFailed("official winetricks steam", result.status) }
+                    guard result.status == 0 else { throw PortsideError.processFailed("Portside runtime Steam setup", result.status) }
                 }
                 // The Windows PE file does not need a macOS executable bit;
                 // its existence is the authoritative post-winetricks check.
                 state.steamInstalled = FileManager.default.fileExists(atPath: steamExecutable.path)
                 state.steamExecutablePath = steamExecutable.path
-                guard state.steamInstalled else { throw PortsideError.invalidArtifact("steam.exe was not created by the official winetricks flow") }
+                guard state.steamInstalled else { throw PortsideError.invalidArtifact("steam.exe was not created by the Portside runtime setup") }
 
                 // The official first run must be over before the clean second
                 // opening. Only this wrapper/prefix may be terminated.
@@ -348,10 +348,10 @@ final class PortsideModel: ObservableObject {
             errorCode: errorCode,
             macOSVersion: requirements.macOSVersion,
             architecture: requirements.architecture,
-            sikarugirVersion: SikarugirBaselineConfiguration.creatorVersion,
-            templateVersion: SikarugirBaselineConfiguration.templateVersion,
-            engineVersion: SikarugirBaselineConfiguration.engineVersion,
-            renderer: SikarugirBaselineConfiguration.golden.renderer.rawValue,
+            runtimeVersion: "Portside runtime",
+            templateVersion: "Portside wrapper",
+            engineVersion: "Portside Wine source build",
+            renderer: "wineD3D",
             exitCode: state.lastExitCode,
             windowDetected: report?.windowDetected,
             processStarted: report?.processStarted,
@@ -365,12 +365,12 @@ final class PortsideModel: ObservableObject {
     private func errorCode(_ error: Error) -> String {
         switch error {
         case PortsideError.rosettaUnavailable: return "rosetta_unavailable"
-        case PortsideError.runtimeUnavailable: return "sikarugir_runtime_unavailable"
-        case PortsideError.checksumMismatch: return "official_artifact_checksum_failed"
-        case PortsideError.processTimedOut: return "official_process_timeout"
-        case PortsideError.processFailed: return "official_process_failed"
+        case PortsideError.runtimeUnavailable: return "portside_runtime_unavailable"
+        case PortsideError.checksumMismatch: return "runtime_artifact_checksum_failed"
+        case PortsideError.processTimedOut: return "runtime_process_timeout"
+        case PortsideError.processFailed: return "runtime_process_failed"
         case PortsideError.processLaunchFailed: return "steam_window_failed"
-        default: return "sikarugir_setup_failed"
+        default: return "portside_setup_failed"
         }
     }
 
@@ -380,7 +380,7 @@ final class PortsideModel: ObservableObject {
     }
 
     private func isValidWrapper(_ wrapper: URL) -> Bool {
-        (try? SikarugirWrapperValidator.validate(wrapper: wrapper)) != nil
+        (try? PortsideRuntimeValidator.validate(wrapper: wrapper)) != nil
     }
 
     private func isManagedSteamRunning(wrapper: URL, prefix: URL) -> Bool {

@@ -7,12 +7,16 @@ Run:
 ~~~sh
 swift test --package-path apps/desktop
 swift build --package-path apps/desktop
+cd apps/backend && npm run typecheck && npm run lint && npm test && npm run build
+cd ../..
+for file in scripts/build-runtime/*.sh scripts/generate_manifest.sh scripts/publish_runtime_staging.sh; do sh -n "$file"; done
+./scripts/validate-production-policy.sh
 ./scripts/package_app.sh
 ~~~
 
-The current suite covers the official artifact catalog and checksums, natural
+The current suite covers the Portside artifact catalog and checksums, native
 engine selection, daily update throttling, baseline Info.plist values,
-WSS-winetricks steam, clean wrapper launch arguments, archive traversal,
+winetricks steam, clean wrapper launch arguments, archive traversal,
 atomic installation, secret sanitization, renderer fallback ordering,
 32/64-bit PE detection, process ownership, readiness states and manifest
 round-tripping.
@@ -23,8 +27,8 @@ The following must be checked on a real macOS display for the migrated Portside
 build:
 
 1. Rosetta is installed only when absent.
-2. The first run creates a new isolated wrapper and runs the official
-   WSS-winetricks steam flow.
+2. The first run creates a new isolated wrapper and runs the vendored
+   winetricks `steam` verb.
 3. The initial Steam updater finishes and its first execution exits.
 4. The same wrapper opens cleanly a second time.
 5. The wrapper appears in the Dock and creates a real Steam window.
@@ -63,11 +67,8 @@ screenshots or full user paths.
 
 ## Baseline evidence
 
-The original Sikarugir baseline was created separately from the Portside
-prefix, with the exact PortsideBaseline.app values in UPSTREAM_VERSIONS.json.
-The Portside app has now repeated the automated portion of this validation:
-the official Steam verb created `steam.exe`, the first-run processes were
-terminated, a clean wrapper opening produced an on-screen managed window, and
-`steamwebhelper` was observed in the same prefix. `interfaceVerification`
-remains `notVerified` until a person confirms the rendered login form and
-keyboard/mouse interaction on the real display.
+The source/build checks above do not prove that Steam's graphical interface
+works. The Portside runtime host and artifacts must be installed into a fresh
+wrapper and the graphical acceptance list must be completed on the real Mac.
+`interfaceVerification` remains `notVerified` until a person confirms the
+rendered login form and keyboard/mouse interaction on the real display.

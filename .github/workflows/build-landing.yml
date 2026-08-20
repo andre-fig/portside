@@ -1,0 +1,49 @@
+name: Build Landing
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/landing/**"
+      - ".github/workflows/build-landing.yml"
+  pull_request:
+    paths:
+      - "apps/landing/**"
+      - ".github/workflows/build-landing.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Lint and build landing page
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/landing
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.21"
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint landing page
+        run: bun run lint
+
+      - name: Build landing page
+        run: bun run build
+
+      - name: Upload landing build
+        uses: actions/upload-artifact@v7
+        with:
+          name: portside-landing-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: apps/landing/.output

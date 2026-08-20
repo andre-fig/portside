@@ -49,7 +49,7 @@ public enum CompatibilityDiagnostics {
         for key in allowedKeys {
             if let value = info[key] { options[key] = String(describing: value) }
         }
-        var environment = SikarugirBaselineConfiguration.golden.environment
+        var environment = PortsideRuntimeConfiguration.golden.environment
         if let values = info["Environment"] as? [String: Any] {
             for (key, value) in values where allowedKeys.contains(key) { environment[key] = String(describing: value) }
         }
@@ -60,7 +60,7 @@ public enum CompatibilityDiagnostics {
             CompatibilityProcessDiagnostic(pid: snapshot.pid, parentPID: snapshot.parentPID, command: PortsideLogger.sanitize(snapshot.command))
         }
         let prefixStructure = knownPrefixStructure(prefix: prefix, fileManager: fileManager)
-        let logNames = ["sikarugir-install.log", "sikarugir-update.log", "steam-readiness.log", "game-launches.log", "game-launch-attempts.jsonl", "portside-agent.log"]
+        let logNames = ["runtime-install.log", "portside-update.log", "steam-readiness.log", "game-launches.log", "game-launch-attempts.jsonl", "portside-agent.log"]
         var logs: [String: String] = [:]
         for name in logNames {
             let url = PortsidePaths.logs.appendingPathComponent(name)
@@ -69,10 +69,10 @@ public enum CompatibilityDiagnostics {
             }
         }
         let steamLaunch = [
-            "executable": PortsideLogger.sanitize((info["Program Name and Path"] as? String) ?? SikarugirBaselineConfiguration.windowsSteamExecutable),
+            "executable": PortsideLogger.sanitize((info["PortsideSteamExecutable"] as? String) ?? PortsideRuntimeConfiguration.windowsSteamExecutable),
             "arguments": PortsideLogger.sanitize((info["Program Flags"] as? String) ?? "")
         ]
-        let report = CompatibilityDiagnosticsReport(wrapper: PortsideLogger.sanitize(wrapper.path), engine: SikarugirBaselineConfiguration.engineVersion, engineChecksum: SikarugirBaselineConfiguration.engineVersionSHA256, rendererInventory: sanitizedInventory(inventory), relevantOptions: options, environment: environment, prefixStructure: prefixStructure, processes: processRecords, steamLaunch: steamLaunch, logs: logs)
+        let report = CompatibilityDiagnosticsReport(wrapper: PortsideLogger.sanitize(wrapper.path), engine: PortsideRuntimeConfiguration.engineVersion, engineChecksum: PortsideRuntimeConfiguration.engineVersionSHA256, rendererInventory: sanitizedInventory(inventory), relevantOptions: options, environment: environment, prefixStructure: prefixStructure, processes: processRecords, steamLaunch: steamLaunch, logs: logs)
         let destination = outputURL ?? PortsidePaths.diagnostics.appendingPathComponent("compatibility-" + String(Int(Date().timeIntervalSince1970)) + ".json")
         try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder.portside.encode(report).write(to: destination, options: .atomic)

@@ -1,41 +1,118 @@
-name: Build Runtime
+name: Build Portside Runtime
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "vendor/**"
+      - "upstream/lock.json"
+      - "upstream/dependencies.json"
+      - "apps/runtime-host/**"
+      - "runtime/wrapper-template/**"
+      - "scripts/build-runtime/**"
+      - "scripts/generate_manifest.sh"
+      - "scripts/publish_runtime_staging.sh"
+      - ".github/workflows/build-runtime.yml"
   workflow_dispatch:
     inputs:
       version:
-        description: "Portside runtime source build version"
+        description: "Portside runtime version"
         required: true
-        default: "source"
+        type: string
+      artifact_url_prefix:
+        description: "HTTPS staging object URL prefix, including the runtime channel path"
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   build-runtime:
+    name: Build and publish staging runtime
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 180
+    environment: staging
     env:
-      PORTSIDE_RUNTIME_VERSION: ${{ inputs.version }}
+      PORTSIDE_RUNTIME_VERSION: ${{ inputs.version || github.sha }}
+      PORTSIDE_RUNTIME_CHANNEL: staging
+      PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX: ${{ inputs.artifact_url_prefix || secrets.PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX }}
+      PORTSIDE_MANIFEST_SIGNING_KEY_ID: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY_ID }}
+      PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
+      PORTSIDE_SECONDARY_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_SECONDARY_PUBLIC_BUCKET }}
     steps:
       - name: Check out Portside sources
         uses: actions/checkout@v7
 
-      - name: Record build environment
+      - name: Select fixed toolchain
         run: |
-          sw_vers
+          set -eu
+          sw_vers -productVersion
           xcode-select -p
+          xcodebuild -version
           clang --version
-          git --version
+          swift --version
+          for tool in clang clang++ make tar shasum jq node swiftc; do command -v "$tool"; done
 
-      - name: Build only from checked-in sources
+      - name: Install pinned runtime toolchain
+        run: |
+          for formula in bison mingw-w64 llvm lld freetype pkgconf; do brew list "$formula" >/dev/null 2>&1 || brew install "$formula"; done
+          test "$("$(brew --prefix bison)/bin/bison" --version | awk 'NR==1 {print $4}')" = "3.8.2"
+          test "$(brew list --versions mingw-w64 | awk '{print $2}')" = "14.0.0_3"
+          test "$(brew list --versions llvm | awk '{print $2}')" = "22.1.8_2"
+          test "$(brew list --versions lld | awk '{print $2}')" = "22.1.8"
+          test "$(brew list --versions freetype | awk '{print $2}')" = "2.14.3"
+          test "$(brew list --versions pkgconf | awk '{print $2}')" = "3.0.5"
+
+      - name: Validate staging publication inputs
+        run: |
+          set -eu
+          test -n "$PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX"
+          case "$PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX" in https://*) ;; *) echo "artifact prefix must be HTTPS" >&2; exit 1;; esac
+          test -n "$PORTSIDE_MANIFEST_SIGNING_KEY_ID"
+          test -n "$PORTSIDE_PUBLIC_BUCKET"
+          test -n "$PORTSIDE_SECONDARY_PUBLIC_BUCKET"
+
+      - name: Build wrapper, engine and winetricks from local sources
         run: ./scripts/build-runtime/build.sh
 
-      - name: Upload source-build evidence
+      - name: Materialize staging manifest signing key
+        env:
+          MANIFEST_PRIVATE_KEY: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY }}
+        run: |
+          set -eu
+          test -n "$MANIFEST_PRIVATE_KEY"
+          umask 077
+          printf '%s' "$MANIFEST_PRIVATE_KEY" > "$RUNNER_TEMP/portside-runtime-manifest.key"
+
+      - name: Sign and validate staging manifest
+        env:
+          PORTSIDE_RUNTIME_MANIFEST_INPUT: ${{ runner.workspace }}/build/runtime/runtime-manifest-unsigned.json
+          PORTSIDE_MANIFEST_SIGNING_KEY_FILE: ${{ runner.temp }}/portside-runtime-manifest.key
+          PORTSIDE_MANIFEST_OUTPUT: ${{ runner.workspace }}/build/runtime/runtime-manifest.json
+        run: |
+          ./scripts/generate_manifest.sh
+          ./scripts/build-runtime/validate-manifest.sh "$PORTSIDE_MANIFEST_OUTPUT"
+
+      - name: Publish staging runtime to both buckets
+        env:
+          PORTSIDE_RUNTIME_BUILD_DIR: ${{ runner.workspace }}/build/runtime
+        run: ./scripts/publish_runtime_staging.sh
+
+      - name: Run artifact and source policy checks
+        run: |
+          ./scripts/validate-production-policy.sh
+          test -s build/runtime/PortsideWrapper-${PORTSIDE_RUNTIME_VERSION}.tar.xz
+          test -s build/runtime/PortsideWineEngine-${PORTSIDE_RUNTIME_VERSION}.tar.xz
+          test -s build/runtime/PortsideWinetricks-${PORTSIDE_RUNTIME_VERSION}.tar.xz
+          test -s build/runtime/sbom.spdx.json
+          test -s build/runtime/provenance.json
+
+      - name: Upload staging evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: Portside-runtime-source-build-${{ inputs.version }}
-          if-no-files-found: warn
+          name: portside-runtime-staging-${{ env.PORTSIDE_RUNTIME_VERSION }}
+          if-no-files-found: error
           retention-days: 30
           path: build/runtime/

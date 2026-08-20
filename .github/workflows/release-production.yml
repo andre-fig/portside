@@ -29,6 +29,7 @@ jobs:
       PORTSIDE_UPDATE_FEED_URL: ${{ secrets.PORTSIDE_UPDATE_FEED_URL }}
       PORTSIDE_SPARKLE_PUBLIC_KEY: ${{ secrets.PORTSIDE_SPARKLE_PUBLIC_KEY }}
       PORTSIDE_RUNTIME_MANIFEST_PUBLIC_KEY: ${{ secrets.PORTSIDE_RUNTIME_MANIFEST_PUBLIC_KEY }}
+      PORTSIDE_MANIFEST_SIGNING_KEY_ID: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY_ID }}
       PORTSIDE_LICENSE_PUBLIC_KEY: ${{ secrets.PORTSIDE_LICENSE_PUBLIC_KEY }}
       PORTSIDE_LICENSE_KEY_ID: ${{ secrets.PORTSIDE_LICENSE_KEY_ID }}
       PORTSIDE_ARTIFACT_HOSTS: ${{ secrets.PORTSIDE_ARTIFACT_HOSTS }}
@@ -41,6 +42,17 @@ jobs:
     steps:
       - name: Check out tested sources
         uses: actions/checkout@v7
+
+      - name: Install pinned runtime toolchain
+        run: |
+          set -eu
+          for formula in bison mingw-w64 llvm lld freetype pkgconf; do brew list "$formula" >/dev/null 2>&1 || brew install "$formula"; done
+          test "$($(brew --prefix bison)/bin/bison --version | awk 'NR==1 {print $4}')" = "3.8.2"
+          test "$(brew list --versions mingw-w64 | awk '{print $2}')" = "14.0.0_3"
+          test "$(brew list --versions llvm | awk '{print $2}')" = "22.1.8_2"
+          test "$(brew list --versions lld | awk '{print $2}')" = "22.1.8"
+          test "$(brew list --versions freetype | awk '{print $2}')" = "2.14.3"
+          test "$(brew list --versions pkgconf | awk '{print $2}')" = "3.0.5"
 
       - name: Resolve and build Swift dependencies
         run: |
@@ -71,20 +83,25 @@ jobs:
       - name: Validate production source policy
         run: ./scripts/validate-production-policy.sh
 
+      - name: Build Portside runtime from local sources
+        env:
+          PORTSIDE_RUNTIME_BUILD_DIR: ${{ runner.temp }}/portside-release
+          PORTSIDE_RUNTIME_VERSION: ${{ inputs.version }}
+          PORTSIDE_RUNTIME_CHANNEL: staging
+          PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/runtime/staging/
+        run: ./scripts/build-runtime/build.sh
+
       - name: Materialize CI-only signing inputs
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.PORTSIDE_SPARKLE_PRIVATE_KEY }}
           MANIFEST_PRIVATE_KEY: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY }}
-          UNSIGNED_MANIFEST: ${{ secrets.PORTSIDE_RUNTIME_MANIFEST_JSON }}
         run: |
           set -eu
           umask 077
           test -n "$SPARKLE_PRIVATE_KEY"
           test -n "$MANIFEST_PRIVATE_KEY"
-          test -n "$UNSIGNED_MANIFEST"
           printf '%s' "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/portside-sparkle-ed25519.key"
           printf '%s' "$MANIFEST_PRIVATE_KEY" > "$RUNNER_TEMP/portside-manifest-ed25519.key"
-          printf '%s' "$UNSIGNED_MANIFEST" > "$RUNNER_TEMP/runtime-manifest-unsigned.json"
 
       - name: Validate release inputs without printing secrets
         run: |
@@ -102,7 +119,7 @@ jobs:
       - name: Sign application and generate provenance
         env:
           PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
-          PORTSIDE_RUNTIME_MANIFEST_INPUT: ${{ runner.temp }}/runtime-manifest-unsigned.json
+          PORTSIDE_RUNTIME_MANIFEST_INPUT: ${{ runner.temp }}/portside-release/runtime-manifest-unsigned.json
           PORTSIDE_MANIFEST_SIGNING_KEY_FILE: ${{ runner.temp }}/portside-manifest-ed25519.key
         run: ./scripts/sign_release.sh
 
@@ -158,6 +175,7 @@ jobs:
       PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
       PORTSIDE_SECONDARY_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_SECONDARY_PUBLIC_BUCKET }}
       PORTSIDE_PUBLIC_BASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}
+      PORTSIDE_MANIFEST_SIGNING_KEY_ID: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY_ID }}
       PORTSIDE_CONFIRM_PRODUCTION: YES
     steps:
       - name: Check out release scripts
@@ -183,6 +201,38 @@ jobs:
           umask 077
           test -n "$SPARKLE_PRIVATE_KEY"
           printf '%s' "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/portside-sparkle-ed25519.key"
+
+      - name: Materialize runtime manifest signing key
+        env:
+          MANIFEST_PRIVATE_KEY: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY }}
+        run: |
+          set -eu
+          umask 077
+          test -n "$MANIFEST_PRIVATE_KEY"
+          printf '%s' "$MANIFEST_PRIVATE_KEY" > "$RUNNER_TEMP/portside-runtime-manifest.key"
+
+      - name: Create signed production runtime manifest
+        env:
+          PORTSIDE_RUNTIME_BUILD_DIR: ${{ runner.temp }}/portside-release
+          PORTSIDE_RUNTIME_VERSION: ${{ inputs.version }}
+          PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/runtime/production/
+          PORTSIDE_RUNTIME_MANIFEST_INPUT: ${{ runner.temp }}/portside-release/runtime-manifest-production-unsigned.json
+          PORTSIDE_MANIFEST_SIGNING_KEY_FILE: ${{ runner.temp }}/portside-runtime-manifest.key
+          PORTSIDE_MANIFEST_OUTPUT: ${{ runner.temp }}/portside-release/runtime-manifest.json
+        run: |
+          set -eu
+          INPUT="$PORTSIDE_RUNTIME_BUILD_DIR/runtime-manifest-unsigned.json" OUTPUT="$PORTSIDE_RUNTIME_MANIFEST_INPUT" PREFIX="$PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX" node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const input = JSON.parse(readFileSync(process.env.INPUT, 'utf8'));
+          const prefix = process.env.PREFIX.endsWith('/') ? process.env.PREFIX : `${process.env.PREFIX}/`;
+          input.channel = 'production';
+          input.buildStatus = 'production';
+          input.signature = null;
+          input.components = input.components.map((component) => ({ ...component, downloadURL: prefix + component.downloadURL.split('/').pop() }));
+          writeFileSync(process.env.OUTPUT, JSON.stringify(input, null, 2) + '\n');
+          NODE
+          ./scripts/generate_manifest.sh
+          ./scripts/build-runtime/validate-manifest.sh "$PORTSIDE_MANIFEST_OUTPUT"
 
       - name: Re-sign appcast for production storage URLs
         env:

@@ -43,17 +43,16 @@ public final class PortsideBackendClient: @unchecked Sendable {
         }
     }
 
-    public func downloadBaselineArtifacts(currentVersion: String, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> [SikarugirArtifact: URL] {
+    public func downloadBaselineArtifacts(currentVersion: String, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> [PortsideRuntimeArtifact: URL] {
         let manifest = try await fetchRuntimeManifest(currentVersion: currentVersion)
         return try await downloadArtifacts(manifest: manifest, to: PortsidePaths.downloads, progress: progress)
     }
 
-    public func downloadArtifacts(manifest: PortsideRuntimeManifest, to directory: URL, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> [SikarugirArtifact: URL] {
-        let expected = [SikarugirOfficialCatalog.template, SikarugirOfficialCatalog.engine, SikarugirOfficialCatalog.winetricks]
-        var result: [SikarugirArtifact: URL] = [:]
+    public func downloadArtifacts(manifest: PortsideRuntimeManifest, to directory: URL, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> [PortsideRuntimeArtifact: URL] {
+        var result: [PortsideRuntimeArtifact: URL] = [:]
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        for (index, artifact) in expected.enumerated() {
-            guard let component = manifest.components.first(where: { $0.component == artifact.identifier || $0.id == artifact.identifier }) else {
+        for (index, component) in manifest.components.enumerated() {
+            guard PortsideRuntimeCatalog.requiredComponents.contains(component.component) else {
                 throw PortsideCommercialError.invalidManifest("required runtime component is missing")
             }
             guard let host = component.downloadURL.host, configuration.allowedHosts.contains(host) else { throw PortsideCommercialError.unauthorizedURL }
@@ -63,8 +62,8 @@ public final class PortsideBackendClient: @unchecked Sendable {
             } else {
                 _ = try await downloader.download(from: component.downloadURL, to: destination, expectedSHA256: component.sha256, expectedSize: component.size)
             }
-            result[artifact] = destination
-            progress(Double(index + 1) / Double(expected.count))
+            result[PortsideRuntimeArtifact(component: component)] = destination
+            progress(Double(index + 1) / Double(manifest.components.count))
         }
         return result
     }

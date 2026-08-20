@@ -3,66 +3,101 @@ set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 BUILD_DIR="${PORTSIDE_RUNTIME_BUILD_DIR:-$ROOT_DIR/build/runtime}"
-VERSION="${PORTSIDE_RUNTIME_VERSION:-source-$(date -u +%Y%m%d)}"
+VERSION="${PORTSIDE_RUNTIME_VERSION:?Set PORTSIDE_RUNTIME_VERSION}"
+CHANNEL="${PORTSIDE_RUNTIME_CHANNEL:-staging}"
+URL_PREFIX="${PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX:-}"
+PORTSIDE_COMMIT="${PORTSIDE_COMMIT:-$(git -C "$ROOT_DIR" rev-parse HEAD)}"
+
+case "$CHANNEL" in staging|production) ;; *) echo "runtime channel must be staging or production" >&2; exit 1 ;; esac
+case "$BUILD_DIR" in "$ROOT_DIR"/*) ;; *) echo "runtime build directory must be inside the checkout" >&2; exit 1 ;; esac
+command -v jq >/dev/null 2>&1 || { echo "jq is required for the Portside runtime build" >&2; exit 1; }
 
 mkdir -p "$BUILD_DIR"
-"$ROOT_DIR/scripts/upstream/validate_snapshot.sh" "$ROOT_DIR/vendor/wine"
-"$ROOT_DIR/scripts/upstream/validate_snapshot.sh" "$ROOT_DIR/vendor/winetricks"
+"$ROOT_DIR/scripts/build-runtime/source-audit.sh"
+"$ROOT_DIR/scripts/build-runtime/build-wrapper.sh"
+"$ROOT_DIR/scripts/build-runtime/build-wine-engine.sh"
+"$ROOT_DIR/scripts/build-runtime/build-winetricks.sh"
+"$ROOT_DIR/scripts/build-runtime/validate-clean-layout.sh"
 
-# This is a Portside-produced source artifact. It is deliberately made from
-# the checked-in tree and never downloaded from a release URL.
-WINETRICKS_ARCHIVE="$BUILD_DIR/PortsideWinetricks-$VERSION.tar.xz"
-tar -cJf "$WINETRICKS_ARCHIVE" -C "$ROOT_DIR/vendor/winetricks" .
-artifact_sha256=$(shasum -a 256 "$WINETRICKS_ARCHIVE" | awk '{print $1}')
-artifact_size=$(wc -c < "$WINETRICKS_ARCHIVE" | tr -d '[:space:]')
+wrapper_file="PortsideWrapper-$VERSION.tar.xz"
+engine_file="PortsideWineEngine-$VERSION.tar.xz"
+winetricks_file="PortsideWinetricks-$VERSION.tar.xz"
+for artifact in "$wrapper_file" "$engine_file" "$winetricks_file"; do
+    [ -s "$BUILD_DIR/$artifact" ] || { echo "required runtime artifact was not produced: $artifact" >&2; exit 1; }
+    case "$artifact" in *Sikarugir*|*Template*) echo "legacy artifact name produced: $artifact" >&2; exit 1 ;; esac
+done
 
-wine_commit=$(jq -r '.repositories[] | select(.name == "wine") | .commit' "$ROOT_DIR/upstream/lock.json")
-winetricks_commit=$(jq -r '.repositories[] | select(.name == "winetricks") | .commit' "$ROOT_DIR/upstream/lock.json")
-wine_checksum=$(jq -r '.repositories[] | select(.name == "wine") | .snapshotChecksum' "$ROOT_DIR/upstream/lock.json")
-winetricks_checksum=$(jq -r '.repositories[] | select(.name == "winetricks") | .snapshotChecksum' "$ROOT_DIR/upstream/lock.json")
-winetricks_repository=$(jq -r '.repositories[] | select(.name == "winetricks") | .repository' "$ROOT_DIR/upstream/lock.json")
-macos_version=$(sw_vers -productVersion 2>/dev/null || uname -sr)
-architecture=$(uname -m)
-xcode_version=$(xcodebuild -version 2>/dev/null | tr '\n' ' ' || true)
-swift_version=$(swift --version 2>/dev/null | head -1 || true)
+wine_commit="$(jq -r '.repositories[] | select(.name == "wine") | .commit' "$ROOT_DIR/upstream/lock.json")"
+wine_checksum="$(jq -r '.repositories[] | select(.name == "wine") | .snapshotChecksum' "$ROOT_DIR/upstream/lock.json")"
+winetricks_commit="$(jq -r '.repositories[] | select(.name == "winetricks") | .commit' "$ROOT_DIR/upstream/lock.json")"
+winetricks_checksum="$(jq -r '.repositories[] | select(.name == "winetricks") | .snapshotChecksum' "$ROOT_DIR/upstream/lock.json")"
+wrapper_source_root="$BUILD_DIR/source-checksums"
+rm -rf "$wrapper_source_root"
+mkdir -p "$wrapper_source_root"
+cp -R "$ROOT_DIR/runtime/wrapper-template" "$wrapper_source_root/"
+cp -R "$ROOT_DIR/apps/runtime-host" "$wrapper_source_root/"
+wrapper_source_checksum="$($ROOT_DIR/scripts/upstream/snapshot_checksum.sh "$wrapper_source_root")"
+rm -rf "$wrapper_source_root"
+wrapper_checksum="$(shasum -a 256 "$BUILD_DIR/$wrapper_file" | awk '{print $1}')"
+engine_checksum="$(shasum -a 256 "$BUILD_DIR/$engine_file" | awk '{print $1}')"
+winetricks_artifact_checksum="$(shasum -a 256 "$BUILD_DIR/$winetricks_file" | awk '{print $1}')"
+wrapper_size="$(wc -c < "$BUILD_DIR/$wrapper_file" | tr -d '[:space:]')"
+engine_size="$(wc -c < "$BUILD_DIR/$engine_file" | tr -d '[:space:]')"
+winetricks_size="$(wc -c < "$BUILD_DIR/$winetricks_file" | tr -d '[:space:]')"
+build_id="${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}"
+published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+cat > "$BUILD_DIR/provenance.json" <<EOF
+{
+  "schemaVersion": 1,
+  "buildId": "$build_id",
+  "portsideCommit": "$PORTSIDE_COMMIT",
+  "channel": "$CHANNEL",
+  "version": "$VERSION",
+  "sourcePolicy": "checked-in vendor sources only; no compiled upstream input",
+  "sourceCommits": {"portside": "$PORTSIDE_COMMIT", "wine": "$wine_commit", "winetricks": "$winetricks_commit"},
+  "sourceSnapshotChecksums": {"portsideWrapper": "$wrapper_source_checksum", "wine": "$wine_checksum", "winetricks": "$winetricks_checksum"},
+  "artifacts": ["$wrapper_file", "$engine_file", "$winetricks_file"]
+}
+EOF
+
+url_for() {
+    case "$URL_PREFIX" in */) printf '%s%s' "$URL_PREFIX" "$1" ;; *) printf '%s/%s' "$URL_PREFIX" "$1" ;; esac
+}
+wrapper_url="$(url_for "$wrapper_file")"
+engine_url="$(url_for "$engine_file")"
+winetricks_url="$(url_for "$winetricks_file")"
 
 jq -n \
-  --arg artifact "PortsideWinetricks-$VERSION.tar.xz" \
   --arg version "$VERSION" \
-  --arg sha256 "$artifact_sha256" \
-  --arg size "$artifact_size" \
-  --arg sourceRepository "$winetricks_repository" \
-  --arg sourceCommit "$winetricks_commit" \
-  --arg sourceSnapshotChecksum "$winetricks_checksum" \
-  '{spdxVersion: "SPDX-2.3", dataLicense: "CC0-1.0", SPDXID: "SPDXRef-DOCUMENT", name: ("Portside runtime " + $version), documentNamespace: ("https://portside.invalid/sbom/" + $version), packages: [{SPDXID: "SPDXRef-winetricks", name: "winetricks", versionInfo: $version, downloadLocation: $sourceRepository, licenseConcluded: "LGPL-2.1-or-later", supplier: "Portside", checksums: [{algorithm: "SHA256", checksumValue: $sha256}], externalRefs: [{referenceType: "source-commit", referenceLocator: $sourceCommit}, {referenceType: "source-snapshot-sha256", referenceLocator: $sourceSnapshotChecksum}], annotations: [{annotationType: "OTHER", annotator: "Tool: Portside", comment: ("artifact=" + $artifact + "; size=" + $size)}]}]}' \
-  > "$BUILD_DIR/sbom.spdx.json"
+  --arg buildId "$build_id" \
+  --arg portsideCommit "$PORTSIDE_COMMIT" \
+  --arg channel "$CHANNEL" \
+  --arg publishedAt "$published_at" \
+  --arg wrapperURL "$wrapper_url" --arg wrapperSHA "$wrapper_checksum" --arg wrapperSize "$wrapper_size" \
+  --arg engineURL "$engine_url" --arg engineSHA "$engine_checksum" --arg engineSize "$engine_size" \
+  --arg winetricksURL "$winetricks_url" --arg winetricksSHA "$winetricks_artifact_checksum" --arg winetricksSize "$winetricks_size" \
+  --arg wineCommit "$wine_commit" --arg wineChecksum "$wine_checksum" \
+  --arg winetricksCommit "$winetricks_commit" --arg winetricksChecksum "$winetricks_checksum" --arg wrapperSourceChecksum "$wrapper_source_checksum" \
+  '{schemaVersion: 2, channel: $channel, manifestVersion: $version, minimumPortsideVersion: "0.1.0", publishedAt: $publishedAt, buildStatus: $channel, builtBy: "Portside", buildId: $buildId, portsideCommit: $portsideCommit, components: [
+    {id: "wrapper", component: "wrapper", version: $version, downloadURL: $wrapperURL, sha256: $wrapperSHA, size: ($wrapperSize|tonumber), critical: true, rollbackVersion: null, builtBy: "Portside", sourcePath: "runtime/wrapper-template + apps/runtime-host", sourceCommit: $portsideCommit, sourceSnapshotChecksum: $wrapperSourceChecksum, license: "Portside runtime host and template"},
+    {id: "engine", component: "engine", version: $version, downloadURL: $engineURL, sha256: $engineSHA, size: ($engineSize|tonumber), critical: true, rollbackVersion: null, builtBy: "Portside", sourcePath: "vendor/wine", sourceCommit: $wineCommit, sourceSnapshotChecksum: $wineChecksum, license: "LGPL-2.1-or-later"},
+    {id: "winetricks", component: "winetricks", version: $version, downloadURL: $winetricksURL, sha256: $winetricksSHA, size: ($winetricksSize|tonumber), critical: true, rollbackVersion: null, builtBy: "Portside", sourcePath: "vendor/winetricks", sourceCommit: $winetricksCommit, sourceSnapshotChecksum: $winetricksChecksum, license: "LGPL-2.1-or-later"}
+  ], rendererDefaults: {renderer: "wineD3D", D3DMETAL: 0, DXMT: 0, DXVK: 0, WINEMSYNC: 1, WINEESYNC: 1}, compatibilityRules: [], critical: true, rollbackVersion: null, signatureKeyId: "", signature: null}' \
+  > "$BUILD_DIR/runtime-manifest-unsigned.json"
 
 jq -n \
-  --arg version "$VERSION" \
-  --arg wineCommit "$wine_commit" \
-  --arg wineSnapshotChecksum "$wine_checksum" \
-  --arg winetricksCommit "$winetricks_commit" \
-  --arg winetricksSnapshotChecksum "$winetricks_checksum" \
-  --arg winetricksRepository "$winetricks_repository" \
-  --arg artifact "build/runtime/PortsideWinetricks-$VERSION.tar.xz" \
-  --arg artifactSHA256 "$artifact_sha256" \
-  --arg artifactSize "$artifact_size" \
-  --arg macosVersion "$macos_version" \
-  --arg architecture "$architecture" \
-  --arg xcodeVersion "$xcode_version" \
-  --arg swiftVersion "$swift_version" \
-  --arg sbom "build/runtime/sbom.spdx.json" \
-  '{schemaVersion: 1, version: $version, channel: "staging", status: "partial", artifacts: [{component: "winetricks", path: $artifact, sha256: $artifactSHA256, size: ($artifactSize | tonumber), sourceRepository: $winetricksRepository, sourceCommit: $winetricksCommit, sourceSnapshotChecksum: $winetricksSnapshotChecksum, license: "LGPL-2.1-or-later", sbom: $sbom}], sourceCommits: {wine: $wineCommit, winetricks: $winetricksCommit}, sourceSnapshotChecksums: {wine: $wineSnapshotChecksum, winetricks: $winetricksSnapshotChecksum}, environment: {macOS: $macosVersion, architecture: $architecture, xcode: $xcodeVersion, swift: $swiftVersion, flags: "source-only; no network fetch"}, blockers: ["wrapper source is missing from the pinned Wrapper repository", "engine build recipe and Sikarugir engine patches are missing from the pinned Engines/Wine source set"], note: "No official compiled artifact was used as a fallback."}' \
-  > "$BUILD_DIR/provenance.json"
+  --arg version "$VERSION" --arg wineCommit "$wine_commit" --arg wineChecksum "$wine_checksum" --arg winetricksCommit "$winetricks_commit" --arg winetricksChecksum "$winetricks_checksum" --arg wrapperSHA "$wrapper_checksum" --arg engineSHA "$engine_checksum" --arg winetricksSHA "$winetricks_artifact_checksum" \
+  '{spdxVersion: "SPDX-2.3", dataLicense: "CC0-1.0", SPDXID: "SPDXRef-DOCUMENT", name: ("Portside runtime " + $version), documentNamespace: ("https://portside.invalid/sbom/" + $version), packages: [
+    {SPDXID: "SPDXRef-wrapper", name: "Portside wrapper", versionInfo: $version, downloadLocation: "NOASSERTION", licenseConcluded: "NOASSERTION", supplier: "Portside", checksums: [{algorithm: "SHA256", checksumValue: $wrapperSHA}]},
+    {SPDXID: "SPDXRef-wine", name: "Wine", versionInfo: $version, downloadLocation: "NOASSERTION", licenseConcluded: "LGPL-2.1-or-later", supplier: "Portside", checksums: [{algorithm: "SHA256", checksumValue: $engineSHA}], externalRefs: [{referenceType: "source-commit", referenceLocator: $wineCommit}, {referenceType: "source-snapshot-sha256", referenceLocator: $wineChecksum}]},
+    {SPDXID: "SPDXRef-winetricks", name: "Winetricks", versionInfo: $version, downloadLocation: "NOASSERTION", licenseConcluded: "LGPL-2.1-or-later", supplier: "Portside", checksums: [{algorithm: "SHA256", checksumValue: $winetricksSHA}], externalRefs: [{referenceType: "source-commit", referenceLocator: $winetricksCommit}, {referenceType: "source-snapshot-sha256", referenceLocator: $winetricksChecksum}]}
+  ]}' > "$BUILD_DIR/sbom.spdx.json"
 
-if "$ROOT_DIR/scripts/build-runtime/source-audit.sh" > "$BUILD_DIR/source-audit.txt" 2>&1; then
-    cat "$BUILD_DIR/source-audit.txt"
-else
-    audit_status=$?
-    cat "$BUILD_DIR/source-audit.txt"
-    echo "Partial runtime output is available at $BUILD_DIR, but the requested wrapper/engine build is blocked." >&2
-    exit "$audit_status"
+if [ -z "$URL_PREFIX" ]; then
+    echo "Runtime archives were built, but PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX is required to create a publishable manifest." >&2
+    exit 2
 fi
-
-echo "The source audit unexpectedly found all required build inputs; implement the component builders before publishing."
-exit 3
+case "$URL_PREFIX" in https://*) ;; *) echo "runtime artifact URL prefix must use HTTPS" >&2; exit 1 ;; esac
+"$ROOT_DIR/scripts/build-runtime/validate-manifest.sh" "$BUILD_DIR/runtime-manifest-unsigned.json"
+echo "Built Portside runtime artifacts and unsigned staging manifest in $BUILD_DIR."

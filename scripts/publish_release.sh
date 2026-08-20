@@ -26,7 +26,18 @@ publish_object "$BUILD_DIR/Portside-${VERSION}-notarized.zip" "app/$CHANNEL/Port
 publish_object "$BUILD_DIR/Portside-${VERSION}.dmg" "app/$CHANNEL/Portside-${VERSION}.dmg" "application/x-apple-diskimage"
 publish_object "$BUILD_DIR/appcast.xml" "app/$CHANNEL/appcast.xml" "application/xml"
 publish_object "$BUILD_DIR/checksums.txt" "app/$CHANNEL/checksums.txt" "text/plain"
-if [ -f "$BUILD_DIR/runtime-manifest.json" ]; then
-    publish_object "$BUILD_DIR/runtime-manifest.json" "runtime/$CHANNEL/runtime-manifest.json" "application/json"
-fi
+for runtime_file in \
+    "PortsideWrapper-${VERSION}.tar.xz" \
+    "PortsideWineEngine-${VERSION}.tar.xz" \
+    "PortsideWinetricks-${VERSION}.tar.xz" \
+    "runtime-manifest.json" \
+    "provenance.json" \
+    "sbom.spdx.json"; do
+    [ -f "$BUILD_DIR/$runtime_file" ] || { echo "Missing runtime release file: $runtime_file" >&2; exit 1; }
+    case "$runtime_file" in
+        *.json) content_type="application/json" ;;
+        *) content_type="application/x-xz" ;;
+    esac
+    publish_object "$BUILD_DIR/$runtime_file" "runtime/$CHANNEL/$runtime_file" "$content_type"
+done
 echo "Published $VERSION to primary and secondary storage in $CHANNEL. Explicit release promotion remains required."

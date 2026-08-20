@@ -8,7 +8,7 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
     private static let release = "com.portside.app@0.1.0+1"
     private static let allowedTagKeys: Set<String> = [
         "stage", "error_code", "portside_version", "portside_build", "macos_version", "architecture",
-        "sikarugir_version", "template_version", "engine_version", "renderer", "app_id",
+        "runtime_version", "template_version", "engine_version", "renderer", "app_id",
         "executable_architecture", "graphics_api", "launch_attempt", "fallback_index", "exit_code",
         "window_detected", "rollback_performed", "process_started", "webhelper_started",
         "interface_verification", "msync_enabled", "esync_enabled"

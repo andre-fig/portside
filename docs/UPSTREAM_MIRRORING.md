@@ -23,18 +23,25 @@ that record before commercial distribution. `upstream/licenses/` is only an
 inventory pointer: exact notices remain beside their source in each
 `vendor/` snapshot.
 
-Rebuild from the repository alone with:
+Rebuild the Portside runtime from the repository sources with:
 
 ```sh
+PORTSIDE_RUNTIME_VERSION=0.1.0 \
+PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX=https://artifacts.example.invalid/staging/runtime/ \
 ./scripts/build-runtime/build.sh
 ```
 
-The current pinned Wrapper and Engines snapshots stop this command after
-producing the local winetricks source artifact and provenance evidence. They
-contain no wrapper/template source or engine build recipe/patch set. This is a
-deliberate recorded blocker: the workflow never substitutes a downloaded
-official binary. Wine and winetricks are present as source snapshots; the
-engine-equivalent and wrapper build remain pending the missing inputs.
+The command builds the Portside wrapper/template, the native runtime host, a
+Wine engine from `vendor/wine`, and a winetricks source archive. The pinned
+Wrapper and Engines snapshots are retained as provenance only because they do
+not contain executable build source. The workflow never substitutes a
+downloaded compiled runtime when the source build fails.
+
+The exact host dependencies are recorded in `upstream/dependencies.json`.
+`docs/RUNTIME_BUILD.md` records the current validation result, architecture,
+toolchain and any missing dependency. A successful build creates unsigned
+staging evidence; signing, upload, promotion and production publication are
+separate explicit steps.
 
 A missing external repository must not prevent a stable reinstall, repair,
 rollback or use of an already installed runtime. The private bucket and

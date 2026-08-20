@@ -1,0 +1,15 @@
+{
+  "version": "0.1.0",
+  "wineRelativePath": "Contents/SharedSupport/engine",
+  "prefixRelativePath": "Contents/SharedSupport/prefix",
+  "winetricksRelativePath": "Contents/SharedSupport/winetricks/src/winetricks",
+  "steamExecutable": "C:\\Program Files (x86)\\Steam\\steam.exe",
+  "wineDebug": "-plugplay,+loaddll",
+  "environment": {
+    "WINEMSYNC": "1",
+    "WINEESYNC": "1",
+    "D3DMETAL": "0",
+    "DXMT": "0",
+    "DXVK": "0"
+  }
+}

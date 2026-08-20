@@ -2,6 +2,9 @@
   "schemaVersion": 2,
   "channel": "staging",
   "manifestVersion": "source-build-pending",
+  "buildStatus": "blocked",
+  "builtBy": "Portside",
+  "buildId": null,
   "minimumPortsideVersion": "0.1.0",
   "publishedAt": "2026-08-19T00:00:00Z",
   "components": [],
@@ -18,9 +21,8 @@
   "rollbackVersion": null,
   "signatureKeyId": "staging-key-not-configured",
   "signature": null,
-  "buildStatus": "blocked",
   "blockers": [
-    "The pinned Wrapper repository has no template source or build recipe.",
-    "The pinned Engines repository has no engine source or Sikarugir patch set."
+    "This checked-in fixture is intentionally non-publishable until a Portside source build, validation and promotion exist.",
+    "No production download URL or compiled runtime is stored in the repository."
   ]
 }

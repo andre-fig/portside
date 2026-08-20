@@ -134,8 +134,10 @@ export class RuntimeService {
           orderBy: { publishedAt: "desc" },
         });
         if (published) {
+          const payload = published.payload as Record<string, unknown>;
+          this.validatePublishedManifest(payload, published.channel);
           return {
-            ...(published.payload as Record<string, unknown>),
+            ...payload,
             signature: published.signature,
             signatureKeyId: published.signatureKeyId,
           };
@@ -152,7 +154,9 @@ export class RuntimeService {
     }
     const path = join(process.cwd(), "manifests", "runtime-manifest.json");
     try {
-      return JSON.parse(await readFile(path, "utf8"));
+      const payload = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+      this.validatePublishedManifest(payload, Channel.staging);
+      return payload;
     } catch {
       throw new ServiceUnavailableException(
         "production runtime manifest is not published",
@@ -175,8 +179,10 @@ export class RuntimeService {
     if (manifest.channel !== input.channel)
       throw new BadRequestException("manifest channel does not match the release channel");
     const components = Array.isArray(manifest.components) ? manifest.components : [];
-    if (input.channel === Channel.production && components.length === 0)
-      throw new BadRequestException("production manifest must contain runtime artifacts");
+    if (components.length !== 3)
+      throw new BadRequestException("runtime manifest must contain wrapper, engine and winetricks artifacts");
+    if (manifest.buildStatus !== input.channel || manifest.builtBy !== "Portside" || typeof manifest.buildId !== "string" || !manifest.buildId)
+      throw new BadRequestException("runtime manifest must reference a successful Portside build");
     const artifactHosts = new Set(
       (process.env.PORTSIDE_ARTIFACT_HOSTS ?? "")
         .split(",")
@@ -209,17 +215,24 @@ export class RuntimeService {
           ? (component as Record<string, number>).size
           : 0;
       if (
-        input.channel === Channel.production &&
         (!downloadURL ||
           downloadURL.protocol !== "https:" ||
           !downloadURL.hostname ||
           !artifactHosts.has(downloadURL.hostname) ||
           !/^[a-f0-9]{64}$/i.test(sha256) ||
           !Number.isSafeInteger(size) ||
-          size <= 0)
+          size <= 0 ||
+          typeof component !== "object" ||
+          (component as Record<string, unknown>).builtBy !== "Portside" ||
+          typeof (component as Record<string, unknown>).sourcePath !== "string" ||
+          typeof (component as Record<string, unknown>).sourceCommit !== "string" ||
+          typeof (component as Record<string, unknown>).sourceSnapshotChecksum !== "string" ||
+          typeof (component as Record<string, unknown>).license !== "string" ||
+          !["wrapper", "engine", "winetricks"].includes(String((component as Record<string, unknown>).component)) ||
+          /sikarugir|raw\.githubusercontent\.com|github\.com\/Sikarugir-App/i.test(String((component as Record<string, unknown>).downloadURL)))
       )
         throw new BadRequestException(
-          "production manifest contains an invalid or non-Portside artifact",
+          "runtime manifest contains an invalid or non-Portside artifact",
         );
     }
     const unsigned = { ...manifest, signature: null };
@@ -506,6 +519,15 @@ export class RuntimeService {
       });
       return rolledBack;
     });
+  }
+
+  private validatePublishedManifest(payload: Record<string, unknown>, channel: Channel): void {
+    const components = Array.isArray(payload.components) ? payload.components : [];
+    if (payload.buildStatus !== channel || payload.builtBy !== "Portside" || components.length !== 3)
+      throw new ServiceUnavailableException("runtime manifest is not a complete Portside build");
+    const names = components.map((component) => component && typeof component === "object" ? String((component as Record<string, unknown>).component) : "").sort();
+    if (names.join(",") !== "engine,winetricks,wrapper")
+      throw new ServiceUnavailableException("runtime manifest components are incomplete");
   }
 
   private requireDatabase(): PrismaService {

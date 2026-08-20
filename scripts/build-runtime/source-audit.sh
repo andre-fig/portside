@@ -4,28 +4,18 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 VENDOR_DIR="$ROOT_DIR/vendor"
 
-source_markers() {
-    find "$1" -type f \( \
-        -name configure.ac -o \
-        -name CMakeLists.txt -o \
-        -name Package.swift -o \
-        -name Makefile.am -o \
-        -name '*.xcodeproj' -o \
-        -name '*.xcworkspace' \
-    \) -print -quit
-}
-
 missing=0
+if [ ! -f "$ROOT_DIR/apps/runtime-host/Sources/PortsideRuntimeHost/main.swift" ]; then
+    echo "MISSING_SOURCE wrapper: PortsideRuntimeHost source is absent"
+    missing=1
+fi
+if [ ! -f "$ROOT_DIR/runtime/wrapper-template/Contents/Info.plist" ]; then
+    echo "MISSING_SOURCE wrapper: Portside wrapper template is absent"
+    missing=1
+fi
 for component in wrapper engines; do
-    component_dir="$VENDOR_DIR/$component"
-    if [ ! -d "$component_dir" ]; then
-        echo "MISSING_SOURCE $component: vendor directory is absent"
-        missing=1
-        continue
-    fi
-    if ! source_markers "$component_dir" | grep -q .; then
-        echo "MISSING_SOURCE $component: no source/build marker exists in $component_dir"
-        find "$component_dir" -maxdepth 2 -type f -print | sed 's#^#  available: #' | head -30
+    if [ ! -d "$VENDOR_DIR/$component" ]; then
+        echo "MISSING_SOURCE provenance: vendor/$component is absent"
         missing=1
     fi
 done
@@ -40,7 +30,7 @@ if [ ! -f "$VENDOR_DIR/winetricks/src/winetricks" ]; then
 fi
 
 if [ "$missing" -ne 0 ]; then
-    echo "Runtime source audit blocked: the pinned upstream set cannot reproduce the requested wrapper and engine." >&2
+    echo "Runtime source audit blocked: Portside build inputs are incomplete." >&2
     exit 2
 fi
 

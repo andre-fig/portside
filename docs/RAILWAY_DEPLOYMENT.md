@@ -40,7 +40,8 @@ return a temporary object-storage URL rather than proxying large files.
 Runtime publication is staging-only by default. The authenticated release
 sequence is source snapshot, successful build, staging release, validation,
 explicit promotion and signed manifest publication. Do not point a production
-manifest at a GitHub/Sikarugir URL.
+manifest at an upstream source URL; runtime files must already be built and
+promoted into Portside object storage.
 
 Production is connected to `andre-fig/portside` on the `main` branch. Railway
 deploys the three application services automatically after each push; the

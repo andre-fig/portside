@@ -5,13 +5,13 @@ import Darwin
 /// when the launcher hides and exits after Steam becomes ready.
 public final class PortsideRuntimeUpdateWorker: @unchecked Sendable {
     private let logger: PortsideLogger
-    private let updateService: SikarugirUpdateService
+    private let updateService: PortsideUpdateService
     private let lockURL = PortsidePaths.runtime.appendingPathComponent("runtime-update-worker.lock")
     private var lockDescriptor: Int32 = -1
 
-    public init(logger: PortsideLogger = PortsideLogger(logFileName: "runtime-updates.log"), updateService: SikarugirUpdateService? = nil) {
+    public init(logger: PortsideLogger = PortsideLogger(logFileName: "runtime-updates.log"), updateService: PortsideUpdateService? = nil) {
         self.logger = logger
-        self.updateService = updateService ?? SikarugirUpdateService(
+        self.updateService = updateService ?? PortsideUpdateService(
             logger: logger,
             backendConfiguration: PortsideBackendConfiguration.fromBundle(),
             currentVersion: (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.1.0"

@@ -4,7 +4,7 @@ import Darwin
 import PortsideCore
 
 /// The Portside launcher delegates prefix creation, winetricks and the final
-/// executable handoff to the official Sikarugir wrapper. It never invokes Wine
+/// executable handoff to the Portside runtime host. It never invokes Wine
 /// directly and never passes Portside-specific Steam login flags.
 @MainActor
 final class SteamProcessLauncher {
@@ -16,11 +16,11 @@ final class SteamProcessLauncher {
     }
 
     func installSteam(using wrapper: URL) async throws -> ProcessResult {
-        let specification = try SikarugirSteamFlow.installationSpec(wrapper: wrapper)
-        logger.write("Starting official Sikarugir WSS-winetricks steam flow")
+        let specification = try PortsideSteamFlow.installationSpec(wrapper: wrapper)
+        logger.write("Starting Portside runtime Steam setup")
         let result = try await runner.run(specification, logger: logger)
         guard result.status == 0 else {
-            throw PortsideError.processFailed("official winetricks steam", result.status)
+            throw PortsideError.processFailed("Portside runtime Steam setup", result.status)
         }
         return result
     }
@@ -34,7 +34,7 @@ final class SteamProcessLauncher {
         return try await withCheckedThrowingContinuation { continuation in
             NSWorkspace.shared.openApplication(at: wrapper, configuration: configuration) { application, error in
                 if let error {
-                    continuation.resume(throwing: PortsideError.processLaunchFailed("Sikarugir wrapper could not be opened: \(error.localizedDescription)"))
+                    continuation.resume(throwing: PortsideError.processLaunchFailed("Portside runtime could not be opened: \(error.localizedDescription)"))
                 } else {
                     continuation.resume(returning: application)
                 }
@@ -51,6 +51,6 @@ final class SteamProcessLauncher {
         for pid in Set(pids) where pid > 1 && pid != getpid() {
             _ = kill(pid, SIGTERM)
         }
-        logger.write("Requested termination of \(pids.count) managed Sikarugir processes")
+        logger.write("Requested termination of \(pids.count) managed Portside processes")
     }
 }

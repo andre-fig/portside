@@ -20,17 +20,18 @@ the deterministic checksum of the imported snapshot.
 - Creator remains provenance-only. It is not copied into Portside because the
   current source/build path does not prove that its interface is required.
 
-## Rebuild limitation recorded by the initial import
+## Build inputs and recorded limitations
 
 The pinned Wrapper repository contains only `README.md` and
 `NewestVersion.txt`. The pinned Engines repository contains only
 `EngineList.txt`, `README.md` and `index.html`. Neither contains the source or
 build recipe for `Template-1.0.11` or `WS12WineSikarugir10.0_6`.
 
-The Portside build scripts therefore refuse to claim a rebuilt wrapper or
-engine and never fall back silently to an official compiled release. A future
-upstream synchronization may unblock the build if the missing sources and
-patches become available.
+Portside does not use those metadata-only snapshots as executable build input.
+The wrapper/template and native host are implemented in Portside source, and
+the engine recipe builds from `vendor/wine`. The build still stops on missing
+toolchain or library inputs and never falls back silently to a compiled
+external release.
 
 ## Synchronization rules
 

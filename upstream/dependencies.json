@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Pinned build dependencies for the Portside source runtime build",
+  "platform": "macOS arm64 runner; target architecture defaults to the host",
+  "dependencies": [
+    {
+      "name": "bison",
+      "version": "3.8.2",
+      "origin": "https://ftpmirror.gnu.org/gnu/bison/bison-3.8.2.tar.xz",
+      "sha256": "9bba0214ccf7f1079c5d59210045227bcf619519840ebfa80cd3849cff5a5bf2",
+      "license": "GPL-3.0-or-later",
+      "role": "configure parser generator"
+    },
+    {
+      "name": "mingw-w64",
+      "version": "14.0.0",
+      "origin": "https://downloads.sourceforge.net/project/mingw-w64/mingw-w64/mingw-w64-release/mingw-w64-v14.0.0.tar.bz2",
+      "sha256": "6eaf921d9eb987d3820b364ea9775bc19b965ec81490b6fdd716526c28e1995c",
+      "license": "ZPL-2.1 and bundled GCC runtime licenses",
+      "role": "Windows PE cross compiler"
+    },
+    {
+      "name": "llvm",
+      "version": "22.1.8",
+      "origin": "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/llvm-project-22.1.8.src.tar.xz",
+      "sha256": "922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888",
+      "license": "Apache-2.0 WITH LLVM-exception",
+      "role": "LLVM toolchain support"
+    },
+    {
+      "name": "lld",
+      "version": "22.1.8",
+      "origin": "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/llvm-project-22.1.8.src.tar.xz",
+      "sha256": "922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888",
+      "license": "Apache-2.0 WITH LLVM-exception",
+      "role": "PE linker"
+    },
+    {
+      "name": "freetype",
+      "version": "2.14.3",
+      "origin": "https://downloads.sourceforge.net/project/freetype/freetype2/2.14.3/freetype-2.14.3.tar.xz",
+      "sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f",
+      "license": "FreeType License",
+      "role": "font rasterization development files"
+    },
+    {
+      "name": "pkgconf",
+      "version": "3.0.5",
+      "origin": "https://distfiles.ariadne.space/pkgconf/pkgconf-3.0.5.tar.xz",
+      "sha256": "3acd3a8a3cce65a8d620321855d92fb602e026cbe8e13ee36bdec58483b59ace",
+      "license": "ISC",
+      "role": "dependency discovery"
+    }
+  ]
+}

@@ -20,9 +20,13 @@ For a source audit:
 4. Keep the public Portside source, this notice, upstream notices and the
    authorization record together.
 
-The initial source audit is blocked for the Wrapper template and Sikarugir
-engine: the pinned upstream repositories contain no buildable source for those
-components. Portside does not substitute the old official binaries silently.
+The Portside wrapper template and native host are source-controlled in
+`runtime/wrapper-template` and `apps/runtime-host`. The engine recipe builds
+from `vendor/wine`; it must stop when a required native dependency is missing
+and must never substitute a prebuilt third-party engine silently. Current
+build validation status is recorded in `docs/RUNTIME_BUILD.md` and in the
+generated provenance evidence.
 
-No Portside change modifies upstream binaries or claims affiliation with
-Sikarugir, Apple or Valve.
+No Portside change claims affiliation with Apple or Valve. Upstream provenance
+and license obligations remain documented separately from the Portside product
+interface.

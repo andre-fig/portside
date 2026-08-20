@@ -73,9 +73,17 @@ public struct PortsideRuntimeComponent: Codable, Equatable, Sendable {
     public let size: Int64
     public let critical: Bool
     public let rollbackVersion: String?
+    public let builtBy: String?
+    public let sourcePath: String?
+    public let sourceCommit: String?
+    public let sourceSnapshotChecksum: String?
+    public let license: String?
+    public let buildId: String?
+    public let sbom: String?
 
-    public init(id: String, component: String, version: String, downloadURL: URL, sha256: String, size: Int64, critical: Bool = false, rollbackVersion: String? = nil) {
+    public init(id: String, component: String, version: String, downloadURL: URL, sha256: String, size: Int64, critical: Bool = false, rollbackVersion: String? = nil, builtBy: String? = nil, sourcePath: String? = nil, sourceCommit: String? = nil, sourceSnapshotChecksum: String? = nil, license: String? = nil, buildId: String? = nil, sbom: String? = nil) {
         self.id = id; self.component = component; self.version = version; self.downloadURL = downloadURL; self.sha256 = sha256; self.size = size; self.critical = critical; self.rollbackVersion = rollbackVersion
+        self.builtBy = builtBy; self.sourcePath = sourcePath; self.sourceCommit = sourceCommit; self.sourceSnapshotChecksum = sourceSnapshotChecksum; self.license = license; self.buildId = buildId; self.sbom = sbom
     }
 }
 
@@ -115,10 +123,15 @@ public enum PortsideManifestVerifier {
         guard compareVersions(currentVersion, manifest.minimumPortsideVersion) >= 0 else { throw PortsideCommercialError.incompatibleVersion }
         guard !allowedHosts.isEmpty else { throw PortsideCommercialError.unauthorizedURL }
         var identifiers = Set<String>()
+        guard manifest.components.count == PortsideRuntimeCatalog.requiredComponents.count,
+              Set(manifest.components.map(\.component)) == Set(PortsideRuntimeCatalog.requiredComponents) else {
+            throw PortsideCommercialError.invalidManifest("the runtime manifest must contain wrapper, engine and winetricks")
+        }
         for component in manifest.components {
             guard identifiers.insert(component.id).inserted else { throw PortsideCommercialError.invalidManifest("manifest contains a duplicate component") }
             guard !component.downloadURL.absoluteString.contains("example.invalid") else { throw PortsideCommercialError.invalidManifest("manifest contains a placeholder download") }
-            guard component.downloadURL.scheme == "https", let host = component.downloadURL.host, allowedHosts.contains(host), !component.sha256.isEmpty, component.size > 0 else { throw PortsideCommercialError.invalidManifest("component is incomplete or outside the Portside host allowlist") }
+            guard component.downloadURL.scheme == "https", let host = component.downloadURL.host, allowedHosts.contains(host), component.sha256.count == 64, component.sha256.allSatisfy(\.isHexDigit), component.size > 0, component.builtBy == "Portside", component.sourcePath?.isEmpty == false, component.sourceCommit?.isEmpty == false, component.sourceSnapshotChecksum?.isEmpty == false, component.license?.isEmpty == false else { throw PortsideCommercialError.invalidManifest("component is incomplete, not Portside-built, or outside the Portside host allowlist") }
+            guard !component.downloadURL.absoluteString.localizedCaseInsensitiveContains("sikarugir"), !component.downloadURL.absoluteString.localizedCaseInsensitiveContains("raw.githubusercontent.com") else { throw PortsideCommercialError.unauthorizedURL }
         }
         return manifest
     }

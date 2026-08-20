@@ -6,7 +6,7 @@ Portside is a native SwiftUI macOS app that prepares one private, user-local
 runtime wrapper and opens the official Windows Steam client. It preserves the
 Portside identity, Sentry boundary, sanitized diagnostics and rotating logs.
 It does not distribute games, copy a native Steam session, bypass DRM or
-anti-cheat, or expose Sikarugir Creator to the end user.
+anti-cheat, or expose build tools to the end user.
 
 ## Build and test
 
@@ -26,11 +26,21 @@ on `main` (or manually) and publishes the unsigned validation build as
 The repository keeps the two deployable products isolated:
 
 ```text
-apps/desktop/   Native macOS client, Swift Package and tests
-apps/backend/   NestJS API, Prisma schema, worker and sync job
-docs/           Product, security, validation and deployment documentation
-scripts/        Release packaging, signing and publishing automation
+apps/desktop/        Native macOS client, Swift Package and tests
+apps/backend/        NestJS API, Prisma schema, worker and sync job
+apps/landing/        Landing page, purchase flow and public commercial pages
+apps/runtime-host/   Native host used by the Portside runtime wrapper
+runtime/             Portside-owned wrapper template and runtime defaults
+vendor/              Audited upstream source snapshots, without nested Git
+upstream/            Source locks, dependency locks, licenses and patches
+docs/                Product, security, validation and operating documentation
+scripts/             Build, validation, release and publication automation
 ```
+
+The complete folder map, script catalog, artifact origins, DMG procedure and
+release/update runbooks are in [`docs/PROJECT_GUIDE.md`](docs/PROJECT_GUIDE.md).
+The landing page can be run independently from `apps/landing/`; its CI build
+is defined in `.github/workflows/build-landing.yml`.
 
 After the first setup, Portside stays ready and opens Steam only when you
 choose `Open Steam`; closing Steam does not launch it again.
@@ -42,27 +52,27 @@ manifest to the Portside Application Support directory and never embedded in
 Portside.app. Upstream source snapshots are versioned under `vendor/`; they are
 not a production download fallback.
 
-## Official Sikarugir baseline
+## Portside runtime baseline
 
-The first wrapper is isolated as PortsideBaseline.app and uses the values
-validated against the original Sikarugir flow:
+The first wrapper is isolated as `PortsideBaseline.app` and is produced by
+Portside from the checked-in template and native runtime host:
 
 ~~~text
-Creator provenance: 1.0.1
-Wrapper template: 1.0.11
-Engine: WS12WineSikarugir10.0_6
+Wrapper: Portside template + PortsideRuntimeHost
+Engine: Portside Wine build from vendor/wine
 Renderer: WineD3D
 D3DMetal/DXMT/DXVK: disabled
 MSYNC/ESYNC: enabled
 WINEDEBUG: -plugplay,+loaddll
 Program: /Program Files (x86)/Steam/steam.exe
-Steam install: official WSS-winetricks steam verb
+Steam install: vendored winetricks steam verb
 ~~~
 
-The first install waits for the official winetricks process and its Steam
-updater to finish. A second clean wrapper opening then waits for a real
-on-screen window. A process, Dock icon or steamwebhelper without a window is
-not considered UI success.
+The first install waits for the winetricks process and Steam updater to finish.
+A second clean wrapper opening then waits for a real on-screen window. A
+process, Dock icon or steamwebhelper without a window is not considered UI
+success. The wrapper, engine and winetricks archives are downloaded only from
+the signed Portside runtime manifest.
 
 Managed state is separated into Runtime, Wrappers, Prefixes, SteamLibrary,
 Cache, Logs, Diagnostics, Profiles and Manifests. Steam games remain outside
@@ -73,7 +83,7 @@ runtime changes.
 
 GameCompatibilityService stores a versioned manifest indexed by Steam App ID
 and executable. It detects PE architecture and common graphics APIs and
-orders the official renderer fallbacks described in ARCHITECTURE.md. Unknown
+orders the supported renderer fallbacks described in ARCHITECTURE.md. Unknown
 games use a bounded, observable fallback sequence and record only a
 functional result. No anti-cheat bypass is attempted.
 

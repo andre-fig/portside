@@ -3,11 +3,11 @@ import CryptoKit
 @testable import PortsideCore
 
 final class PortsideCoreTests: XCTestCase {
-    func testGoldenBaselineMatchesValidatedOfficialConfiguration() {
-        let configuration = SikarugirBaselineConfiguration.golden
-        XCTAssertEqual(SikarugirBaselineConfiguration.creatorVersion, "1.0.1")
-        XCTAssertEqual(SikarugirBaselineConfiguration.templateVersion, "1.0.11")
-        XCTAssertEqual(SikarugirBaselineConfiguration.engineName, "WS12WineSikarugir10.0_6")
+    func testGoldenBaselineMatchesPortsideConfiguration() {
+        let configuration = PortsideRuntimeConfiguration.golden
+        XCTAssertEqual(PortsideRuntimeConfiguration.creatorVersion, "Portside")
+        XCTAssertEqual(PortsideRuntimeConfiguration.templateVersion, "Portside wrapper 1")
+        XCTAssertEqual(PortsideRuntimeConfiguration.engineName, "PortsideWineEngine")
         XCTAssertEqual(configuration.renderer, .wineD3D)
         XCTAssertTrue(configuration.msync)
         XCTAssertTrue(configuration.esync)
@@ -18,67 +18,47 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertEqual(configuration.environment["DXVK"], "0")
     }
 
-    func testCatalogUsesPortsideManifestComponentsWithoutDirectUpstreamURLs() throws {
-        for artifact in SikarugirOfficialCatalog.all {
-            try SikarugirArtifactValidator.validate(artifact)
-            XCTAssertEqual(artifact.sha256.count, 64)
-            XCTAssertNil(artifact.url)
-            XCTAssertNil(artifact.sourceRepository)
-        }
-        XCTAssertEqual(SikarugirOfficialCatalog.engine.sha256, SikarugirBaselineConfiguration.engineArchiveSHA256)
-        XCTAssertEqual(SikarugirOfficialCatalog.template.sha256, SikarugirBaselineConfiguration.templateArchiveSHA256)
-    }
-
-    func testLatestStableEngineParsingIsNaturalAndExcludesBattleNetVariant() {
-        let list = """
-        WS12WineSikarugir10.0
-        WS12WineSikarugir10.0_4
-        WS12WineSikarugir10.0-battle.net
-        WS12WineSikarugir10.0_6
-        WS12WineCX24.0.7_7
-        """
-        XCTAssertEqual(SikarugirUpdateService.latestStableEngine(in: list), "WS12WineSikarugir10.0_6")
+    func testRuntimeCatalogRequiresPortsideComponents() {
+        XCTAssertEqual(PortsideRuntimeCatalog.requiredComponents, ["wrapper", "engine", "winetricks"])
+        XCTAssertEqual(PortsideRuntimeCatalog.wrapperName, "PortsideBaseline.app")
     }
 
     func testUpdateChecksAtMostOncePerDay() {
         let now = Date()
-        XCTAssertTrue(SikarugirUpdateService.shouldCheck(lastCheck: nil, now: now))
-        XCTAssertFalse(SikarugirUpdateService.shouldCheck(lastCheck: now.addingTimeInterval(-60), now: now))
-        XCTAssertTrue(SikarugirUpdateService.shouldCheck(lastCheck: now.addingTimeInterval(-86_401), now: now))
+        XCTAssertTrue(PortsideUpdateService.shouldCheck(lastCheck: nil, now: now))
+        XCTAssertFalse(PortsideUpdateService.shouldCheck(lastCheck: now.addingTimeInterval(-60), now: now))
+        XCTAssertTrue(PortsideUpdateService.shouldCheck(lastCheck: now.addingTimeInterval(-86_401), now: now))
     }
 
     func testWrapperConfigurationDoesNotEnableAlternativeRenderers() throws {
-        let values = SikarugirWrapperConfiguration().plistValues()
-        XCTAssertEqual(values["Program Name and Path"] as? String, "/Program Files (x86)/Steam/steam.exe")
-        XCTAssertEqual(values["Program Flags"] as? String, "")
-        XCTAssertEqual(values["D3DMETAL"] as? Int, 0)
-        XCTAssertEqual(values["DXMT"] as? Int, 0)
-        XCTAssertEqual(values["DXVK"] as? Int, 0)
-        XCTAssertNil(values["NSMicrophoneUsageDescription"])
-        XCTAssertThrowsError(try SikarugirBaselineConfiguration(renderer: .dxvk))
+        XCTAssertEqual(PortsideRuntimeCatalog.steamExecutable, "C:\\Program Files (x86)\\Steam\\steam.exe")
+        XCTAssertEqual(PortsideRuntimeConfiguration.golden.environment["D3DMETAL"], "0")
+        XCTAssertEqual(PortsideRuntimeConfiguration.golden.environment["DXMT"], "0")
+        XCTAssertEqual(PortsideRuntimeConfiguration.golden.environment["DXVK"], "0")
+        XCTAssertThrowsError(try PortsideRuntimeConfiguration(renderer: .dxvk))
     }
 
-    func testSteamInstallUsesOfficialWinetricksVerbAndNoCustomSteamFlags() throws {
+    func testSteamInstallUsesPortsideWinetricksVerbAndNoCustomSteamFlags() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let launcher = root.appendingPathComponent("Contents/MacOS/Sikarugir")
+        let launcher = root.appendingPathComponent("Contents/MacOS/PortsideRuntimeHost")
         try FileManager.default.createDirectory(at: launcher.deletingLastPathComponent(), withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: launcher.path, contents: Data())
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: launcher.path)
         defer { try? FileManager.default.removeItem(at: root) }
-        let spec = try SikarugirSteamFlow.installationSpec(wrapper: root)
-        XCTAssertEqual(spec.arguments, ["WSS-winetricks", "steam"])
+        let spec = try PortsideSteamFlow.installationSpec(wrapper: root)
+        XCTAssertEqual(spec.arguments, ["--winetricks", "steam"])
         XCTAssertFalse(spec.arguments.joined(separator: " ").contains("cef"))
         XCTAssertFalse(spec.arguments.contains { $0.contains("noreactlogin") || $0.contains("allosarches") })
     }
 
-    func testCleanLaunchUsesTheWrapperExecutableWithoutDirectWineOrSteamArguments() throws {
+    func testCleanLaunchUsesThePortsideHostWithoutDirectWineOrSteamArguments() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let launcher = root.appendingPathComponent("Contents/MacOS/Sikarugir")
+        let launcher = root.appendingPathComponent("Contents/MacOS/PortsideRuntimeHost")
         try FileManager.default.createDirectory(at: launcher.deletingLastPathComponent(), withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: launcher.path, contents: Data())
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: launcher.path)
         defer { try? FileManager.default.removeItem(at: root) }
-        let spec = try SikarugirSteamFlow.cleanLaunchSpec(wrapper: root)
+        let spec = try PortsideSteamFlow.cleanLaunchSpec(wrapper: root)
         XCTAssertEqual(spec.arguments, [])
         XCTAssertEqual(spec.executable, launcher)
     }
@@ -199,16 +179,24 @@ final class PortsideCoreTests: XCTestCase {
             "manifestVersion": "1.0.0",
             "minimumPortsideVersion": "0.1.0",
             "publishedAt": "2026-08-19T00:00:00Z",
-            "components": [[
-                "id": "engine",
-                "component": "WS12WineSikarugir10.0_6",
-                "version": "10.0.6",
-                "downloadURL": "https://downloads.portside.test/engine.tar.xz",
+            "builtBy": "Portside",
+            "buildId": "test-build",
+            "buildStatus": "staging",
+            "components": ["wrapper", "engine", "winetricks"].map { name in [
+                "id": name,
+                "component": name,
+                "version": "1.0.0",
+                "downloadURL": "https://downloads.portside.test/\(name).tar.xz",
                 "sha256": String(repeating: "a", count: 64),
                 "size": 10,
                 "critical": false,
-                "rollbackVersion": NSNull()
-            ]],
+                "rollbackVersion": NSNull(),
+                "builtBy": "Portside",
+                "sourcePath": "vendor/\(name)",
+                "sourceCommit": String(repeating: "b", count: 40),
+                "sourceSnapshotChecksum": String(repeating: "c", count: 64),
+                "license": "LGPL-2.1-or-later"
+            ]},
             "rendererDefaults": ["renderer": "wineD3D"],
             "compatibilityRules": [],
             "critical": false,
@@ -221,7 +209,7 @@ final class PortsideCoreTests: XCTestCase {
         unsigned["signature"] = signature
         let data = try JSONSerialization.data(withJSONObject: unsigned, options: [.sortedKeys])
         let manifest = try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", currentVersion: "0.1.0", allowedHosts: ["downloads.portside.test"])
-        XCTAssertEqual(manifest.components.count, 1)
+        XCTAssertEqual(manifest.components.count, 3)
         XCTAssertThrowsError(try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", expectedChannel: "production", currentVersion: "0.1.0", allowedHosts: ["downloads.portside.test"]))
         XCTAssertThrowsError(try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", currentVersion: "0.0.9", allowedHosts: ["downloads.portside.test"]))
     }

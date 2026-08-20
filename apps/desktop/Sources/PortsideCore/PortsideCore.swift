@@ -1,9 +1,9 @@
 import Foundation
 import CryptoKit
 
-/// All Portside-owned state is kept below this root. Sikarugir assets are
-/// downloaded into these directories at runtime; no upstream runtime is
-/// embedded in the Portside application bundle.
+/// All Portside-owned state is kept below this root. Runtime components are
+/// downloaded into these directories; the active prefix and game library are
+/// kept separate from replaceable runtime versions.
 public enum PortsidePaths {
     public static var root: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -55,9 +55,9 @@ public enum PortsideError: LocalizedError, Equatable {
         case .unsupportedOperatingSystem(let version): return "macOS \(version) is not supported by this build."
         case .insufficientStorage(let required, let available):
             return "Portside needs at least \(ByteCountFormatter.string(fromByteCount: required, countStyle: .file)); only \(ByteCountFormatter.string(fromByteCount: available, countStyle: .file)) is available."
-        case .rosettaUnavailable: return "Rosetta 2 is required for the official Sikarugir engine."
-        case .runtimeUnavailable: return "The official Sikarugir runtime is not installed."
-        case .invalidArtifact(let reason): return "The official Sikarugir artifact is invalid: \(reason)"
+        case .rosettaUnavailable: return "Rosetta 2 is required to prepare the gaming environment."
+        case .runtimeUnavailable: return "The Portside gaming environment is not installed."
+        case .invalidArtifact(let reason): return "The Portside runtime could not be verified: \(reason)"
         case .checksumMismatch(let expected, let actual): return "Checksum mismatch (expected \(expected.prefix(12))…, got \(actual.prefix(12))…)."
         case .processLaunchFailed(let reason), .processTimedOut(let reason): return reason
         case .processFailed(let process, let status): return "\(process) exited with status \(status)."
@@ -121,7 +121,7 @@ public struct EnvironmentState: Codable, Equatable, Sendable {
     public var setupCompleted = false
     public var steamInstalled = false
     public var runtime: RuntimeDescriptor?
-    public var runtimeRecord: InstalledRuntimeRecord?
+    public var runtimeRecord: PortsideRuntimeRecord?
     public var runtimeManifestVersion: String?
     public var phase: EnvironmentPhase?
     public var wrapperPath: String?
@@ -146,7 +146,7 @@ public struct DiagnosticContext: Sendable, Equatable {
     public var portsideBuild: String
     public var macOSVersion: String?
     public var architecture: String?
-    public var sikarugirVersion: String?
+    public var runtimeVersion: String?
     public var templateVersion: String?
     public var engineVersion: String?
     public var renderer: String?
@@ -164,14 +164,14 @@ public struct DiagnosticContext: Sendable, Equatable {
     public var msyncEnabled: Bool?
     public var esyncEnabled: Bool?
 
-    public init(stage: String? = nil, errorCode: String? = nil, portsideVersion: String = "0.1.0", portsideBuild: String = "1", macOSVersion: String? = nil, architecture: String? = nil, sikarugirVersion: String? = nil, templateVersion: String? = nil, engineVersion: String? = nil, renderer: String? = nil, appID: String? = nil, executableArchitecture: String? = nil, graphicsAPI: String? = nil, launchAttempt: Int? = nil, fallbackIndex: Int? = nil, exitCode: Int32? = nil, windowDetected: Bool? = nil, rollbackPerformed: Bool? = nil, processStarted: Bool? = nil, webHelperStarted: Bool? = nil, interfaceVerification: String? = nil, msyncEnabled: Bool? = nil, esyncEnabled: Bool? = nil) {
+    public init(stage: String? = nil, errorCode: String? = nil, portsideVersion: String = "0.1.0", portsideBuild: String = "1", macOSVersion: String? = nil, architecture: String? = nil, runtimeVersion: String? = nil, templateVersion: String? = nil, engineVersion: String? = nil, renderer: String? = nil, appID: String? = nil, executableArchitecture: String? = nil, graphicsAPI: String? = nil, launchAttempt: Int? = nil, fallbackIndex: Int? = nil, exitCode: Int32? = nil, windowDetected: Bool? = nil, rollbackPerformed: Bool? = nil, processStarted: Bool? = nil, webHelperStarted: Bool? = nil, interfaceVerification: String? = nil, msyncEnabled: Bool? = nil, esyncEnabled: Bool? = nil) {
         self.stage = stage
         self.errorCode = errorCode
         self.portsideVersion = portsideVersion
         self.portsideBuild = portsideBuild
         self.macOSVersion = macOSVersion
         self.architecture = architecture
-        self.sikarugirVersion = sikarugirVersion
+        self.runtimeVersion = runtimeVersion
         self.templateVersion = templateVersion
         self.engineVersion = engineVersion
         self.renderer = renderer
@@ -194,7 +194,7 @@ public struct DiagnosticContext: Sendable, Equatable {
         var result = ["portside_version": portsideVersion, "portside_build": portsideBuild]
         let values: [(String, String?)] = [
             ("stage", stage), ("error_code", errorCode), ("macos_version", macOSVersion), ("architecture", architecture),
-            ("sikarugir_version", sikarugirVersion), ("template_version", templateVersion), ("engine_version", engineVersion),
+            ("runtime_version", runtimeVersion), ("template_version", templateVersion), ("engine_version", engineVersion),
             ("renderer", renderer), ("app_id", appID), ("executable_architecture", executableArchitecture), ("graphics_api", graphicsAPI),
             ("launch_attempt", launchAttempt.map(String.init)), ("fallback_index", fallbackIndex.map(String.init)),
             ("exit_code", exitCode.map(String.init)), ("window_detected", windowDetected.map(String.init)),
@@ -313,7 +313,7 @@ public final class SecureDownloader: @unchecked Sendable {
     private let maxBytes: Int64
     private let session: URLSession
 
-    public init(allowedHosts: Set<String> = ["github.com", "raw.githubusercontent.com", "api.github.com", "objects.githubusercontent.com"], maxBytes: Int64 = 2_147_483_648) {
+    public init(allowedHosts: Set<String> = [], maxBytes: Int64 = 2_147_483_648) {
         self.allowedHosts = allowedHosts
         self.maxBytes = maxBytes
         self.session = URLSession(configuration: .ephemeral, delegate: RedirectPolicy(allowedHosts: allowedHosts), delegateQueue: nil)

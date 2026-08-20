@@ -11,7 +11,7 @@ ship required notices with Portside.
 | Sparkle 2 | `sparkle-project/Sparkle` | Sparkle license and embedded notices |
 | WineD3D/Wine | selected approved engine/source revision | LGPL-2.1-or-later and included notices |
 | winetricks | selected approved source revision | LGPL-2.1-or-later |
-| Wrapper/template | pinned source snapshot; build blocked | `vendor/wrapper`, license review and authorization required |
+| Wrapper/template and native host | Portside source | `runtime/wrapper-template`, `apps/runtime-host` |
 | Steam for Windows | Valve official distribution | Valve terms; not bundled by Portside |
 
 Run a source/license inventory for every new version before promotion. The
