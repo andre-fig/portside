@@ -240,16 +240,17 @@ um app assinado, um ZIP notarizado e um DMG notarizado com ticket stapled no
 1. Faça a mudança no app, landing, backend ou runtime e rode as validações
    locais.
 2. Para runtime, execute `scripts/build-runtime/build.sh` no macOS fixado. A
-   saída começa em `staging`; cada componente recebe SHA-256, tamanho, commit
-   fonte, proveniência e SBOM.
-3. O workflow `build-runtime.yml` é disparado após um merge de fontes/runtime
-   na `main` e, com o ambiente `staging` configurado, compila, assina e publica
-   automaticamente somente em staging. Um `workflow_dispatch` também permite
-   repetir a build com uma versão explícita. O app consulta o manifesto
+   saída começa no canal de validação; cada componente recebe SHA-256, tamanho,
+   commit fonte, proveniência e SBOM. No CI, o Wine reutiliza cache quando o
+   snapshot e a toolchain não mudaram.
+3. O workflow `build-runtime.yml` é disparado após uma mudança de
+   fonte/runtime na `main`; alterações comuns de app, backend, documentação ou
+   do próprio workflow não recompilam o Wine. Um `workflow_dispatch` permite
+   forçar uma nova build com versão explícita. O app consulta o manifesto
    assinado e baixa somente hosts Portside autorizados.
-4. Para o app macOS, `release-production.yml` compila, assina, notariza,
-   publica staging e aguarda revisão. O job de produção requer promoção
-   explícita e ambiente protegido.
+4. Para o app macOS, `release-production.yml` seleciona o último runtime
+   validado, compila o app, assina, notariza, publica a validação e aguarda
+   revisão. O job de produção requer promoção explícita e ambiente protegido.
 5. `publish_release.sh` replica cada objeto no bucket primário e secundário;
    versões anteriores ficam disponíveis para rollback.
 6. O backend registra source snapshot, build, artifact, release, canal,

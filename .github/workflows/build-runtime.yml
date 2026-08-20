@@ -11,8 +11,6 @@ on:
       - "runtime/wrapper-template/**"
       - "scripts/build-runtime/**"
       - "scripts/generate_manifest.sh"
-      - "scripts/publish_runtime_staging.sh"
-      - ".github/workflows/build-runtime.yml"
   workflow_dispatch:
     inputs:
       version:
@@ -23,6 +21,11 @@ on:
         description: "HTTPS Portside API runtime download URL prefix, including the runtime channel path"
         required: true
         type: string
+      force_rebuild:
+        description: "Ignore the Wine cache and rebuild the engine from source"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -69,14 +72,22 @@ jobs:
           printf 'bison: '; "$(brew --prefix bison)/bin/bison" --version | awk 'NR==1 {print}'
           for formula in mingw-w64 llvm lld freetype pkgconf; do brew list --versions "$formula"; done
 
-      - name: Validate staging publication inputs
+      - name: Restore cached Wine engine
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/portside-wine-cache
+          key: portside-wine-${{ runner.os }}-macos-15-${{ hashFiles('upstream/lock.json', 'scripts/build-runtime/build-wine-engine.sh') }}
+          restore-keys: |
+            portside-wine-${{ runner.os }}-macos-15-
+
+      - name: Validate validation publication inputs
         run: |
           set -eu
           require_env() {
             variable="$1"
             eval "value=\${$variable-}"
             if [ -z "$value" ]; then
-              echo "missing required staging secret: $variable" >&2
+              echo "missing required validation secret: $variable" >&2
               exit 1
             fi
           }
@@ -100,10 +111,13 @@ jobs:
             *) echo "runtime download prefix must use the Portside signed-download route" >&2; exit 1;;
           esac
 
-      - name: Build wrapper, engine and winetricks from local sources
+      - name: Assemble wrapper, cached engine and winetricks from local sources
+        env:
+          PORTSIDE_WINE_CACHE_DIR: ${{ runner.temp }}/portside-wine-cache
+          PORTSIDE_WINE_FORCE_REBUILD: ${{ inputs.force_rebuild }}
         run: ./scripts/build-runtime/build.sh
 
-      - name: Materialize staging manifest signing key
+      - name: Materialize validation manifest signing key
         env:
           MANIFEST_PRIVATE_KEY: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY }}
         run: |
@@ -112,7 +126,7 @@ jobs:
           umask 077
           printf '%s' "$MANIFEST_PRIVATE_KEY" > "$RUNNER_TEMP/portside-runtime-manifest.key"
 
-      - name: Sign and validate staging manifest
+      - name: Sign and validate validation manifest
         env:
           PORTSIDE_RUNTIME_MANIFEST_INPUT: ${{ github.workspace }}/build/runtime/runtime-manifest-unsigned.json
           PORTSIDE_MANIFEST_SIGNING_KEY_FILE: ${{ runner.temp }}/portside-runtime-manifest.key
@@ -121,7 +135,7 @@ jobs:
           ./scripts/generate_manifest.sh
           ./scripts/build-runtime/validate-manifest.sh "$PORTSIDE_MANIFEST_OUTPUT"
 
-      - name: Publish staging runtime to both buckets
+      - name: Publish validation runtime to both buckets
         env:
           PORTSIDE_RUNTIME_BUILD_DIR: ${{ github.workspace }}/build/runtime
         run: ./scripts/publish_runtime_staging.sh
@@ -135,7 +149,7 @@ jobs:
           test -s "build/runtime/sbom.spdx.json"
           test -s "build/runtime/provenance.json"
 
-      - name: Upload staging evidence
+      - name: Upload validation evidence
         if: ${{ always() && hashFiles('build/runtime/**') != '' }}
         uses: actions/upload-artifact@v7
         with:

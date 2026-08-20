@@ -7,6 +7,14 @@ on:
         description: "Portside version to build"
         required: true
         type: string
+      runtime_run_id:
+        description: "Optional successful Build Portside Runtime run ID; latest successful run is selected when empty"
+        required: false
+        type: string
+      runtime_artifact_name:
+        description: "Optional runtime artifact name from that run; selected automatically when empty"
+        required: false
+        type: string
       promote:
         description: "After staging validation, request the protected production promotion job"
         required: true
@@ -15,6 +23,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   build-stage-and-publish:
@@ -35,6 +44,14 @@ jobs:
       PORTSIDE_ARTIFACT_HOSTS: ${{ secrets.PORTSIDE_ARTIFACT_HOSTS }}
       PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
       PORTSIDE_SECONDARY_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_SECONDARY_PUBLIC_BUCKET }}
+      PORTSIDE_S3_ACCESS_KEY_ID: ${{ secrets.PORTSIDE_S3_ACCESS_KEY_ID }}
+      PORTSIDE_S3_SECRET_ACCESS_KEY: ${{ secrets.PORTSIDE_S3_SECRET_ACCESS_KEY }}
+      PORTSIDE_S3_REGION: ${{ secrets.PORTSIDE_S3_REGION }}
+      PORTSIDE_S3_ENDPOINT: ${{ secrets.PORTSIDE_S3_ENDPOINT }}
+      PORTSIDE_SECONDARY_S3_ACCESS_KEY_ID: ${{ secrets.PORTSIDE_SECONDARY_S3_ACCESS_KEY_ID }}
+      PORTSIDE_SECONDARY_S3_SECRET_ACCESS_KEY: ${{ secrets.PORTSIDE_SECONDARY_S3_SECRET_ACCESS_KEY }}
+      PORTSIDE_SECONDARY_S3_REGION: ${{ secrets.PORTSIDE_SECONDARY_S3_REGION }}
+      PORTSIDE_SECONDARY_S3_ENDPOINT: ${{ secrets.PORTSIDE_SECONDARY_S3_ENDPOINT }}
       PORTSIDE_PUBLIC_BASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}
       PORTSIDE_CODESIGN_IDENTITY: ${{ secrets.PORTSIDE_CODESIGN_IDENTITY }}
       PORTSIDE_NOTARY_PROFILE: ${{ secrets.PORTSIDE_NOTARY_PROFILE }}
@@ -43,12 +60,37 @@ jobs:
       - name: Check out tested sources
         uses: actions/checkout@v7
 
-      - name: Install pinned runtime toolchain
+      - name: Ensure release storage client
         run: |
           set -eu
-          for formula in bison mingw-w64 llvm lld freetype pkgconf; do brew list "$formula" >/dev/null 2>&1 || brew install "$formula"; done
-          printf 'bison: '; "$(brew --prefix bison)/bin/bison" --version | awk 'NR==1 {print}'
-          for formula in mingw-w64 llvm lld freetype pkgconf; do brew list --versions "$formula"; done
+          command -v aws >/dev/null 2>&1 || brew install awscli
+
+      - name: Select validated runtime artifact
+        id: runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_RUNTIME_RUN_ID: ${{ inputs.runtime_run_id }}
+          REQUESTED_RUNTIME_ARTIFACT_NAME: ${{ inputs.runtime_artifact_name }}
+        run: |
+          set -eu
+          run_id="$REQUESTED_RUNTIME_RUN_ID"
+          if [ -z "$run_id" ]; then
+            run_id="$(gh run list --workflow build-runtime.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
+          fi
+          test -n "$run_id" && test "$run_id" != null
+          gh run view "$run_id" --json workflowName,status,conclusion,headBranch \
+            | jq -e '(.workflowName == "Build Portside Runtime" and .status == "completed" and .conclusion == "success" and .headBranch == "main")' >/dev/null
+          artifact_name="$REQUESTED_RUNTIME_ARTIFACT_NAME"
+          if [ -z "$artifact_name" ]; then
+            artifact_name="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" --jq '.artifacts[] | select(.expired == false and (.name | startswith("portside-runtime-staging-"))) | .name' | head -n 1)"
+          fi
+          test -n "$artifact_name"
+          case "$artifact_name" in
+            portside-runtime-staging-*) ;;
+            *) echo "selected artifact is not a validation runtime artifact" >&2; exit 1 ;;
+          esac
+          printf 'runtime_run_id=%s\n' "$run_id" >> "$GITHUB_OUTPUT"
+          printf 'runtime_artifact_name=%s\n' "$artifact_name" >> "$GITHUB_OUTPUT"
 
       - name: Resolve and build Swift dependencies
         run: |
@@ -79,13 +121,34 @@ jobs:
       - name: Validate production source policy
         run: ./scripts/validate-production-policy.sh
 
-      - name: Build Portside runtime from local sources
+      - name: Download previously validated runtime artifact
+        uses: actions/download-artifact@v7
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.runtime.outputs.runtime_run_id }}
+          name: ${{ steps.runtime.outputs.runtime_artifact_name }}
+          path: ${{ runner.temp }}/portside-release
+
+      - name: Validate reused runtime evidence
+        id: runtime-evidence
         env:
           PORTSIDE_RUNTIME_BUILD_DIR: ${{ runner.temp }}/portside-release
-          PORTSIDE_RUNTIME_VERSION: ${{ inputs.version }}
-          PORTSIDE_RUNTIME_CHANNEL: staging
-          PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX: ${{ secrets.PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX }}
-        run: ./scripts/build-runtime/build.sh
+        run: |
+          set -eu
+          test -s "$PORTSIDE_RUNTIME_BUILD_DIR/runtime-manifest-unsigned.json"
+          test -s "$PORTSIDE_RUNTIME_BUILD_DIR/runtime-manifest.json"
+          test -s "$PORTSIDE_RUNTIME_BUILD_DIR/provenance.json"
+          test -s "$PORTSIDE_RUNTIME_BUILD_DIR/sbom.spdx.json"
+          ./scripts/build-runtime/validate-manifest.sh "$PORTSIDE_RUNTIME_BUILD_DIR/runtime-manifest.json"
+          runtime_version="$(jq -r '.manifestVersion' "$PORTSIDE_RUNTIME_BUILD_DIR/runtime-manifest-unsigned.json")"
+          test -n "$runtime_version" && test "$runtime_version" != null
+          for component in Wrapper WineEngine Winetricks; do
+            test -s "$PORTSIDE_RUNTIME_BUILD_DIR/Portside${component}-${runtime_version}.tar.xz"
+          done
+          PORTSIDE_RUNTIME_VERSION="$runtime_version" \
+            PORTSIDE_RUNTIME_BUILD_DIR="$PORTSIDE_RUNTIME_BUILD_DIR" \
+            ./scripts/build-runtime/validate-clean-layout.sh
+          printf 'runtime_version=%s\n' "$runtime_version" >> "$GITHUB_OUTPUT"
 
       - name: Materialize CI-only signing inputs
         env:
@@ -167,6 +230,7 @@ jobs:
       - name: Publish staging artifacts to both Portside buckets
         env:
           PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
+          PORTSIDE_RUNTIME_VERSION: ${{ steps.runtime-evidence.outputs.runtime_version }}
         run: ./scripts/publish_release.sh
 
       - name: Upload signed staging release for protected promotion
@@ -189,6 +253,14 @@ jobs:
       PORTSIDE_UPDATE_CHANNEL: production
       PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
       PORTSIDE_SECONDARY_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_SECONDARY_PUBLIC_BUCKET }}
+      PORTSIDE_S3_ACCESS_KEY_ID: ${{ secrets.PORTSIDE_S3_ACCESS_KEY_ID }}
+      PORTSIDE_S3_SECRET_ACCESS_KEY: ${{ secrets.PORTSIDE_S3_SECRET_ACCESS_KEY }}
+      PORTSIDE_S3_REGION: ${{ secrets.PORTSIDE_S3_REGION }}
+      PORTSIDE_S3_ENDPOINT: ${{ secrets.PORTSIDE_S3_ENDPOINT }}
+      PORTSIDE_SECONDARY_S3_ACCESS_KEY_ID: ${{ secrets.PORTSIDE_SECONDARY_S3_ACCESS_KEY_ID }}
+      PORTSIDE_SECONDARY_S3_SECRET_ACCESS_KEY: ${{ secrets.PORTSIDE_SECONDARY_S3_SECRET_ACCESS_KEY }}
+      PORTSIDE_SECONDARY_S3_REGION: ${{ secrets.PORTSIDE_SECONDARY_S3_REGION }}
+      PORTSIDE_SECONDARY_S3_ENDPOINT: ${{ secrets.PORTSIDE_SECONDARY_S3_ENDPOINT }}
       PORTSIDE_PUBLIC_BASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}
       PORTSIDE_MANIFEST_SIGNING_KEY_ID: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY_ID }}
       PORTSIDE_CONFIRM_PRODUCTION: YES
@@ -227,11 +299,11 @@ jobs:
           printf '%s' "$MANIFEST_PRIVATE_KEY" > "$RUNNER_TEMP/portside-runtime-manifest.key"
 
       - name: Create signed production runtime manifest
+        id: production-runtime
         env:
           PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
           PORTSIDE_RUNTIME_BUILD_DIR: ${{ runner.temp }}/portside-release
-          PORTSIDE_RUNTIME_VERSION: ${{ inputs.version }}
-          PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX: ${{ secrets.PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX }}
+          PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX: ${{ secrets.PORTSIDE_API_BASE_URL }}/v1/runtime/artifacts/production/
           PORTSIDE_RUNTIME_MANIFEST_INPUT: ${{ runner.temp }}/portside-release/runtime-manifest-production-unsigned.json
           PORTSIDE_MANIFEST_SIGNING_KEY_FILE: ${{ runner.temp }}/portside-runtime-manifest.key
           PORTSIDE_MANIFEST_OUTPUT: ${{ runner.temp }}/portside-release/runtime-manifest.json
@@ -249,6 +321,9 @@ jobs:
           NODE
           ./scripts/generate_manifest.sh
           ./scripts/build-runtime/validate-manifest.sh "$PORTSIDE_MANIFEST_OUTPUT"
+          runtime_version="$(jq -r '.manifestVersion' "$PORTSIDE_MANIFEST_OUTPUT")"
+          test -n "$runtime_version" && test "$runtime_version" != null
+          printf 'runtime_version=%s\n' "$runtime_version" >> "$GITHUB_OUTPUT"
 
       - name: Re-sign appcast for production storage URLs
         env:
@@ -268,6 +343,7 @@ jobs:
       - name: Publish the reviewed artifact to production storage
         env:
           PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
+          PORTSIDE_RUNTIME_VERSION: ${{ steps.production-runtime.outputs.runtime_version }}
         run: ./scripts/publish_release.sh
 
       - name: Require explicit backend promotion

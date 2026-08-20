@@ -249,8 +249,10 @@ avisos do macOS.
 `Build Portside Runtime` roda em `macos-15`, instala a toolchain registrada,
 audita fontes locais, constrói wrapper/Wine/winetricks, materializa a chave
 privada apenas no runner, assina e valida o manifesto e publica em dois
-buckets de staging. A versão automática é `0.1.<run_number>`; o dispatch
-permite informar versão e prefixo HTTPS.
+buckets de validação. O Wine usa cache por snapshot, arquitetura, flags e
+toolchain; um cache compatível evita o `configure`/`make` completo. A versão
+automática é `0.1.<run_number>`; o dispatch permite informar versão e prefixo
+HTTPS.
 
 O artifact de runtime contém arquivos necessários para auditoria, incluindo:
 
@@ -282,9 +284,10 @@ o artefato aparecer no GitHub Actions.
 A versão comercial do app é separada: não existe uma versão comercial atual
 enquanto não houver uma release notarizada e promovida. O workflow
 `release-production.yml` recebe a versão manualmente no campo `version`; ele
-usa esse valor para o app, o DMG, o ZIP e os artefatos de runtime daquela
-release. O `0.1.0` presente no `Info.plist` é apenas o valor padrão de
-desenvolvimento e não representa a última versão publicada.
+usa esse valor para o app, o DMG e o ZIP, e reutiliza a versão do runtime
+registrada no manifesto selecionado. O `0.1.0` presente no `Info.plist` é
+apenas o valor padrão de desenvolvimento e não representa a última versão
+publicada.
 
 ### Sincronização upstream
 
@@ -294,15 +297,19 @@ checksums e compara o lockfile. Se houver alteração, abre uma branch e PR.
 Se o upstream falhar ou desaparecer, o script falha antes de substituir o
 snapshot existente. O merge da PR é a autorização para receber a mudança; ele
 não publica automaticamente uma release de usuário, embora mudanças em
-`vendor/` possam disparar a build de runtime staging depois do merge.
+`vendor/` possam disparar a build de runtime no canal de validação depois do
+merge.
 
 ### Release do app
 
-`release-production.yml` é manual e recebe `version` e `promote`. O estágio:
+`release-production.yml` é manual e recebe `version` e `promote`. Ele seleciona
+automaticamente o último runtime validado com sucesso; também aceita
+`runtime_run_id` e `runtime_artifact_name` explícitos quando a release precisa
+fixar uma execução. O estágio:
 
 1. testa Swift e backend;
 2. valida a política de fontes;
-3. constrói runtime de staging;
+3. baixa e valida o runtime já construído;
 4. compila o app configurado;
 5. assina app, agente, Sparkle e manifesto;
 6. notariza e faz staple no app/ZIP/DMG;

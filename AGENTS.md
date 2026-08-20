@@ -106,9 +106,10 @@ download pelo desktop ou funcionamento visual da Steam.
   DMG e dSYM de validação; não é release comercial e não é notarizado.
 - `Build Landing`: faz lint/build da landing em PR, push relevante ou execução
   manual e armazena `.output` como artifact.
-- `Build Portside Runtime`: em `main` ou manualmente, compila wrapper, Wine e
-  winetricks a partir de `vendor/`, assina o manifesto e publica somente em
-  `staging`, replicando nos dois buckets configurados.
+- `Build Portside Runtime`: em mudanças de fontes/runtime na `main` ou
+  manualmente, compila wrapper, Wine e winetricks a partir de `vendor`, assina
+  o manifesto e publica somente no canal de validação, replicando nos dois
+  buckets configurados. O Wine usa cache por snapshot e toolchain.
 - `Sync Upstreams`: roda diariamente às 03:17 UTC ou manualmente, atualiza
   snapshots autorizados e abre PR. Nunca faz merge, promoção ou publicação.
 - `Validate Clean Portside Runtime`: execução manual em Mac self-hosted com
@@ -116,9 +117,9 @@ download pelo desktop ou funcionamento visual da Steam.
   e coleta logs sanitizados; exige revisão manual da janela/login.
 - `Verify Railway`: após CI na `main`, aguarda `GET /health` da API pública.
   É uma verificação de saúde, não uma validação de release de cliente.
-- `Release Portside`: execução manual. O job staging testa, compila, assina,
-  notariza e publica; o job production só aparece quando `promote=true` e usa
-  Environment protegido.
+- `Release Portside`: execução manual. O job de validação testa, reutiliza o
+  último runtime validado, assina, notariza e publica; o job production só
+  aparece quando `promote=true` e usa Environment protegido.
 
 O workflow é uma automação, não uma autorização. A promoção para production,
 a aceitação visual e a configuração de secrets continuam sendo decisões

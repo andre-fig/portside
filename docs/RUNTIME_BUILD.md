@@ -51,7 +51,13 @@ self-hosted Mac. The lockfile is not updated from an incomplete build.
 
 `build-runtime.yml` builds on the pinned macOS runner after source/runtime
 merges on `main` (or a manual dispatch), signs the manifest and publishes the
-logical validation channel. The protected GitHub Environment `production` must
+logical validation channel. It is not triggered by ordinary app/backend/docs
+changes or by edits to its own workflow file. The Wine engine is keyed by the
+vendored snapshot, compiler flags, architecture and macOS/Xcode toolchain; a
+matching cache assembles the archive without rerunning the full Wine compile.
+Use the manual `force_rebuild=true` input only when the cache itself must be
+discarded and Wine must be rebuilt from source.
+The protected GitHub Environment `production` must
 provide the manifest-signing key, both bucket names, an HTTPS
 `PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX` and
 S3-compatible credentials for both Railway buckets (`PORTSIDE_S3_ACCESS_KEY_ID`,
@@ -68,3 +74,13 @@ channel and a clean-install validation.
 Production requires a separate explicit promotion and retains prior versions
 for rollback. The backend rejects a production component without source
 provenance, a Portside build ID, successful validation and promotion state.
+
+## Reusing a validated runtime
+
+`release-production.yml` does not compile Wine or the wrapper. It selects the
+latest successful `Build Portside Runtime` run on `main` (or accepts an
+explicit `runtime_run_id` and `runtime_artifact_name`), downloads its signed
+evidence and reuses those archives for the app release. The runtime version is
+read from `runtime-manifest-unsigned.json`, so the app version and runtime
+version do not have to be identical. A source/runtime change still requires a
+new runtime build before the next commercial release.

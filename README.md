@@ -20,8 +20,10 @@ open build/Portside.app
 The `Build Desktop` GitHub Actions workflow runs after a successful `CI` run
 on `main` (or manually) and publishes the unsigned validation build as
 `Portside.app.zip`, `Portside.dmg`, its checksum file and debug symbols. After
-a source/runtime merge, `Build Portside Runtime` also builds, signs and
-publishes the runtime to the protected validation channel.
+a source/runtime merge, `Build Portside Runtime` builds, signs and publishes
+the runtime to the protected validation channel; Wine is restored from a
+snapshot/toolchain cache when possible. Commercial releases reuse the last
+successful validated runtime instead of rebuilding it.
 
 ## Monorepo layout
 

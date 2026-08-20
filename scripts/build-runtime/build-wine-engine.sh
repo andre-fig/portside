@@ -11,6 +11,7 @@ BUILD_TREE="$WORK_DIR/build"
 TOOLS_TREE="$WORK_DIR/tools"
 INSTALL_ROOT="$WORK_DIR/install"
 ARCHIVE="$BUILD_DIR/PortsideWineEngine-$VERSION.tar.xz"
+CACHE_ROOT="${PORTSIDE_WINE_CACHE_DIR:-$ROOT_DIR/.cache/portside-wine}"
 
 "$ROOT_DIR/scripts/upstream/validate_snapshot.sh" "$SOURCE_DIR"
 [ -f "$SOURCE_DIR/configure.ac" ] || { echo "vendor/wine/configure.ac is missing" >&2; exit 1; }
@@ -48,14 +49,6 @@ for tool in clang clang++ make tar shasum; do
     command -v "$tool" >/dev/null 2>&1 || { echo "$tool is required for the Portside Wine build" >&2; exit 1; }
 done
 
-rm -rf "$WORK_DIR"
-mkdir -p "$WORK_DIR" "$BUILD_TREE" "$TOOLS_TREE" "$INSTALL_ROOT"
-if command -v rsync >/dev/null 2>&1; then
-    rsync -a --exclude .git "$SOURCE_DIR/" "$SOURCE_COPY/"
-else
-    cp -R "$SOURCE_DIR" "$SOURCE_COPY"
-fi
-
 native_arch="$(uname -m)"
 target_arch="${PORTSIDE_WINE_ARCH:-$native_arch}"
 jobs="${PORTSIDE_BUILD_JOBS:-$(sysctl -n hw.ncpu)}"
@@ -74,6 +67,42 @@ case "$native_arch:$target_arch" in
     arm64:arm64|x86_64:x86_64|arm64:x86_64) ;;
     *) echo "unsupported Portside Wine architecture pair: $native_arch -> $target_arch" >&2; exit 1 ;;
 esac
+
+wine_snapshot_checksum="$(jq -r '.repositories[] | select(.name == "wine") | .snapshotChecksum' "$ROOT_DIR/upstream/lock.json")"
+macos_version="$(sw_vers -productVersion 2>/dev/null || uname -s)"
+xcode_version="$(xcodebuild -version 2>/dev/null | tr '\n' ';' || true)"
+clang_version="$(clang --version | head -n 1)"
+cache_signature="$wine_version|$wine_snapshot_checksum|$native_arch|$target_arch|$native_cflags|$native_cxxflags|$native_ldflags|$target_cflags|$target_cxxflags|$target_ldflags|$macos_version|$xcode_version|$clang_version"
+
+package_engine() {
+    ENGINE_STAGE="$WORK_DIR/PortsideWineEngine-$VERSION"
+    mkdir -p "$ENGINE_STAGE"
+    cp -R "$INSTALL_ROOT/bin" "$ENGINE_STAGE/"
+    cp -R "$INSTALL_ROOT/lib" "$ENGINE_STAGE/"
+    cp -R "$INSTALL_ROOT/share/wine" "$ENGINE_STAGE/share-wine"
+    printf 'Wine %s\nPortside build target: %s\nWoW64 PE architectures: i386,x86_64\n' "$wine_version" "$target_arch" > "$ENGINE_STAGE/version"
+    rm -f "$ARCHIVE"
+    "$ROOT_DIR/scripts/build-runtime/create-archive.sh" "$ARCHIVE" "$WORK_DIR" "PortsideWineEngine-$VERSION"
+    shasum -a 256 "$ARCHIVE" | awk '{print $1 "  " $2}' > "$BUILD_DIR/PortsideWineEngine-$VERSION.sha256"
+}
+
+force_rebuild="${PORTSIDE_WINE_FORCE_REBUILD:-false}"
+if [ "$force_rebuild" != "1" ] && [ "$force_rebuild" != "true" ] && [ "$(cat "$CACHE_ROOT/metadata" 2>/dev/null || true)" = "$cache_signature" ] && [ -x "$CACHE_ROOT/install/bin/wine" ] && [ -x "$CACHE_ROOT/install/bin/wineserver" ] && [ -x "$CACHE_ROOT/install/bin/wineboot" ] && [ -d "$CACHE_ROOT/install/share/wine" ]; then
+    rm -rf "$WORK_DIR"
+    mkdir -p "$WORK_DIR"
+    INSTALL_ROOT="$CACHE_ROOT/install"
+    package_engine
+    echo "Reused cached Wine engine for $wine_version ($target_arch)."
+    exit 0
+fi
+
+rm -rf "$WORK_DIR"
+mkdir -p "$WORK_DIR" "$BUILD_TREE" "$TOOLS_TREE" "$INSTALL_ROOT"
+if command -v rsync >/dev/null 2>&1; then
+    rsync -a --exclude .git "$SOURCE_DIR/" "$SOURCE_COPY/"
+else
+    cp -R "$SOURCE_DIR" "$SOURCE_COPY"
+fi
 
 # The native tools are executed by the build machine. They must use the
 # machine architecture even when a separate target architecture is selected.
@@ -124,13 +153,9 @@ make install
 [ -x "$INSTALL_ROOT/bin/wineboot" ] || { echo "Wine build did not produce bin/wineboot" >&2; exit 1; }
 [ -d "$INSTALL_ROOT/share/wine" ] || { echo "Wine build did not produce share/wine" >&2; exit 1; }
 
-ENGINE_STAGE="$WORK_DIR/PortsideWineEngine-$VERSION"
-mkdir -p "$ENGINE_STAGE"
-cp -R "$INSTALL_ROOT/bin" "$ENGINE_STAGE/"
-cp -R "$INSTALL_ROOT/lib" "$ENGINE_STAGE/"
-cp -R "$INSTALL_ROOT/share/wine" "$ENGINE_STAGE/share-wine"
-printf 'Wine %s\nPortside build target: %s\nWoW64 PE architectures: i386,x86_64\n' "$wine_version" "$target_arch" > "$ENGINE_STAGE/version"
-rm -f "$ARCHIVE"
-"$ROOT_DIR/scripts/build-runtime/create-archive.sh" "$ARCHIVE" "$WORK_DIR" "PortsideWineEngine-$VERSION"
-shasum -a 256 "$ARCHIVE" | awk '{print $1 "  " $2}' > "$BUILD_DIR/PortsideWineEngine-$VERSION.sha256"
+mkdir -p "$CACHE_ROOT"
+rm -rf "$CACHE_ROOT/install"
+cp -R "$INSTALL_ROOT" "$CACHE_ROOT/install"
+printf '%s' "$cache_signature" > "$CACHE_ROOT/metadata"
+package_engine
 echo "Built $ARCHIVE from vendor/wine $wine_version; no compiled upstream artifact was used."
