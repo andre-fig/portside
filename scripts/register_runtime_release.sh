@@ -24,11 +24,22 @@ api_post() {
     endpoint="$1"
     body="$2"
     output="$3"
-    curl --fail --silent --show-error --retry 3 \
+    http_code="$(curl --silent --show-error --retry 3 \
         -H "Authorization: Bearer $ADMIN_TOKEN" \
         -H 'Content-Type: application/json' \
         -d "$body" \
-        "$API_URL$endpoint" > "$output"
+        -o "$output" \
+        -w '%{http_code}' \
+        "$API_URL$endpoint")"
+    case "$http_code" in
+        2??) ;;
+        *)
+            error_body="$(jq -c '{statusCode,error,message}' "$output" 2>/dev/null || true)"
+            [ -n "$error_body" ] || error_body="response body unavailable"
+            echo "Portside API rejected $endpoint (HTTP $http_code): $error_body" >&2
+            return 1
+            ;;
+    esac
 }
 
 json_id() {
