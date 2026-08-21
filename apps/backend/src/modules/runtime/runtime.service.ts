@@ -67,45 +67,34 @@ export class RuntimeService {
 
   async registerAppRelease(input: RegisterAppReleaseDto) {
     const prisma = this.requireDatabase();
-    if (input.channel !== Channel.staging)
-      throw new BadRequestException("app releases must enter staging before promotion");
+    if (input.channel !== Channel.production)
+      throw new BadRequestException("app releases must use the production channel");
     const url = new URL(input.url);
     const hosts = new Set((process.env.PORTSIDE_APP_HOSTS ?? process.env.PORTSIDE_ARTIFACT_HOSTS ?? "").split(",").map((host) => host.trim()).filter(Boolean));
     if (url.protocol !== "https:" || (hosts.size > 0 && !hosts.has(url.hostname)) || url.hostname.includes("example.invalid"))
       throw new BadRequestException("app release URL is not an approved Portside host");
     const pubDate = input.pubDate ? new Date(input.pubDate) : new Date();
     if (Number.isNaN(pubDate.getTime())) throw new BadRequestException("app release date is invalid");
-    return prisma.appRelease.create({
-      data: {
-        version: input.version,
-        build: input.build,
-        channel: Channel.staging,
-        status: AppReleaseStatus.staging,
-        url: input.url,
-        length: BigInt(input.length),
-        edSignature: input.edSignature,
-        minimumOSVersion: input.minimumOSVersion,
-        releaseNotesURL: input.releaseNotesURL,
-        releaseNotes: input.releaseNotes,
-        pubDate,
-      },
-    });
-  }
-
-  async promoteAppRelease(id: string) {
-    const prisma = this.requireDatabase();
-    const release = await prisma.appRelease.findUnique({ where: { id } });
-    if (!release) throw new NotFoundException("app release not found");
-    if (release.channel !== Channel.staging || release.status !== AppReleaseStatus.staging)
-      throw new BadRequestException("only staging app releases can be promoted");
     return prisma.$transaction(async (transaction) => {
       await transaction.appRelease.updateMany({
         where: { channel: Channel.production, status: AppReleaseStatus.production },
         data: { status: AppReleaseStatus.superseded },
       });
-      return transaction.appRelease.update({
-        where: { id },
-        data: { channel: Channel.production, status: AppReleaseStatus.production, promotedAt: new Date() },
+      return transaction.appRelease.create({
+        data: {
+          version: input.version,
+          build: input.build,
+          channel: Channel.production,
+          status: AppReleaseStatus.production,
+          url: input.url,
+          length: BigInt(input.length),
+          edSignature: input.edSignature,
+          minimumOSVersion: input.minimumOSVersion,
+          releaseNotesURL: input.releaseNotesURL,
+          releaseNotes: input.releaseNotes,
+          pubDate,
+          promotedAt: new Date(),
+        },
       });
     });
   }
@@ -155,7 +144,7 @@ export class RuntimeService {
     const path = join(process.cwd(), "manifests", "runtime-manifest.json");
     try {
       const payload = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
-      this.validatePublishedManifest(payload, Channel.staging);
+      this.validatePublishedManifest(payload, Channel.production);
       return payload;
     } catch {
       throw new ServiceUnavailableException(
@@ -264,11 +253,9 @@ export class RuntimeService {
     });
     if (
       !release ||
-      release.channel !== input.channel ||
-      (input.channel === Channel.production &&
-        release.status !== ReleaseStatus.production) ||
-      (input.channel === Channel.staging &&
-        release.status !== ReleaseStatus.staging)
+      input.channel !== Channel.production ||
+      release.channel !== Channel.production ||
+      release.status !== ReleaseStatus.production
     )
       throw new BadRequestException("manifest release is not eligible for this channel");
     const releaseArtifactIds = new Set(release.artifacts.map(({ id }) => id));
@@ -384,10 +371,8 @@ export class RuntimeService {
 
   async registerRelease(input: RegisterReleaseDto) {
     const prisma = this.requireDatabase();
-    if (input.channel !== Channel.staging)
-      throw new BadRequestException(
-        "new runtime releases must enter staging before promotion",
-      );
+    if (input.channel !== Channel.production)
+      throw new BadRequestException("runtime releases must use the production channel");
     const build = await prisma.runtimeBuild.findUnique({
       where: { id: input.buildId },
     });
@@ -415,86 +400,26 @@ export class RuntimeService {
         where: { id: { in: input.artifactIds } },
         data: { buildId: input.buildId },
       });
+      await transaction.artifact.updateMany({
+        where: { id: { in: input.artifactIds } },
+        data: { status: ArtifactStatus.production, promotedAt: new Date() },
+      });
       await transaction.runtimeBuild.update({
         where: { id: input.buildId },
-        data: { promotionStatus: "staging" },
+        data: { promotionStatus: "production" },
       });
       return transaction.runtimeRelease.create({
         data: {
           version: input.version,
-          channel: Channel.staging,
-          status: ReleaseStatus.staging,
+          channel: Channel.production,
+          status: ReleaseStatus.production,
           buildId: input.buildId,
           manifestVersion: input.manifestVersion,
           manifestURL: input.manifestURL,
+          promotedAt: new Date(),
           artifacts: { connect: input.artifactIds.map((id) => ({ id })) },
         },
       });
-    });
-  }
-
-  async promoteRelease(id: string, actor = "admin") {
-    const prisma = this.requireDatabase();
-    const release = await prisma.runtimeRelease.findUnique({
-      where: { id },
-      include: {
-        build: true,
-        artifacts: true,
-        manifests: {
-          where: { channel: Channel.staging, status: "published" },
-          take: 1,
-        },
-      },
-    });
-    if (!release) throw new NotFoundException("runtime release not found");
-    if (release.channel !== Channel.staging || release.status !== ReleaseStatus.staging)
-      throw new BadRequestException("only staging releases can be promoted");
-    if (release.build.status !== BuildStatus.succeeded)
-      throw new BadRequestException("release build did not succeed");
-    const testResult = release.build.testResult;
-    if (
-      !testResult ||
-      typeof testResult !== "object" ||
-      Array.isArray(testResult) ||
-      (testResult as Record<string, unknown>).cleanInstall !== "passed"
-    )
-      throw new BadRequestException("clean-install acceptance is required before promotion");
-    if (release.manifests.length === 0)
-      throw new BadRequestException("a signed staging runtime manifest is required before promotion");
-    if (
-      release.artifacts.some(
-        (artifact) =>
-          artifact.status !== ArtifactStatus.verified &&
-          artifact.status !== ArtifactStatus.approved,
-      )
-    )
-      throw new BadRequestException("all release artifacts must pass validation");
-    return prisma.$transaction(async (transaction) => {
-      await transaction.artifact.updateMany({
-        where: { id: { in: release.artifacts.map(({ id: artifactId }) => artifactId) } },
-        data: { status: ArtifactStatus.production, promotedAt: new Date() },
-      });
-      await transaction.runtimeBuild.update({
-        where: { id: release.buildId },
-        data: { promotionStatus: "production" },
-      });
-      const promoted = await transaction.runtimeRelease.update({
-        where: { id },
-        data: {
-          channel: Channel.production,
-          status: ReleaseStatus.production,
-          promotedAt: new Date(),
-        },
-      });
-      await transaction.releasePromotion.create({
-        data: {
-          releaseId: id,
-          fromChannel: Channel.staging,
-          toChannel: Channel.production,
-          actor,
-        },
-      });
-      return promoted;
     });
   }
 

@@ -24,7 +24,7 @@ public final class PortsideRuntimeUpdateWorker: @unchecked Sendable {
         logger.write("runtime update service started")
         while !Task.isCancelled {
             do {
-                _ = try await updateService.stageRuntimeUpdate()
+                _ = try await updateService.prepareRuntimeUpdate()
             } catch {
                 // Offline operation is expected. Keep the current runtime and
                 // retry later without surfacing a technical dialog to users.

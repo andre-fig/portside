@@ -46,19 +46,9 @@ export class AdminController {
     return this.runtimeService.registerAppRelease(body);
   }
 
-  @Post("app-releases/:id/promote")
-  promoteAppRelease(@Param("id") id: string) {
-    return this.runtimeService.promoteAppRelease(id);
-  }
-
   @Post("app-releases/:id/rollback")
   rollbackAppRelease(@Param("id") id: string, @Body() body: RollbackReleaseDto) {
     return this.runtimeService.rollbackAppRelease(id, body.targetReleaseId);
-  }
-
-  @Post("releases/:id/promote")
-  promoteRelease(@Param("id") id: string) {
-    return this.runtimeService.promoteRelease(id);
   }
 
   @Post("releases/:id/rollback")

@@ -9,7 +9,8 @@ Rotation procedure:
 1. Generate a new pair in the approved offline/CI key system.
 2. Assign a new `keyId` and publish the new public key in a release that still
    accepts the previous key.
-3. Sign a new appcast/manifest/token with the new key and verify it on staging.
+3. Sign a new appcast/manifest/token with the new key and verify it in the
+   production publication checks.
 4. Promote only after old and new clients have been tested.
 5. Keep the old public key for the documented overlap window, then revoke it
    from the backend and CI workflow.

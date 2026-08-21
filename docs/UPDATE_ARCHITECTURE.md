@@ -10,14 +10,14 @@ Portside.app updates and runtime updates are separate:
   download or extraction.
 
 The app starts Sparkle asynchronously at launch. An unavailable feed does not
-delay Steam. A failed runtime update is staged atomically and leaves the
+delay Steam. A failed runtime update is prepared atomically and leaves the
 existing wrapper, prefix and Steam data in place. The backend retains at least
 three usable runtime versions: current production, previous production and
 the last proven stable version.
 
-Staging uses a separate appcast and manifest channel. The newest upstream
-version is never promoted automatically. Promotion requires checksum,
-signature, license inventory and real macOS validation.
+Production uses one appcast and manifest channel. A new version is never
+published until checksum, signature, license inventory and real macOS
+validation have passed.
 
 The app rejects unsigned or malformed manifests, invalid hashes, incompatible
 minimum versions, unauthorized hosts and downgrades outside the signed

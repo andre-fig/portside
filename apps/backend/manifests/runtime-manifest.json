@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "channel": "staging",
+  "channel": "production",
   "manifestVersion": "development-unpublished",
   "buildStatus": "blocked",
   "builtBy": "Portside",

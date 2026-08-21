@@ -15,7 +15,7 @@ for key in PortsideAPIBaseURL SUFeedURL SUPublicEDKey PortsideArtifactHosts Port
     value="$(plist_value "$key")"
     case "$value" in ""|*example.invalid*) echo "Production Info.plist has an invalid $key" >&2; exit 1;; esac
 done
-case "$(plist_value PortsideBuildChannel)" in staging|production) ;; *) echo "Production bundle must declare staging or production" >&2; exit 1;; esac
+[ "$(plist_value PortsideBuildChannel)" = production ] || { echo "Production bundle must declare production" >&2; exit 1; }
 [ "$(plist_value CFBundleShortVersionString)" = "$VERSION" ] || { echo "Bundle version does not match release version" >&2; exit 1; }
 
 HELPER="$APP_DIR/Contents/Helpers/PortsideAgent.app/Contents/Info.plist"

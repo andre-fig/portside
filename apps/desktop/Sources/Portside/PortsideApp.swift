@@ -97,7 +97,7 @@ final class PortsideModel: ObservableObject {
                 do {
                     let prefix = URL(fileURLWithPath: state.prefixPath ?? PortsidePaths.steamPrefix.path)
                     if !isManagedSteamRunning(wrapper: wrapperPath, prefix: prefix),
-                       let applied = try await updateService.applyStagedRuntime(using: wrapperInstaller) {
+                       let applied = try await updateService.applyPendingRuntime(using: wrapperInstaller) {
                         state.wrapperPath = applied.result.validation.wrapper.path
                         state.prefixPath = applied.result.validation.prefix.path
                         state.runtimeRecord = applied.result.runtimeRecord
@@ -106,9 +106,9 @@ final class PortsideModel: ObservableObject {
                     }
                 } catch {
                     // A non-critical runtime update never prevents an existing
-                    // working installation from opening. The staged copy stays
+                    // working installation from opening. The pending copy stays
                     // on disk for retry and rollback remains available.
-                    if (try? updateService.stagedRuntimeUpdate()?.manifest.critical) == true {
+                    if (try? updateService.pendingRuntimeUpdate()?.manifest.critical) == true {
                         errorMessage = "We couldn't verify an important Portside update. Steam was not opened."
                         message = "Portside needs attention before Steam can open."
                         setupStep = .failed

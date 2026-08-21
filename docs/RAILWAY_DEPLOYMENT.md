@@ -1,9 +1,8 @@
 # Railway deployment runbook
 
 The Portside deployment uses the existing Railway `production` environment.
-Do not create or assume a separate Railway staging environment. Logical
-validation and production channels are represented by the Portside release
-state and object-storage prefixes, not by another Railway project. Create or
+There is one Railway production environment and one product release channel.
+Create or
 maintain these services in production:
 
 1. API using `apps/backend/railway.api.json`.
@@ -47,11 +46,10 @@ Before adding a public custom domain, verify `/health`, `/ready`, TLS, signed
 artifact URLs, appcast content type and manifest signature. The API should
 return a temporary object-storage URL rather than proxying large files.
 
-Runtime publication is staging-only by default. The authenticated release
-sequence is source snapshot, successful build, staging release, validation,
-explicit promotion and signed manifest publication. Do not point a production
-manifest at an upstream source URL; runtime files must already be built and
-promoted into Portside object storage.
+Runtime publication is production-only. The authenticated release sequence is
+source snapshot, successful build, validation, signed manifest publication and
+backend registration. Do not point a production manifest at an upstream source
+URL; runtime files must already be built into Portside object storage.
 
 ## Runtime build secrets from Railway
 
@@ -73,10 +71,9 @@ contain a copy of the Railway bucket connection values. The mapping is:
 | `PORTSIDE_SECONDARY_S3_ENDPOINT` | secondary `endpoint` |
 
 `PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX` is the stable HTTPS API route used in
-the signed runtime manifest. For staging, it has the form
-`https://<api-host>/v1/runtime/artifacts/staging/`; the production GitHub
-Environment uses the same route with `/production/`. The backend maps the
-filename to `runtime/<channel>/<fileName>` and returns a short-lived signed
+the signed production runtime manifest:
+`https://<api-host>/v1/runtime/artifacts/production/`. The backend maps the
+filename to `runtime/production/<fileName>` and returns a short-lived signed
 redirect from the private primary bucket. The bucket remains the Railway
 S3-compatible service; GitHub secrets only grant the runner temporary
 publication access. The runtime workflow uses separate primary and secondary

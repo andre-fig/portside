@@ -165,12 +165,12 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
               let winetricksArchive = artifact("winetricks", in: artifacts) else {
             throw PortsideError.invalidArtifact("the Portside runtime manifest must contain wrapper, engine and winetricks")
         }
-        let staging = PortsidePaths.cache.appendingPathComponent("portside-runtime-(UUID().uuidString)", isDirectory: true)
-        defer { try? fileManager.removeItem(at: staging) }
-        try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
-        let wrapperExtract = staging.appendingPathComponent("wrapper", isDirectory: true)
-        let engineExtract = staging.appendingPathComponent("engine", isDirectory: true)
-        let winetricksExtract = staging.appendingPathComponent("winetricks", isDirectory: true)
+        let pending = PortsidePaths.cache.appendingPathComponent("portside-runtime-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fileManager.removeItem(at: pending) }
+        try fileManager.createDirectory(at: pending, withIntermediateDirectories: true)
+        let wrapperExtract = pending.appendingPathComponent("wrapper", isDirectory: true)
+        let engineExtract = pending.appendingPathComponent("engine", isDirectory: true)
+        let winetricksExtract = pending.appendingPathComponent("winetricks", isDirectory: true)
         try await extract(archive: wrapperArchive, to: wrapperExtract)
         try await extract(archive: engineArchive, to: engineExtract)
         try await extract(archive: winetricksArchive, to: winetricksExtract)
@@ -180,9 +180,9 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
               let winetricksRoot = findWinetricks(in: winetricksExtract) else {
             throw PortsideError.invalidArtifact("Portside runtime archive layout is incomplete")
         }
-        let wrapperStage = staging.appendingPathComponent(PortsideRuntimeCatalog.wrapperName, isDirectory: true)
-        try fileManager.copyItem(at: wrapperBundle, to: wrapperStage)
-        let sharedSupport = wrapperStage.appendingPathComponent("Contents/SharedSupport", isDirectory: true)
+        let wrapperPending = pending.appendingPathComponent(PortsideRuntimeCatalog.wrapperName, isDirectory: true)
+        try fileManager.copyItem(at: wrapperBundle, to: wrapperPending)
+        let sharedSupport = wrapperPending.appendingPathComponent("Contents/SharedSupport", isDirectory: true)
         try fileManager.createDirectory(at: sharedSupport, withIntermediateDirectories: true)
         let engineDestination = sharedSupport.appendingPathComponent("engine", isDirectory: true)
         try fileManager.copyItem(at: engineRoot, to: engineDestination)
@@ -193,7 +193,7 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
         }
         let winetricksDestination = sharedSupport.appendingPathComponent("winetricks", isDirectory: true)
         try fileManager.copyItem(at: winetricksRoot, to: winetricksDestination)
-        try PortsideWrapperConfiguration(baseline: configuration).apply(to: wrapperStage, fileManager: fileManager)
+        try PortsideWrapperConfiguration(baseline: configuration).apply(to: wrapperPending, fileManager: fileManager)
 
         let destination = PortsidePaths.baselineWrapper
         if fileManager.fileExists(atPath: destination.path) {
@@ -201,7 +201,7 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
             try fileManager.createDirectory(at: rollback.deletingLastPathComponent(), withIntermediateDirectories: true)
             try fileManager.moveItem(at: destination, to: rollback)
         }
-        try AtomicInstaller.installDirectory(from: wrapperStage, to: destination, fileManager: fileManager)
+        try AtomicInstaller.installDirectory(from: wrapperPending, to: destination, fileManager: fileManager)
 
         let wrapperPrefix = destination.appendingPathComponent("Contents/SharedSupport/prefix", isDirectory: true)
         let managedPrefix = PortsidePaths.steamPrefix
@@ -274,7 +274,7 @@ public final class PortsideUpdateService: @unchecked Sendable {
     private let currentVersion: String
     public private(set) var lastManifestVersion: String?
 
-    private struct StagedRuntimeIndex: Codable {
+    private struct PendingRuntimeIndex: Codable {
         let manifest: PortsideRuntimeManifest
         let artifacts: [String: String]
     }
@@ -298,64 +298,64 @@ public final class PortsideUpdateService: @unchecked Sendable {
     }
 
     @discardableResult
-    public func stageRuntimeUpdate(progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> PortsideRuntimeManifest? {
+    public func prepareRuntimeUpdate(progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> PortsideRuntimeManifest? {
         guard let backend else { throw PortsideCommercialError.backendUnavailable }
         let manifest = try await backend.fetchRuntimeManifest(currentVersion: currentVersion)
         let installedVersion = EnvironmentStore().load().runtimeManifestVersion
         if let installedVersion,
            PortsideManifestVerifier.compareVersions(manifest.manifestVersion, installedVersion) <= 0,
            manifest.rollbackVersion != installedVersion { return nil }
-        let directory = PortsidePaths.runtimeStaging.appendingPathComponent(stagingDirectoryName(for: manifest.manifestVersion), isDirectory: true)
+        let directory = PortsidePaths.runtimePending.appendingPathComponent(pendingDirectoryName(for: manifest.manifestVersion), isDirectory: true)
         let indexURL = directory.appendingPathComponent("index.json")
-        if let data = try? Data(contentsOf: indexURL), let existing = try? JSONDecoder.portside.decode(StagedRuntimeIndex.self, from: data), existing.manifest.manifestVersion == manifest.manifestVersion { return existing.manifest }
-        let temporary = PortsidePaths.runtimeStaging.appendingPathComponent(".pending-(UUID().uuidString)", isDirectory: true)
+        if let data = try? Data(contentsOf: indexURL), let existing = try? JSONDecoder.portside.decode(PendingRuntimeIndex.self, from: data), existing.manifest.manifestVersion == manifest.manifestVersion { return existing.manifest }
+        let temporary = PortsidePaths.runtimePending.appendingPathComponent(".pending-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: temporary) }
         let artifactsDirectory = temporary.appendingPathComponent("artifacts", isDirectory: true)
         try FileManager.default.createDirectory(at: artifactsDirectory, withIntermediateDirectories: true)
         let artifacts = try await backend.downloadArtifacts(manifest: manifest, to: artifactsDirectory, progress: progress)
         let filenames = artifacts.reduce(into: [String: String]()) { $0[$1.key.id] = $1.value.lastPathComponent }
-        try JSONEncoder.portside.encode(StagedRuntimeIndex(manifest: manifest, artifacts: filenames)).write(to: temporary.appendingPathComponent("index.json"), options: .atomic)
-        try FileManager.default.createDirectory(at: PortsidePaths.runtimeStaging, withIntermediateDirectories: true)
-        for existing in (try? FileManager.default.contentsOfDirectory(at: PortsidePaths.runtimeStaging, includingPropertiesForKeys: nil)) ?? [] where existing.lastPathComponent.hasPrefix("runtime-") && existing.path != directory.path { try? FileManager.default.removeItem(at: existing) }
+        try JSONEncoder.portside.encode(PendingRuntimeIndex(manifest: manifest, artifacts: filenames)).write(to: temporary.appendingPathComponent("index.json"), options: .atomic)
+        try FileManager.default.createDirectory(at: PortsidePaths.runtimePending, withIntermediateDirectories: true)
+        for existing in (try? FileManager.default.contentsOfDirectory(at: PortsidePaths.runtimePending, includingPropertiesForKeys: nil)) ?? [] where existing.lastPathComponent.hasPrefix("runtime-") && existing.path != directory.path { try? FileManager.default.removeItem(at: existing) }
         if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
         try FileManager.default.moveItem(at: temporary, to: directory)
         lastManifestVersion = manifest.manifestVersion
-        logger.write("Verified and staged Portside runtime \(manifest.manifestVersion)")
+        logger.write("Verified and prepared Portside runtime \(manifest.manifestVersion)")
         return manifest
     }
 
-    public func applyStagedRuntime(using installer: PortsideRuntimeInstaller) async throws -> (result: PortsideRuntimeInstallResult, manifest: PortsideRuntimeManifest)? {
-        guard let staged = try stagedRuntimeUpdate() else { return nil }
+    public func applyPendingRuntime(using installer: PortsideRuntimeInstaller) async throws -> (result: PortsideRuntimeInstallResult, manifest: PortsideRuntimeManifest)? {
+        guard let pending = try pendingRuntimeUpdate() else { return nil }
         do {
-            let result = try await installer.install(artifacts: staged.artifacts)
-            removeStagedRuntime(staged.manifest.manifestVersion)
-            return (result, staged.manifest)
+            let result = try await installer.install(artifacts: pending.artifacts)
+            removePendingRuntime(pending.manifest.manifestVersion)
+            return (result, pending.manifest)
         } catch {
             _ = try? installer.rollbackLatest()
             throw error
         }
     }
 
-    public func stagedRuntimeUpdate() throws -> (manifest: PortsideRuntimeManifest, artifacts: [PortsideRuntimeArtifact: URL])? {
-        let directories = ((try? FileManager.default.contentsOfDirectory(at: PortsidePaths.runtimeStaging, includingPropertiesForKeys: [.isDirectoryKey])) ?? []).filter { $0.lastPathComponent.hasPrefix("runtime-") }.sorted { $0.lastPathComponent > $1.lastPathComponent }
+    public func pendingRuntimeUpdate() throws -> (manifest: PortsideRuntimeManifest, artifacts: [PortsideRuntimeArtifact: URL])? {
+        let directories = ((try? FileManager.default.contentsOfDirectory(at: PortsidePaths.runtimePending, includingPropertiesForKeys: [.isDirectoryKey])) ?? []).filter { $0.lastPathComponent.hasPrefix("runtime-") }.sorted { $0.lastPathComponent > $1.lastPathComponent }
         guard let directory = directories.first else { return nil }
-        let index = try JSONDecoder.portside.decode(StagedRuntimeIndex.self, from: Data(contentsOf: directory.appendingPathComponent("index.json")))
+        let index = try JSONDecoder.portside.decode(PendingRuntimeIndex.self, from: Data(contentsOf: directory.appendingPathComponent("index.json")))
         var artifacts: [PortsideRuntimeArtifact: URL] = [:]
         for component in index.manifest.components {
-            guard let filename = index.artifacts[component.id], SafeArchiveExtractor.isSafeRelativePath(filename) else { throw PortsideError.invalidArtifact("staged runtime path is unsafe") }
+            guard let filename = index.artifacts[component.id], SafeArchiveExtractor.isSafeRelativePath(filename) else { throw PortsideError.invalidArtifact("pending runtime path is unsafe") }
             let url = directory.appendingPathComponent("artifacts", isDirectory: true).appendingPathComponent(filename)
-            guard url.standardizedFileURL.path.hasPrefix(directory.standardizedFileURL.path + "/"), FileManager.default.fileExists(atPath: url.path) else { throw PortsideError.invalidArtifact("staged runtime artifact is missing") }
+            guard url.standardizedFileURL.path.hasPrefix(directory.standardizedFileURL.path + "/"), FileManager.default.fileExists(atPath: url.path) else { throw PortsideError.invalidArtifact("pending runtime artifact is missing") }
             artifacts[PortsideRuntimeArtifact(component: component)] = url
         }
-        guard artifacts.count == PortsideRuntimeCatalog.requiredComponents.count else { throw PortsideError.invalidArtifact("staged runtime is incomplete") }
+        guard artifacts.count == PortsideRuntimeCatalog.requiredComponents.count else { throw PortsideError.invalidArtifact("pending runtime is incomplete") }
         return (index.manifest, artifacts)
     }
 
-    public func removeStagedRuntime(_ manifestVersion: String) {
-        try? FileManager.default.removeItem(at: PortsidePaths.runtimeStaging.appendingPathComponent(stagingDirectoryName(for: manifestVersion), isDirectory: true))
+    public func removePendingRuntime(_ manifestVersion: String) {
+        try? FileManager.default.removeItem(at: PortsidePaths.runtimePending.appendingPathComponent(pendingDirectoryName(for: manifestVersion), isDirectory: true))
     }
 
-    private func stagingDirectoryName(for version: String) -> String {
+    private func pendingDirectoryName(for version: String) -> String {
         "runtime-" + SHA256.hash(data: Data(version.utf8)).map { String(format: "%02x", $0) }.joined().prefix(32)
     }
 }

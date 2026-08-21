@@ -12,9 +12,9 @@ MANIFEST_KEY="${PORTSIDE_RUNTIME_MANIFEST_PUBLIC_KEY:?Set the runtime manifest E
 LICENSE_KEY="${PORTSIDE_LICENSE_PUBLIC_KEY:?Set the license-token Ed25519 public key}"
 LICENSE_KEY_ID="${PORTSIDE_LICENSE_KEY_ID:?Set the license signing key ID}"
 ARTIFACT_HOSTS="${PORTSIDE_ARTIFACT_HOSTS:?Set comma-separated Portside object-storage hosts}"
-CHANNEL="${PORTSIDE_UPDATE_CHANNEL:-staging}"
+CHANNEL="${PORTSIDE_UPDATE_CHANNEL:-production}"
 
-case "$CHANNEL" in staging|production) ;; *) echo "PORTSIDE_UPDATE_CHANNEL must be staging or production" >&2; exit 1;; esac
+[ "$CHANNEL" = production ] || { echo "PORTSIDE_UPDATE_CHANNEL must be production" >&2; exit 1; }
 for value in "$API_URL" "$FEED_URL" "$SPARKLE_KEY" "$MANIFEST_KEY" "$LICENSE_KEY" "$LICENSE_KEY_ID" "$ARTIFACT_HOSTS"; do
     case "$value" in ""|*example.invalid*) echo "Release configuration contains an empty or placeholder value" >&2; exit 1;; esac
 done
@@ -58,7 +58,7 @@ iconutil -c icns "$ICONSET_DIR" -o "$APP_DIR/Contents/Resources/PortsideIcon.icn
 /usr/libexec/PlistBuddy -c "Set :SUVerifyUpdateBeforeExtraction true" "$APP_DIR/Contents/Info.plist"
 
 # The background helper must carry the same public configuration because it
-# continues runtime staging after Portside.app exits. It never receives a
+# continues runtime installation after Portside.app exits. It never receives a
 # private signing key.
 AGENT_PLIST="$APP_DIR/Contents/Helpers/PortsideAgent.app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$AGENT_PLIST"

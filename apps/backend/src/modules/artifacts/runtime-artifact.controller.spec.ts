@@ -5,7 +5,7 @@ import type { ArtifactService } from "./artifact.service.js";
 describe("RuntimeArtifactController", () => {
   it("redirects to the short-lived signed storage URL", async () => {
     const signedRuntimeDownload = vi.fn().mockResolvedValue({
-      url: "https://private-storage.example/runtime/staging/PortsideWrapper-1.0.0.tar.xz?signature=redacted",
+      url: "https://private-storage.example/runtime/production/PortsideWrapper-1.0.0.tar.xz?signature=redacted",
       expiresIn: 300,
     });
     const response = {
@@ -15,13 +15,13 @@ describe("RuntimeArtifactController", () => {
     const controller = new RuntimeArtifactController({ signedRuntimeDownload } as unknown as ArtifactService);
 
     await controller.redirect(
-      "staging",
+      "production",
       "PortsideWrapper-1.0.0.tar.xz",
       response as never,
     );
 
     expect(signedRuntimeDownload).toHaveBeenCalledWith(
-      "staging",
+      "production",
       "PortsideWrapper-1.0.0.tar.xz",
     );
     expect(response.setHeader).toHaveBeenCalledWith("Cache-Control", "no-store");

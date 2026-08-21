@@ -175,13 +175,13 @@ final class PortsideCoreTests: XCTestCase {
         let signingKey = Curve25519.Signing.PrivateKey()
         var unsigned: [String: Any] = [
             "schemaVersion": 1,
-            "channel": "staging",
+            "channel": "production",
             "manifestVersion": "1.0.0",
             "minimumPortsideVersion": "0.1.0",
             "publishedAt": "2026-08-19T00:00:00Z",
             "builtBy": "Portside",
             "buildId": "test-build",
-            "buildStatus": "staging",
+            "buildStatus": "production",
             "components": ["wrapper", "engine", "winetricks"].map { name in [
                 "id": name,
                 "component": name,
@@ -210,7 +210,7 @@ final class PortsideCoreTests: XCTestCase {
         let data = try JSONSerialization.data(withJSONObject: unsigned, options: [.sortedKeys])
         let manifest = try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", currentVersion: "0.1.0", allowedHosts: ["downloads.portside.test"])
         XCTAssertEqual(manifest.components.count, 3)
-        XCTAssertThrowsError(try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", expectedChannel: "production", currentVersion: "0.1.0", allowedHosts: ["downloads.portside.test"]))
+        XCTAssertThrowsError(try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", expectedChannel: "development", currentVersion: "0.1.0", allowedHosts: ["downloads.portside.test"]))
         XCTAssertThrowsError(try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", currentVersion: "0.0.9", allowedHosts: ["downloads.portside.test"]))
     }
 

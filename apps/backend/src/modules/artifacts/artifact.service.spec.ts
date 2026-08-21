@@ -23,12 +23,12 @@ describe("ArtifactService runtime downloads", () => {
 
   it("signs only the expected private runtime object path", async () => {
     vi.mocked(getSignedUrl).mockResolvedValueOnce(
-      "https://storage.example/runtime/staging/PortsideWrapper-1.0.0.tar.xz?signature=redacted",
+      "https://storage.example/runtime/production/PortsideWrapper-1.0.0.tar.xz?signature=redacted",
     );
     const service = new ArtifactService({} as PrismaService, config);
 
     await expect(
-      service.signedRuntimeDownload("staging", "PortsideWrapper-1.0.0.tar.xz"),
+      service.signedRuntimeDownload("production", "PortsideWrapper-1.0.0.tar.xz"),
     ).resolves.toEqual({
       url: expect.stringContaining("storage.example"),
       expiresIn: 300,
@@ -37,7 +37,7 @@ describe("ArtifactService runtime downloads", () => {
     const command = vi.mocked(getSignedUrl).mock.calls[0]?.[1] as { input: Record<string, string> };
     expect(command.input).toMatchObject({
       Bucket: "portside-artifacts",
-      Key: "runtime/staging/PortsideWrapper-1.0.0.tar.xz",
+      Key: "runtime/production/PortsideWrapper-1.0.0.tar.xz",
     });
   });
 
@@ -45,10 +45,10 @@ describe("ArtifactService runtime downloads", () => {
     const service = new ArtifactService({} as PrismaService, config);
 
     await expect(
-      service.signedRuntimeDownload("staging", "../../secrets.tar.xz"),
+      service.signedRuntimeDownload("production", "../../secrets.tar.xz"),
     ).rejects.toThrow("runtime artifact name is invalid");
     await expect(
-      service.signedRuntimeDownload("staging", "runtime-manifest.json"),
+      service.signedRuntimeDownload("production", "runtime-manifest.json"),
     ).rejects.toThrow("runtime artifact name is invalid");
   });
 });

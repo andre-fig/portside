@@ -64,9 +64,8 @@ export class ArtifactService {
     channel: string,
     fileName: string,
   ): Promise<{ url: string; expiresIn: number }> {
-    if (channel !== Channel.staging && channel !== Channel.production) {
-      throw new BadRequestException("runtime channel is invalid");
-    }
+    if (channel !== Channel.production)
+      throw new BadRequestException("runtime channel must be production");
     if (
       !/^(PortsideWrapper|PortsideWineEngine|PortsideWinetricks)-[A-Za-z0-9][A-Za-z0-9._-]*\.tar\.xz$/.test(
         fileName,

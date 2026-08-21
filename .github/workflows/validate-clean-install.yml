@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       runtime_run_id:
-        description: "Build Portside Runtime workflow run ID containing the signed staging artifact"
+        description: "Build Portside Runtime workflow run ID containing the signed production artifact"
         required: true
         type: string
       runtime_artifact_name:
-        description: "Artifact name from that run, for example portside-runtime-staging-1.0.0"
+        description: "Artifact name from that run, for example portside-runtime-production-1.0.0"
         required: true
         type: string
       runtime_version:

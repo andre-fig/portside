@@ -76,7 +76,7 @@ verify_manifest_and_artifacts() {
     jq -e --arg version "$source_version" '
       (.signature | strings | length > 0) and
       (.manifestVersion == $version) and
-      (.channel | IN("staging", "production")) and
+      (.channel == "production") and
       (.components | length == 3)
     ' "$manifest" >/dev/null || {
         echo "clean acceptance requires a signed manifest matching version $source_version" >&2

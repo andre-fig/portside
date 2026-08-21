@@ -54,7 +54,7 @@ that canonical prefix; the prefix is not duplicated.
 ## Update and rollback
 
 Updates are downloaded to Cache/Downloads, verified, extracted to a unique
-staging directory and activated atomically. The previous wrapper is retained
+temporary directory and activated atomically. The previous wrapper is retained
 under Runtime/rollback-*. A candidate must pass structure and engine
 validation before activation; a failed Steam-window smoke test keeps the
 previous active wrapper. SteamLibrary and saves are never rollback targets.

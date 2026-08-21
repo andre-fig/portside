@@ -39,9 +39,9 @@ DATABASE_URL=postgresql://... npm --prefix apps/backend ci
 ./scripts/publish_release.sh
 ```
 
-Runtime manifests are signed before backend promotion. The desktop validates the Ed25519 signature, channel, minimum Portside version, approved HTTPS host, SHA-256 and size before staging. ETag/304 responses and a verified local cache preserve offline operation. The background `PortsideAgent` stages runtime updates after the main app exits; installation happens on a later opening while Steam is stopped. The existing wrapper/prefix remain the rollback boundary.
+Runtime manifests are signed before production publication. The desktop validates the Ed25519 signature, production channel, minimum Portside version, approved HTTPS host, SHA-256 and size before download. ETag/304 responses and a verified local cache preserve offline operation. The background `PortsideAgent` prepares runtime updates after the main app exits; installation happens on a later opening while Steam is stopped. The existing wrapper/prefix remain the rollback boundary.
 
-The backend appcast is generated from `AppRelease` rows with `channel=production` and `status=production`; it returns the current release and two previous releases. A release must pass through staging and explicit promotion before it is visible to production clients.
+The backend appcast is generated from `AppRelease` rows with `channel=production` and `status=production`; it returns the current release and two previous releases. A release is registered directly in production after signing, notarization and validation.
 
 For the first real customer release, create Sparkle keys with the `generate_keys`
 tool shipped in Sparkle, register the public key as
@@ -54,8 +54,8 @@ inside the ephemeral runner and removed after the job. The previous
 configurations. The Railway API and dual-bucket runtime storage are configured in
 the single production environment. The
 buckets remain private and the runtime manifest now uses the stable Portside
-API `/v1/runtime/artifacts/<channel>/<fileName>` route, which returns a
+API `/v1/runtime/artifacts/production/<fileName>` route, which returns a
 short-lived signed storage redirect. The API manifest must still be published
-for the selected channel and a clean-install run must pass before an end-to-end
-customer update can be claimed. Apple signing, notarization, production
-promotion and final appcast inspection remain separate release gates.
+for production and a clean-install run must pass before an end-to-end customer
+update can be claimed. Apple signing, notarization, customer release and final
+appcast inspection remain separate release gates.

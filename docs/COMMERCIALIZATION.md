@@ -5,17 +5,13 @@ commercial control plane. The app bundle contains Portside code only. Runtime
 components are selected by a signed manifest and downloaded from Portside-owned
 HTTPS storage using short-lived URLs.
 
-There is one Railway operational environment plus local and logical release
-states:
+There is one Railway operational environment and one customer release channel:
 
 - `development`: local Debug builds may use the pinned official sources for
   validation. No production license bypass is compiled into Release.
-- `validation`: a logical release channel in the production Railway project,
-  object storage and database. GitHub Actions uses its protected `production`
-  Environment for secrets and approvals.
-- `production`: the promoted release state in the same Railway project,
-  database, buckets and API. An authorized promotion is still required before
-  customer distribution.
+- `production`: the only release channel in the Railway project, database,
+  buckets and API. GitHub Actions uses its protected `production` Environment
+  for secrets and approvals.
 
 The repository does not contain Railway IDs, passwords, signing keys, a
 Developer ID identity, a Sparkle private key or a license-signing private key.
@@ -28,8 +24,8 @@ Commercial release gates:
 3. macOS validation of the real Steam window with the approved runtime.
 4. Developer ID signing, Hardened Runtime, notarization and stapling.
 5. Sparkle EdDSA appcast and runtime-manifest signatures verified.
-6. Validation-channel activation/update/rollback tests pass.
-7. Manual authorized promotion to production.
+6. Production activation/update/rollback tests pass.
+7. Authenticated registration of the release in the production API.
 
 Local/CI command sequence (the variables are intentionally not supplied here):
 
@@ -61,33 +57,34 @@ PORTSIDE_UPDATES_DIR="$PWD/build/releases/updates" \
 ./scripts/generate_appcast.sh
 ```
 
-Publish only after staging validation. Use the authenticated admin API to
-promote an approved artifact and to roll back to a signed previous version;
-the application never carries the admin credential.
+Publish only after production validation. The authenticated release workflow
+registers the signed release directly in the production API and can roll back
+to a signed previous version; the application never carries the admin
+credential.
 
 ```sh
 PORTSIDE_VERSION=1.0.0 PORTSIDE_PUBLIC_BUCKET=<approved-bucket> \
 PORTSIDE_SECONDARY_PUBLIC_BUCKET=<approved-secondary-bucket> \
-PORTSIDE_UPDATE_CHANNEL=staging ./scripts/publish_release.sh
+PORTSIDE_UPDATE_CHANNEL=production PORTSIDE_CONFIRM_PRODUCTION=YES ./scripts/publish_release.sh
 
 curl --fail --request POST \
   --header "Authorization: Bearer $PORTSIDE_ADMIN_BEARER_TOKEN" \
   --header 'Content-Type: application/json' \
-  --data '{}' "$PORTSIDE_API_BASE_URL/v1/admin/artifacts/<artifact-id>/promote"
+  --data '{}' "$PORTSIDE_API_BASE_URL/v1/admin/app-releases/register"
 ```
 
 For runtime assets, use the source/build/release endpoints documented in
-`docs/BACKEND.md`. Register only a successful Portside build, create a staging
-release, validate it on a real Mac, promote it explicitly, then publish the
-signed manifest with `POST /v1/admin/manifests/publish`. Production publication
-also requires `PORTSIDE_CONFIRM_PRODUCTION=YES`; the publishing script writes
-each object to both approved buckets and keeps prior versions for rollback.
+`docs/BACKEND.md`. Register only a successful Portside build, validate it on a
+real Mac, then register the production release and publish its signed manifest
+with `POST /v1/admin/manifests/publish`. Production publication also requires
+`PORTSIDE_CONFIRM_PRODUCTION=YES`; the publishing script writes each object to
+both approved buckets and keeps prior versions for rollback.
 
-The Railway API and dual object storage are configured for runtime staging, and
-the staging runtime workflow has produced signed evidence in both buckets.
+The Railway API and dual object storage are configured for production runtime,
+and the production runtime workflow produces signed evidence in both buckets.
 This does not claim a customer release: Developer ID signature, notarization,
-production promotion, real-Mac GUI acceptance and an end-to-end desktop
-download still require their external result to be produced and recorded. The
-current buckets are private; the backend now exposes the short-lived signed
-redirect used by runtime manifests, but the selected API manifest still needs
-to be published and validated end to end before rollout.
+real-Mac GUI acceptance and an end-to-end desktop download still require their
+external result to be produced and recorded. The current buckets are private;
+the backend exposes the short-lived signed redirect used by production runtime
+manifests, but the API manifest still needs to be published and validated end
+to end before rollout.

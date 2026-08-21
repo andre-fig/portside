@@ -2,15 +2,6 @@ name: Release Portside
 
 on:
   workflow_dispatch:
-    inputs:
-      target:
-        description: "Release destination"
-        required: true
-        default: staging
-        type: choice
-        options:
-          - staging
-          - production
 
 permissions:
   contents: read
@@ -69,8 +60,8 @@ jobs:
       - name: Validate production source policy
         run: ./scripts/validate-production-policy.sh
 
-  build-stage-and-publish:
-    name: Build, notarize and publish validation release
+  build-and-publish-production:
+    name: Build, notarize and publish production release
     needs: [validate-desktop, validate-backend, validate-source-policy]
     runs-on: macos-15
     timeout-minutes: 90
@@ -78,7 +69,7 @@ jobs:
     outputs:
       version: ${{ steps.release-version.outputs.version }}
     env:
-      PORTSIDE_UPDATE_CHANNEL: staging
+      PORTSIDE_UPDATE_CHANNEL: production
       PORTSIDE_API_BASE_URL: ${{ secrets.PORTSIDE_API_BASE_URL }}
       PORTSIDE_UPDATE_FEED_URL: ${{ secrets.PORTSIDE_UPDATE_FEED_URL }}
       PORTSIDE_SPARKLE_PUBLIC_KEY: ${{ secrets.PORTSIDE_SPARKLE_PUBLIC_KEY }}
@@ -101,7 +92,8 @@ jobs:
       PORTSIDE_CODESIGN_IDENTITY: ${{ secrets.PORTSIDE_CODESIGN_IDENTITY }}
       PORTSIDE_NOTARY_KEY_ID: ${{ secrets.PORTSIDE_NOTARY_KEY_ID }}
       PORTSIDE_NOTARY_ISSUER_ID: ${{ secrets.PORTSIDE_NOTARY_ISSUER_ID }}
-      PORTSIDE_CONFIRM_PRODUCTION: "NO"
+      PORTSIDE_ADMIN_BEARER_TOKEN: ${{ secrets.PORTSIDE_ADMIN_BEARER_TOKEN }}
+      PORTSIDE_CONFIRM_PRODUCTION: "YES"
     steps:
       - name: Check out tested sources
         uses: actions/checkout@v7
@@ -121,8 +113,8 @@ jobs:
           test -n "$run_id" && test "$run_id" != null
           gh run view "$run_id" --json workflowName,status,conclusion,headBranch \
             | jq -e '(.workflowName == "Build Portside Runtime" and .status == "completed" and .conclusion == "success" and .headBranch == "main")' >/dev/null
-          metadata_artifact_name="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" --jq '.artifacts[] | select(.expired == false and (.name | startswith("portside-runtime-metadata-staging-"))) | .name' | head -n 1)"
-          full_artifact_name="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" --jq '.artifacts[] | select(.expired == false and (.name | startswith("portside-runtime-staging-"))) | .name' | head -n 1)"
+          metadata_artifact_name="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" --jq '.artifacts[] | select(.expired == false and (.name | startswith("portside-runtime-metadata-production-"))) | .name' | head -n 1)"
+          full_artifact_name="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" --jq '.artifacts[] | select(.expired == false and (.name | startswith("portside-runtime-production-"))) | .name' | head -n 1)"
           if [ -n "$metadata_artifact_name" ]; then
             artifact_name="$metadata_artifact_name"
             artifact_kind=metadata
@@ -132,8 +124,8 @@ jobs:
           fi
           test -n "$artifact_name"
           case "$artifact_name" in
-            portside-runtime-metadata-staging-*|portside-runtime-staging-*) ;;
-            *) echo "selected artifact is not a validation runtime artifact" >&2; exit 1 ;;
+            portside-runtime-metadata-production-*|portside-runtime-production-*) ;;
+            *) echo "selected artifact is not a production runtime artifact" >&2; exit 1 ;;
           esac
           {
             printf 'runtime_run_id=%s\n' "$run_id"
@@ -149,7 +141,7 @@ jobs:
           name: ${{ steps.runtime.outputs.runtime_artifact_name }}
           path: ${{ runner.temp }}/portside-release
 
-      - name: Validate reused runtime evidence
+      - name: Validate reused production runtime evidence
         id: runtime-evidence
         env:
           PORTSIDE_RUNTIME_BUILD_DIR: ${{ runner.temp }}/portside-release
@@ -333,13 +325,13 @@ jobs:
           PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
         run: ./scripts/validate_release_bundle.sh
 
-      - name: Generate signed staging appcast
+      - name: Generate signed production appcast
         env:
           PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
           PORTSIDE_UPDATES_DIR: ${{ runner.temp }}/portside-release/updates
           PORTSIDE_APPCAST_OUTPUT: ${{ runner.temp }}/portside-release/appcast.xml
           PORTSIDE_SPARKLE_PRIVATE_KEY_FILE: ${{ runner.temp }}/portside-sparkle-ed25519.key
-          PORTSIDE_DOWNLOAD_URL_PREFIX: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/app/staging/
+          PORTSIDE_DOWNLOAD_URL_PREFIX: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/app/production/
           SPARKLE_BIN: apps/desktop/.build/artifacts/sparkle/Sparkle/bin
         run: |
           set -eu
@@ -348,14 +340,14 @@ jobs:
           printf '%s\n' "Portside ${PORTSIDE_VERSION}: performance, stability and compatibility improvements." > "$PORTSIDE_UPDATES_DIR/Portside-${PORTSIDE_VERSION}-notarized.md"
           ./scripts/generate_appcast.sh
 
-      - name: Publish staging artifacts to both Portside buckets
+      - name: Publish production artifacts to both Portside buckets
         env:
           PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
           PORTSIDE_RUNTIME_VERSION: ${{ steps.runtime-evidence.outputs.runtime_version }}
           PORTSIDE_SKIP_RUNTIME_ARCHIVES: "1"
         run: ./scripts/publish_release.sh
 
-      - name: Upload signed staging release for protected promotion
+      - name: Upload signed production release record
         uses: actions/upload-artifact@v7
         with:
           name: portside-release-${{ steps.release-version.outputs.version }}
@@ -371,125 +363,30 @@ jobs:
             "$RUNNER_TEMP/portside-sparkle-ed25519.key" \
             "$RUNNER_TEMP/portside-manifest-ed25519.key"
 
-  promote-production:
-    name: Promote reviewed staging release to production
-    needs: build-stage-and-publish
-    if: ${{ inputs.target == 'production' }}
-    runs-on: macos-15
-    timeout-minutes: 20
+  register-production:
+    name: Register production release
+    needs: build-and-publish-production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     environment: production
     env:
-      PORTSIDE_VERSION: ${{ needs.build-stage-and-publish.outputs.version }}
-      PORTSIDE_UPDATE_CHANNEL: production
-      PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
-      PORTSIDE_SECONDARY_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_SECONDARY_PUBLIC_BUCKET }}
-      PORTSIDE_S3_ACCESS_KEY_ID: ${{ secrets.PORTSIDE_S3_ACCESS_KEY_ID }}
-      PORTSIDE_S3_SECRET_ACCESS_KEY: ${{ secrets.PORTSIDE_S3_SECRET_ACCESS_KEY }}
-      PORTSIDE_S3_REGION: ${{ secrets.PORTSIDE_S3_REGION }}
-      PORTSIDE_S3_ENDPOINT: ${{ secrets.PORTSIDE_S3_ENDPOINT }}
-      PORTSIDE_SECONDARY_S3_ACCESS_KEY_ID: ${{ secrets.PORTSIDE_SECONDARY_S3_ACCESS_KEY_ID }}
-      PORTSIDE_SECONDARY_S3_SECRET_ACCESS_KEY: ${{ secrets.PORTSIDE_SECONDARY_S3_SECRET_ACCESS_KEY }}
-      PORTSIDE_SECONDARY_S3_REGION: ${{ secrets.PORTSIDE_SECONDARY_S3_REGION }}
-      PORTSIDE_SECONDARY_S3_ENDPOINT: ${{ secrets.PORTSIDE_SECONDARY_S3_ENDPOINT }}
-      PORTSIDE_PUBLIC_BASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}
-      PORTSIDE_MANIFEST_SIGNING_KEY_ID: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY_ID }}
-      PORTSIDE_RUNTIME_SOURCE_CHANNEL: staging
-      PORTSIDE_RUNTIME_TARGET_CHANNEL: production
-      PORTSIDE_CONFIRM_PRODUCTION: YES
+      PORTSIDE_VERSION: ${{ needs.build-and-publish-production.outputs.version }}
+      API_URL: ${{ secrets.PORTSIDE_API_BASE_URL }}
+      ADMIN_TOKEN: ${{ secrets.PORTSIDE_ADMIN_BEARER_TOKEN }}
+      RELEASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/app/production/Portside-${{ needs.build-and-publish-production.outputs.version }}.zip
     steps:
-      - name: Check out release scripts
+      - name: Check out release metadata
         uses: actions/checkout@v7
 
-      - name: Resolve Sparkle tooling
-        run: swift package resolve --package-path apps/desktop
-
-      - name: Build Sparkle tooling for appcast generation
-        run: swift build -c release --arch arm64 --product Portside --package-path apps/desktop
-
-      - name: Download staged release
+      - name: Download production release record
         uses: actions/download-artifact@v7
         with:
-          name: portside-release-${{ needs.build-stage-and-publish.outputs.version }}
+          name: portside-release-${{ needs.build-and-publish-production.outputs.version }}
           path: ${{ runner.temp }}/portside-release
 
-      - name: Materialize Sparkle signing key
-        env:
-          SPARKLE_PRIVATE_KEY: ${{ secrets.PORTSIDE_SPARKLE_PRIVATE_KEY }}
-        run: |
-          set -eu
-          umask 077
-          test -n "$SPARKLE_PRIVATE_KEY"
-          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/portside-sparkle-ed25519.key"
-
-      - name: Materialize runtime manifest signing key
-        env:
-          MANIFEST_PRIVATE_KEY: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY }}
-        run: |
-          set -eu
-          umask 077
-          test -n "$MANIFEST_PRIVATE_KEY"
-          printf '%s' "$MANIFEST_PRIVATE_KEY" > "$RUNNER_TEMP/portside-runtime-manifest.key"
-
-      - name: Create signed production runtime manifest
-        id: production-runtime
+      - name: Register production release in the backend
         env:
           PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
-          PORTSIDE_RUNTIME_BUILD_DIR: ${{ runner.temp }}/portside-release
-          PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX: ${{ secrets.PORTSIDE_API_BASE_URL }}/v1/runtime/artifacts/production/
-          PORTSIDE_RUNTIME_MANIFEST_INPUT: ${{ runner.temp }}/portside-release/runtime-manifest-production-unsigned.json
-          PORTSIDE_MANIFEST_SIGNING_KEY_FILE: ${{ runner.temp }}/portside-runtime-manifest.key
-          PORTSIDE_MANIFEST_OUTPUT: ${{ runner.temp }}/portside-release/runtime-manifest.json
-        run: |
-          set -eu
-          INPUT="$PORTSIDE_RUNTIME_BUILD_DIR/runtime-manifest-unsigned.json" OUTPUT="$PORTSIDE_RUNTIME_MANIFEST_INPUT" PREFIX="$PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX" node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs';
-          const input = JSON.parse(readFileSync(process.env.INPUT, 'utf8'));
-          const prefix = process.env.PREFIX.endsWith('/') ? process.env.PREFIX : `${process.env.PREFIX}/`;
-          input.channel = 'production';
-          input.buildStatus = 'production';
-          input.signature = null;
-          input.components = input.components.map((component) => ({ ...component, downloadURL: prefix + component.downloadURL.split('/').pop() }));
-          writeFileSync(process.env.OUTPUT, JSON.stringify(input, null, 2) + '\n');
-          NODE
-          ./scripts/generate_manifest.sh
-          ./scripts/build-runtime/validate-manifest.sh "$PORTSIDE_MANIFEST_OUTPUT"
-          runtime_version="$(jq -r '.manifestVersion' "$PORTSIDE_MANIFEST_OUTPUT")"
-          test -n "$runtime_version" && test "$runtime_version" != null
-          printf 'runtime_version=%s\n' "$runtime_version" >> "$GITHUB_OUTPUT"
-
-      - name: Re-sign appcast for production storage URLs
-        env:
-          PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
-          PORTSIDE_UPDATES_DIR: ${{ runner.temp }}/portside-release/updates-production
-          PORTSIDE_APPCAST_OUTPUT: ${{ runner.temp }}/portside-release/appcast.xml
-          PORTSIDE_SPARKLE_PRIVATE_KEY_FILE: ${{ runner.temp }}/portside-sparkle-ed25519.key
-          PORTSIDE_DOWNLOAD_URL_PREFIX: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/app/production/
-          SPARKLE_BIN: ${{ github.workspace }}/apps/desktop/.build/artifacts/sparkle/Sparkle/bin
-        run: |
-          set -eu
-          mkdir -p "$PORTSIDE_UPDATES_DIR"
-          cp "$PORTSIDE_BUILD_DIR/Portside-${PORTSIDE_VERSION}-notarized.zip" "$PORTSIDE_UPDATES_DIR/"
-          printf '%s\n' "Portside ${PORTSIDE_VERSION}: performance, stability and compatibility improvements." > "$PORTSIDE_UPDATES_DIR/Portside-${PORTSIDE_VERSION}-notarized.md"
-          ./scripts/generate_appcast.sh
-
-      - name: Promote runtime archives inside Portside storage
-        env:
-          PORTSIDE_RUNTIME_VERSION: ${{ steps.production-runtime.outputs.runtime_version }}
-        run: ./scripts/promote_runtime_storage.sh
-
-      - name: Publish the reviewed artifact to production storage
-        env:
-          PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
-          PORTSIDE_RUNTIME_VERSION: ${{ steps.production-runtime.outputs.runtime_version }}
-          PORTSIDE_SKIP_RUNTIME_ARCHIVES: "1"
-        run: ./scripts/publish_release.sh
-
-      - name: Require explicit backend promotion
-        env:
-          PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
-          API_URL: ${{ secrets.PORTSIDE_API_BASE_URL }}
-          ADMIN_TOKEN: ${{ secrets.PORTSIDE_ADMIN_BEARER_TOKEN }}
-          RELEASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/app/production/Portside-${{ needs.build-stage-and-publish.outputs.version }}.zip
         run: |
           set -eu
           test -n "$API_URL"
@@ -508,13 +405,8 @@ jobs:
           )"
           length="$(printf '%s' "$metadata" | jq -r '.length')"
           signature="$(printf '%s' "$metadata" | jq -r '.edSignature')"
-          response="$(curl --fail --silent --show-error --retry 3 \
-            -H "Authorization: Bearer $ADMIN_TOKEN" \
-            -H 'Content-Type: application/json' \
-            -d "$(jq -n --arg version "$PORTSIDE_VERSION" --arg url "$RELEASE_URL" --arg signature "$signature" --argjson length "$length" '{version:$version,build:$version,channel:"staging",url:$url,length:$length,edSignature:$signature,minimumOSVersion:"13.0",releaseNotes:("Portside " + $version + ": performance, stability and compatibility improvements.")}')" \
-            "$API_URL/v1/admin/app-releases/register")"
-          release_id="$(printf '%s' "$response" | jq -r '.id')"
-          test -n "$release_id" && test "$release_id" != null
           curl --fail --silent --show-error --retry 3 \
             -H "Authorization: Bearer $ADMIN_TOKEN" \
-            -X POST "$API_URL/v1/admin/app-releases/$release_id/promote"
+            -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg version "$PORTSIDE_VERSION" --arg url "$RELEASE_URL" --arg signature "$signature" --argjson length "$length" '{version:$version,build:$version,channel:"production",url:$url,length:$length,edSignature:$signature,minimumOSVersion:"13.0",releaseNotes:("Portside " + $version + ": performance, stability and compatibility improvements.")}')" \
+            "$API_URL/v1/admin/app-releases/register" >/dev/null

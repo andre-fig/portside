@@ -58,20 +58,20 @@ export class SyncService {
     if (!/^[a-f0-9]{64}$/i.test(request.expectedSHA256))
       throw new BadRequestException("expectedSHA256 must be a SHA-256 digest");
     const sourceSnapshotId = request.sourceSnapshotId;
-    if (request.channel === Channel.production) {
-      if (!request.sourceSnapshotId || !request.buildId)
-        throw new BadRequestException(
-          "production artifacts require a verified source snapshot and build",
-        );
-      const [snapshot, build] = await Promise.all([
-        this.prisma.sourceSnapshot.findUnique({ where: { id: request.sourceSnapshotId } }),
-        this.prisma.runtimeBuild.findUnique({ where: { id: request.buildId } }),
-      ]);
-      if (!snapshot || snapshot.status !== SourceSnapshotStatus.verified)
-        throw new BadRequestException("source snapshot is not verified");
-      if (!build || build.status !== BuildStatus.succeeded)
-        throw new BadRequestException("runtime build is not successful");
-    }
+    if (request.channel !== Channel.production)
+      throw new BadRequestException("artifacts must use the production channel");
+    if (!request.sourceSnapshotId || !request.buildId)
+      throw new BadRequestException(
+        "production artifacts require a verified source snapshot and build",
+      );
+    const [snapshot, build] = await Promise.all([
+      this.prisma.sourceSnapshot.findUnique({ where: { id: request.sourceSnapshotId } }),
+      this.prisma.runtimeBuild.findUnique({ where: { id: request.buildId } }),
+    ]);
+    if (!snapshot || snapshot.status !== SourceSnapshotStatus.verified)
+      throw new BadRequestException("source snapshot is not verified");
+    if (!build || build.status !== BuildStatus.succeeded)
+      throw new BadRequestException("runtime build is not successful");
     const existingRun = await this.prisma.syncExecution.findUnique({
       where: { idempotencyKey: request.idempotencyKey },
     });
@@ -107,12 +107,7 @@ export class SyncService {
         throw new ServiceUnavailableException(
           "private artifact storage is not configured",
         );
-      const source = validateHTTPSHost(
-        request.sourceURL,
-        request.channel === Channel.production
-          ? this.config.artifactHosts
-          : this.config.allowedSourceHosts,
-      );
+      const source = validateHTTPSHost(request.sourceURL, this.config.artifactHosts);
       const response = await fetch(source, {
         redirect: "manual",
         signal: AbortSignal.timeout(120_000),

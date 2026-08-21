@@ -140,12 +140,9 @@ nos buckets do Portside.
   runtime, proveniência e SBOM nos buckets primário e secundário. Produção
   exige `PORTSIDE_CONFIRM_PRODUCTION=YES`; pode publicar somente os metadados
   do runtime quando os archives já estiverem no storage.
-- `scripts/promote_runtime_storage.sh`: promove os três archives do runtime,
-  a proveniência e o SBOM de `runtime/staging/` para `runtime/production/`
-  dentro de cada bucket, sem baixar os arquivos para o runner.
-- `scripts/publish_runtime_staging.sh`: publica apenas os três artefatos do
-  runtime, manifesto assinado, proveniência e SBOM no canal `staging`; cada
-  objeto é replicado nos dois buckets em paralelo.
+- `scripts/publish_runtime.sh`: publica os três artefatos do runtime,
+  manifesto assinado, proveniência e SBOM diretamente no canal `production`;
+  cada objeto é replicado nos dois buckets em paralelo.
 
 ### Build e validação do runtime
 
@@ -214,9 +211,9 @@ a segredos externos. As chaves privadas nunca devem ser salvas no repositório:
 
 ```bash
 export PORTSIDE_VERSION=1.0.0
-export PORTSIDE_UPDATE_CHANNEL=staging
+export PORTSIDE_UPDATE_CHANNEL=production
 export PORTSIDE_API_BASE_URL=https://api.example.com
-export PORTSIDE_UPDATE_FEED_URL=https://artifacts.example.com/app/staging/appcast.xml
+export PORTSIDE_UPDATE_FEED_URL=https://artifacts.example.com/app/production/appcast.xml
 export PORTSIDE_SPARKLE_PUBLIC_KEY=...
 export PORTSIDE_RUNTIME_MANIFEST_PUBLIC_KEY=...
 export PORTSIDE_LICENSE_PUBLIC_KEY=...
@@ -260,14 +257,14 @@ um app assinado, um ZIP notarizado e um DMG notarizado com ticket stapled no
    validações Swift, backend e política de produção. Só depois o runner macOS
    compila o app, assina, notariza e publica a validação.
 5. O workflow seleciona primeiro o artefato pequeno
-   `portside-runtime-metadata-staging-<versão>`. O artefato completo
-   `portside-runtime-staging-<versão>` continua retido para evidência e
+   `portside-runtime-metadata-production-<versão>`. O artefato completo
+   `portside-runtime-production-<versão>` continua retido para evidência e
    rollback, e é usado como fallback para builds antigas. Assim a release não
    baixa novamente os archives de aproximadamente 2,8 GB.
 6. `publish_release.sh` publica nos dois buckets em paralelo. Na promoção,
-   `promote_runtime_storage.sh` copia os archives entre prefixos no próprio
-   storage, sem transferi-los pelo GitHub Actions. Versões anteriores ficam
-   disponíveis para rollback.
+   O runtime já é publicado diretamente no prefixo production, sem uma etapa
+   intermediária ou transferência extra pelo GitHub Actions. Versões anteriores
+   ficam disponíveis para rollback.
 7. O backend registra source snapshot, build, artifact, release, canal,
    promoção e rollback. Um checksum correto, sem build/promoção, não torna um
    artefato production.
@@ -315,12 +312,12 @@ verificado na Stripe e disponibilidade real do dispositivo/navegador.
 - `build-desktop.yml`: bundle e DMG de validação não comercial após CI.
 - `build-runtime.yml`: build próprio do runtime no macOS fixado. Pushes na
   `main` e `workflow_dispatch` compilam, assinam e publicam automaticamente
-  somente em staging; promoção para production continua explícita.
+  diretamente em production após as validações e assinatura.
 - `sync-upstreams.yml`: sincronização diária/manual, sem merge automático.
 - `validate-clean-install.yml`: baixa artefatos de uma execução selecionada e
   executa a aceitação manual de prefixo novo, Steam e GUI em um Mac self-hosted
   com sessão gráfica; exige manifesto assinado e não usa upstream como fallback.
-- `release-production.yml`: release staging, notarização e promoção protegida.
+- `release-production.yml`: release production, notarização e registro no backend.
 - `deploy-railway.yml`: verificação de health do backend já publicado no
   Railway; não usa o filesystem efêmero para artefatos.
 
@@ -347,10 +344,9 @@ ficar em GitHub Environments,
 Keychain ou secret manager. O Railway hospeda API/worker/cron e PostgreSQL; os
 arquivos de runtime e releases ficam em storage de objetos primário e
 secundário. Os buckets continuam privados. O manifesto deve apontar para
-`/v1/runtime/artifacts/<channel>/<fileName>` na API; essa rota gera uma URL S3
-temporária e responde com redirect. Publicar em staging e assinar o manifesto
-não prova, por si só, o download pelo cliente: a API precisa ter o manifesto
-publicado para o canal e a instalação limpa precisa ser validada.
+`/v1/runtime/artifacts/production/<fileName>` na API; essa rota gera uma URL
+S3 temporária e responde com redirect. A API precisa ter o manifesto production
+publicado e a instalação limpa precisa ser validada.
 
 Arquivos `.env`, chaves, certificados, DMGs, ZIPs, `node_modules`, `.build` e
 `build/` são ignorados. Confirme `git status` antes de adicionar qualquer

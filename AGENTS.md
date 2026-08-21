@@ -91,8 +91,8 @@ Para alterações no runtime, também execute no macOS com a toolchain de
 
 ```sh
 PORTSIDE_RUNTIME_VERSION=0.1.0 \
-PORTSIDE_RUNTIME_CHANNEL=staging \
-PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX=https://api.example.invalid/v1/runtime/artifacts/staging/ \
+PORTSIDE_RUNTIME_CHANNEL=production \
+PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX=https://api.example.invalid/v1/runtime/artifacts/production/ \
 ./scripts/build-runtime/build.sh
 ```
 
@@ -136,7 +136,7 @@ explícitas.
   apenas a chave pública. O mesmo princípio vale para Sparkle, Developer ID,
   notarização, Stripe e token administrativo.
 - Os buckets de runtime atualmente são privados. A publicação dual e a
-  assinatura já estão operacionais em staging, mas o desktop ainda precisa de
+  assinatura já estão operacionais em production, mas o desktop ainda precisa de
   uma rota Portside que entregue URL temporária assinada (ou de uma política
   pública deliberadamente revisada) antes de um rollout para usuários.
 
@@ -152,8 +152,8 @@ Antes de abrir uma PR:
    `upstream/lock.json`;
 5. para runtime, confirme manifest, SHA-256, tamanho, proveniência, SBOM,
    build ID, canal e resultado dos testes;
-6. para produção, não pule staging, aceitação gráfica, promoção protegida ou
-   rollback planejado.
+6. para produção, preserve aceitação gráfica e rollback planejado; não há um
+   ambiente intermediário.
 
 Não faça afirmações de “notarizado”, “compatível” ou “UI funcional” sem o
 comando/evidência correspondente. Consulte

@@ -21,7 +21,7 @@ public enum PortsidePaths {
     public static var manifests: URL { root.appendingPathComponent("Manifests", isDirectory: true) }
     public static var runtimeManifest: URL { manifests.appendingPathComponent("runtime-manifest.json") }
     public static var runtimeManifestETag: URL { manifests.appendingPathComponent("runtime-manifest.etag") }
-    public static var runtimeStaging: URL { runtime.appendingPathComponent("Staging", isDirectory: true) }
+    public static var runtimePending: URL { runtime.appendingPathComponent("Pending", isDirectory: true) }
 
     // Compatibility aliases for callers from the previous release.
     public static var downloads: URL { cache.appendingPathComponent("Downloads", isDirectory: true) }
@@ -32,7 +32,7 @@ public enum PortsidePaths {
     public static var baselineWrapper: URL { wrappers.appendingPathComponent("PortsideBaseline.app", isDirectory: true) }
 
     public static var allDirectories: [URL] {
-        [root, runtime, runtimeStaging, wrappers, prefixes, steamLibrary, cache, downloads, logs, diagnostics, profiles, manifests]
+        [root, runtime, runtimePending, wrappers, prefixes, steamLibrary, cache, downloads, logs, diagnostics, profiles, manifests]
     }
 }
 

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "channel": "staging",
+  "channel": "production",
   "manifestVersion": "source-build-pending",
   "buildStatus": "blocked",
   "builtBy": "Portside",
@@ -19,7 +19,7 @@
   "compatibilityRules": [],
   "critical": false,
   "rollbackVersion": null,
-  "signatureKeyId": "staging-key-not-configured",
+  "signatureKeyId": "production-key-not-configured",
   "signature": null,
   "blockers": [
     "This checked-in fixture is intentionally non-publishable until a Portside source build, validation and promotion exist.",

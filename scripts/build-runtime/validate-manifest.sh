@@ -8,8 +8,8 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for manifest validation"
 
 jq -e '
   (.schemaVersion | numbers) and
-  (.channel | IN("staging", "production")) and
-  (.buildStatus | IN("staging", "production")) and
+  (.channel == "production") and
+  (.buildStatus == "production") and
   (.builtBy == "Portside") and
   ((.components | length) == 3) and
   ([.components[].component] | sort) == ["engine", "winetricks", "wrapper"] and

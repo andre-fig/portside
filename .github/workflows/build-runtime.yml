@@ -18,7 +18,7 @@ on:
         required: true
         type: string
       artifact_url_prefix:
-        description: "HTTPS Portside API runtime download URL prefix, including the runtime channel path"
+        description: "HTTPS Portside API production runtime download URL prefix"
         required: true
         type: string
       force_rebuild:
@@ -32,13 +32,13 @@ permissions:
 
 jobs:
   build-runtime:
-    name: Build and publish validation runtime
+    name: Build and publish production runtime
     runs-on: macos-15
     timeout-minutes: 180
     environment: production
     env:
       PORTSIDE_RUNTIME_VERSION: ${{ inputs.version || format('0.1.{0}', github.run_number) }}
-      PORTSIDE_RUNTIME_CHANNEL: staging
+      PORTSIDE_RUNTIME_CHANNEL: production
       PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX: ${{ inputs.artifact_url_prefix || secrets.PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX }}
       PORTSIDE_MANIFEST_SIGNING_KEY_ID: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY_ID }}
       PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
@@ -80,7 +80,7 @@ jobs:
           restore-keys: |
             portside-wine-${{ runner.os }}-macos-15-
 
-      - name: Validate validation publication inputs
+      - name: Validate production publication inputs
         run: |
           set -eu
           require_env() {
@@ -107,8 +107,8 @@ jobs:
             require_env "$variable"
           done
           case "$PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX" in
-            https://*/v1/runtime/artifacts/staging/) ;;
-            *) echo "runtime download prefix must use the Portside signed-download route" >&2; exit 1;;
+            https://*/v1/runtime/artifacts/production/) ;;
+            *) echo "runtime download prefix must use the Portside production signed-download route" >&2; exit 1;;
           esac
 
       - name: Assemble wrapper, cached engine and winetricks from local sources
@@ -126,7 +126,7 @@ jobs:
           umask 077
           printf '%s' "$MANIFEST_PRIVATE_KEY" > "$RUNNER_TEMP/portside-runtime-manifest.key"
 
-      - name: Sign and validate validation manifest
+      - name: Sign and validate production manifest
         env:
           PORTSIDE_RUNTIME_MANIFEST_INPUT: ${{ github.workspace }}/build/runtime/runtime-manifest-unsigned.json
           PORTSIDE_MANIFEST_SIGNING_KEY_FILE: ${{ runner.temp }}/portside-runtime-manifest.key
@@ -135,12 +135,12 @@ jobs:
           ./scripts/generate_manifest.sh
           ./scripts/build-runtime/validate-manifest.sh "$PORTSIDE_MANIFEST_OUTPUT"
 
-      - name: Publish validation runtime to both buckets
+      - name: Publish production runtime to both buckets
         env:
           PORTSIDE_RUNTIME_BUILD_DIR: ${{ github.workspace }}/build/runtime
-        run: ./scripts/publish_runtime_staging.sh
+        run: ./scripts/publish_runtime.sh
 
-      - name: Run artifact and source policy checks
+      - name: Run production artifact and source policy checks
         run: |
           ./scripts/validate-production-policy.sh
           test -s "build/runtime/PortsideWrapper-${PORTSIDE_RUNTIME_VERSION}.tar.xz"
@@ -149,11 +149,11 @@ jobs:
           test -s "build/runtime/sbom.spdx.json"
           test -s "build/runtime/provenance.json"
 
-      - name: Upload validation evidence
+      - name: Upload production runtime evidence
         if: ${{ always() && hashFiles('build/runtime/**') != '' }}
         uses: actions/upload-artifact@v7
         with:
-          name: portside-runtime-staging-${{ env.PORTSIDE_RUNTIME_VERSION }}
+          name: portside-runtime-production-${{ env.PORTSIDE_RUNTIME_VERSION }}
           if-no-files-found: error
           retention-days: 30
           path: build/runtime/
@@ -162,7 +162,7 @@ jobs:
         if: ${{ success() }}
         uses: actions/upload-artifact@v7
         with:
-          name: portside-runtime-metadata-staging-${{ env.PORTSIDE_RUNTIME_VERSION }}
+          name: portside-runtime-metadata-production-${{ env.PORTSIDE_RUNTIME_VERSION }}
           if-no-files-found: error
           retention-days: 30
           path: |

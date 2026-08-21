@@ -33,7 +33,7 @@ não captura senha, cookie, token, Steam ID ou conteúdo de janela.
 - `main` estava sincronizada com `origin/main` no commit `2ee0dc1` quando esta
   documentação foi escrita.
 - A execução [`Build Portside Runtime`](https://github.com/andre-fig/portside/actions/runs/32325605325)
-  terminou com sucesso em staging: runtime `0.1.6`, build ID
+  terminou com sucesso em production: runtime `0.1.6`, build ID
   `32325605325-1`, manifesto assinado e evidência replicada nos buckets
   primário e secundário.
 - A API Railway respondia em `/health`; os buckets eram privados e o acesso
@@ -196,7 +196,7 @@ vendor/ + upstream/lock.json
         ↓ PR revisada e merge em main
 CI + build-runtime.yml
         ↓ build, checksums, proveniência, SBOM e manifesto assinado
-Railway object storage: staging primário + réplica
+Railway object storage: production primário + réplica
         ↓ validação limpa/GUI e promoção explícita
 API Portside → manifesto compatível
         ↓ assinatura, host allowlist, SHA-256 e tamanho
@@ -226,11 +226,11 @@ Não confunda uma atualização do app com uma atualização do runtime.
 | `ci.yml` / CI | push e PR para `main` | política de produção, Swift, Prisma, typecheck, lint, testes e build backend | corrigir/revisar e mergear |
 | `build-desktop.yml` | CI concluído com sucesso na `main` ou dispatch | ZIP, DMG e dSYM unsigned de validação | abrir/inspecionar localmente se necessário |
 | `build-landing.yml` | mudanças na landing, PR, push ou dispatch | lint, `.output` e artifact de build | deploy público do provedor |
-| `build-runtime.yml` | mudanças em fontes/runtime na `main` ou dispatch | runtime próprio, manifesto assinado, evidência e publicação no canal de validação | validar GUI e promover |
+| `build-runtime.yml` | mudanças em fontes/runtime na `main` ou dispatch | runtime próprio, manifesto assinado, evidência e publicação production | validar GUI e registrar |
 | `sync-upstreams.yml` | diariamente às 03:17 UTC ou dispatch | PR com novos snapshots/lock/checksums | revisar licença/diff e mergear |
 | `validate-clean-install.yml` | dispatch | instalação limpa e logs de aceitação em Mac self-hosted | sessão gráfica, login e janela real |
 | `deploy-railway.yml` / Verify Railway | CI concluído na `main` | healthcheck da API | investigar se `/health` falhar |
-| `release-production.yml` | dispatch com destino staging/production | release app/runtime de validação, assinatura/notarização e artifact para promoção | configurar secrets e aprovar production |
+| `release-production.yml` | dispatch | release app/runtime production, assinatura/notarização e registro no backend | configurar secrets |
 
 ### CI e desktop
 
@@ -273,7 +273,7 @@ A versão do runtime não deve ser deduzida pelo commit ou pelo valor padrão do
 2. Abra a execução mais recente com status verde.
 3. Role até a seção `Artifacts`.
 4. Leia a versão no nome do artefato, por exemplo
-   `portside-runtime-staging-0.1.6`.
+   `portside-runtime-production-0.1.6`.
 
 O último runtime confirmado no registro operacional desta documentação é o
 `0.1.6`. A execução seguinte usa a versão automática `0.1.<run_number>`; por
@@ -301,8 +301,8 @@ merge.
 
 ### Release do app
 
-`release-production.yml` é manual e recebe apenas o destino `staging` ou
-`production`. Ele seleciona o último runtime validado com sucesso, usa a
+`release-production.yml` é manual e sempre publica em `production`. Ele seleciona o último runtime
+validado com sucesso, usa a
 versão do manifesto desse runtime para o app e escolhe o artifact
 correspondente. O estágio:
 
@@ -314,12 +314,11 @@ correspondente. O estágio:
 6. notariza e faz staple no app/ZIP/DMG;
 7. valida o bundle;
 8. gera appcast assinado;
-9. publica staging nos dois buckets.
+9. publica production nos dois buckets.
 
-Os jobs de publicação usam o Environment GitHub protegido `production`. O job
-`promote-production` só é elegível quando o destino escolhido é `production` e
-depende da validação anterior. A aprovação do Environment `production` continua
-sendo obrigatória; uma build verde não publica produção sem essa proteção.
+O job de publicação usa o Environment GitHub protegido `production`. A
+aprovação desse Environment continua sendo obrigatória; uma build verde não
+publica produção sem essa proteção.
 
 ## 6. Railway e secrets
 
@@ -343,15 +342,15 @@ no CI/secret manager; a API recebe a chave pública para verificação.
 ### Acesso aos buckets privados
 
 Os buckets Railway continuam privados. Os manifestos novos devem apontar para
-`/v1/runtime/artifacts/<channel>/<fileName>` na API Portside. O backend valida
+`/v1/runtime/artifacts/production/<fileName>` na API Portside. O backend valida
 o canal e o nome do archive, cria uma URL S3 temporária para
-`runtime/<channel>/<fileName>` no bucket primário e responde com redirect; as
+`runtime/production/<fileName>` no bucket primário e responde com redirect; as
 credenciais do bucket nunca chegam ao desktop.
 
 O desktop precisa ter na allowlist o host da API e o host de storage usado pelo
 redirect, mas continua verificando assinatura do manifesto, HTTPS, tamanho e
 SHA-256 após o download. A rota resolve o `403` do acesso direto ao bucket; a
-API ainda precisa ter um manifesto publicado para o canal escolhido e a
+API ainda precisa ter um manifesto de produção publicado e a
 instalação limpa precisa ser validada antes do rollout. O detalhe operacional
 está em [`RAILWAY_DEPLOYMENT.md`](RAILWAY_DEPLOYMENT.md).
 
@@ -371,7 +370,7 @@ de compatibilidade. A atualização normal é:
 3. confirmar que não entraram caches, releases, arquivos compilados,
    symlinks perigosos ou dados temporários;
 4. revisar e mergear a PR;
-5. acompanhar CI e `Build Portside Runtime` em staging;
+5. acompanhar CI e `Build Portside Runtime` em production;
 6. executar a aceitação limpa/GUI antes de qualquer promoção.
 
 Se o repositório upstream desaparecer, os snapshots já versionados continuam
@@ -494,7 +493,7 @@ Para problemas de runtime, comece por:
 4. assinatura do manifesto e SHA-256 dos três componentes;
 5. presença em ambos os buckets e canal correto;
 6. allowlist de hosts e acesso privado/público ao objeto;
-7. cache, diretório de staging e rollback no desktop;
+7. cache, diretório temporário e rollback no desktop;
 8. somente então processos da Steam e evidência visual.
 
 Não “corrija” um erro de download adicionando uma URL upstream escondida. Não
@@ -512,7 +511,7 @@ gerenciado para não afetar a Steam nativa ou outro usuário.
       `vendor/` manualmente.
 - [ ] Para artefato, confirmei SHA-256, tamanho, build ID, canal, assinatura e
       origem.
-- [ ] Para release, mantive staging, aceitação e promoção como etapas distintas.
+- [ ] Para release, mantive validação, publicação production e rollback como etapas distintas.
 - [ ] Documentei qualquer bloqueio ou validação manual pendente.
 - [ ] Só fiz commit/push/merge quando isso foi explicitamente solicitado.
 

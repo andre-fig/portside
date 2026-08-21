@@ -4,11 +4,11 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 BUILD_DIR="${PORTSIDE_RUNTIME_BUILD_DIR:-$ROOT_DIR/build/runtime}"
 VERSION="${PORTSIDE_RUNTIME_VERSION:?Set PORTSIDE_RUNTIME_VERSION}"
-CHANNEL="${PORTSIDE_RUNTIME_CHANNEL:-staging}"
+CHANNEL="${PORTSIDE_RUNTIME_CHANNEL:-production}"
 DOWNLOAD_URL_PREFIX="${PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX:-${PORTSIDE_RUNTIME_ARTIFACT_URL_PREFIX:-}}"
 PORTSIDE_COMMIT="${PORTSIDE_COMMIT:-$(git -C "$ROOT_DIR" rev-parse HEAD)}"
 
-case "$CHANNEL" in staging|production) ;; *) echo "runtime channel must be staging or production" >&2; exit 1 ;; esac
+[ "$CHANNEL" = production ] || { echo "runtime channel must be production" >&2; exit 1; }
 case "$BUILD_DIR" in "$ROOT_DIR"/*) ;; *) echo "runtime build directory must be inside the checkout" >&2; exit 1 ;; esac
 command -v jq >/dev/null 2>&1 || { echo "jq is required for the Portside runtime build" >&2; exit 1; }
 
@@ -100,4 +100,4 @@ if [ -z "$DOWNLOAD_URL_PREFIX" ]; then
 fi
 case "$DOWNLOAD_URL_PREFIX" in https://*) ;; *) echo "runtime download URL prefix must use HTTPS" >&2; exit 1 ;; esac
 "$ROOT_DIR/scripts/build-runtime/validate-manifest.sh" "$BUILD_DIR/runtime-manifest-unsigned.json"
-echo "Built Portside runtime artifacts and unsigned staging manifest in $BUILD_DIR."
+echo "Built Portside runtime artifacts and unsigned production manifest in $BUILD_DIR."

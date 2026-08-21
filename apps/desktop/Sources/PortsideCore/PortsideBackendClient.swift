@@ -104,10 +104,7 @@ public final class PortsideBackendClient: @unchecked Sendable {
     }
 
     private var expectedChannel: String? {
-        switch configuration.buildChannel {
-        case "staging", "production": return configuration.buildChannel
-        default: return nil
-        }
+        configuration.buildChannel == "production" ? "production" : nil
     }
 }
 

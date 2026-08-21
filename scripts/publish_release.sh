@@ -15,9 +15,9 @@ SECONDARY_ACCESS_KEY_ID="${PORTSIDE_SECONDARY_S3_ACCESS_KEY_ID:?Set PORTSIDE_SEC
 SECONDARY_SECRET_ACCESS_KEY="${PORTSIDE_SECONDARY_S3_SECRET_ACCESS_KEY:?Set PORTSIDE_SECONDARY_S3_SECRET_ACCESS_KEY}"
 SECONDARY_REGION="${PORTSIDE_SECONDARY_S3_REGION:?Set PORTSIDE_SECONDARY_S3_REGION}"
 SECONDARY_ENDPOINT="${PORTSIDE_SECONDARY_S3_ENDPOINT:?Set PORTSIDE_SECONDARY_S3_ENDPOINT}"
-CHANNEL="${PORTSIDE_UPDATE_CHANNEL:-staging}"
+CHANNEL="${PORTSIDE_UPDATE_CHANNEL:-production}"
 SKIP_RUNTIME_ARCHIVES="${PORTSIDE_SKIP_RUNTIME_ARCHIVES:-0}"
-case "$CHANNEL" in staging|production) ;; *) echo "Channel must be staging or production" >&2; exit 1;; esac
+[ "$CHANNEL" = production ] || { echo "Channel must be production" >&2; exit 1; }
 [ "$CHANNEL" != production ] || [ "${PORTSIDE_CONFIRM_PRODUCTION:-}" = YES ] || { echo "Production publication requires PORTSIDE_CONFIRM_PRODUCTION=YES" >&2; exit 1; }
 [ "$SKIP_RUNTIME_ARCHIVES" = 0 ] || [ "$SKIP_RUNTIME_ARCHIVES" = 1 ] || { echo "PORTSIDE_SKIP_RUNTIME_ARCHIVES must be 0 or 1" >&2; exit 1; }
 [ -f "$BUILD_DIR/Portside-${VERSION}-notarized.zip" ] || { echo "Publish only after notarization" >&2; exit 1; }
@@ -63,4 +63,4 @@ for runtime_file in $runtime_files; do
     esac
     publish_object "$BUILD_DIR/$runtime_file" "runtime/$CHANNEL/$runtime_file" "$content_type"
 done
-echo "Published $VERSION to primary and secondary storage in $CHANNEL. Explicit release promotion remains required."
+echo "Published production release $VERSION to primary and secondary storage."

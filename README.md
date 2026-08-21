@@ -103,7 +103,7 @@ NestJS, PostgreSQL/Prisma, private object storage, signed runtime manifests,
 Sparkle 2 app updates and one-Mac license activation. Start with
 `docs/COMMERCIALIZATION.md`, `docs/BACKEND.md` and
 `docs/RAILWAY_DEPLOYMENT.md`. The Railway API and dual object storage are
-configured for runtime staging. The private runtime buckets are accessed
-through the API's short-lived signed redirect; publishing the API manifest,
-customer-facing Developer ID signing, notarization, production promotion and
-clean-install validation still require protected credentials and approval.
+configured for production runtime artifacts. The private runtime buckets are
+accessed through the API's short-lived signed redirect; publishing the API
+manifest, customer-facing Developer ID signing, notarization and clean-install
+validation still require protected credentials and approval.

@@ -33,7 +33,6 @@ enum ArtifactStatus {
 }
 
 enum Channel {
-  staging
   production
 }
 
@@ -62,7 +61,6 @@ enum BuildStatus {
 
 enum ReleaseStatus {
   draft
-  staging
   approved
   production
   rolled_back
@@ -71,7 +69,6 @@ enum ReleaseStatus {
 
 enum AppReleaseStatus {
   draft
-  staging
   production
   superseded
   rolled_back

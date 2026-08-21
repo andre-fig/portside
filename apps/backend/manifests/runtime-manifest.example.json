@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "channel": "staging",
+  "channel": "production",
   "manifestVersion": "2026.08.19.1",
   "minimumPortsideVersion": "0.1.0",
   "publishedAt": "2026-08-19T00:00:00Z",

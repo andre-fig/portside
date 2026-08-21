@@ -12,7 +12,7 @@ discovered -> downloading -> quarantined -> verified -> testing -> approved -> p
                                                                             \-> rejected/deprecated
 ```
 
-Staging synchronization accepts only HTTPS URLs on the configured allowlist,
+Production synchronization accepts only HTTPS URLs on the configured allowlist,
 does not follow an unapproved redirect, enforces a maximum download size,
 hashes before extraction and uses idempotency keys. Production artifacts must
 reference a verified source snapshot and successful Portside build and must be
