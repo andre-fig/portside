@@ -90,14 +90,14 @@ export class RuntimeService {
     if (existing) {
       if (existing.url !== input.url || existing.edSignature !== input.edSignature || existing.length !== BigInt(input.length))
         throw new BadRequestException("app release identity conflicts with the existing record");
-      return existing;
+      return this.appReleaseResponse(existing);
     }
     return prisma.$transaction(async (transaction) => {
       await transaction.appRelease.updateMany({
         where: { channel: Channel.production, status: AppReleaseStatus.production },
         data: { status: AppReleaseStatus.superseded },
       });
-      return transaction.appRelease.create({
+      const created = await transaction.appRelease.create({
         data: {
           version: input.version,
           build: input.build,
@@ -113,6 +113,7 @@ export class RuntimeService {
           promotedAt: new Date(),
         },
       });
+      return this.appReleaseResponse(created);
     });
   }
 
@@ -556,6 +557,22 @@ export class RuntimeService {
     const names = components.map((component) => component && typeof component === "object" ? String((component as Record<string, unknown>).component) : "").sort();
     if (names.join(",") !== "engine,winetricks,wrapper")
       throw new ServiceUnavailableException("runtime manifest components are incomplete");
+  }
+
+  private appReleaseResponse(release: {
+    id: string;
+    version: string;
+    channel: Channel;
+    status: AppReleaseStatus;
+    length: bigint;
+  }) {
+    return {
+      id: release.id,
+      version: release.version,
+      channel: release.channel,
+      status: release.status,
+      length: release.length.toString(),
+    };
   }
 
   private requireDatabase(): PrismaService {
