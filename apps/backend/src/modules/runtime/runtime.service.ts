@@ -72,6 +72,14 @@ export class RuntimeService {
       throw new BadRequestException("app releases must use the production channel");
     const url = new URL(input.url);
     const hosts = new Set((process.env.PORTSIDE_APP_HOSTS ?? process.env.PORTSIDE_ARTIFACT_HOSTS ?? "").split(",").map((host) => host.trim()).filter(Boolean));
+    for (const value of [process.env.PUBLIC_BASE_URL, process.env.RAILWAY_PUBLIC_DOMAIN]) {
+      if (!value) continue;
+      try {
+        hosts.add(new URL(value.startsWith("http") ? value : `https://${value}`).hostname);
+      } catch {
+        // Invalid optional host values are ignored; required production hosts are validated elsewhere.
+      }
+    }
     if (url.protocol !== "https:" || (hosts.size > 0 && !hosts.has(url.hostname)) || url.hostname.includes("example.invalid"))
       throw new BadRequestException("app release URL is not an approved Portside host");
     const pubDate = input.pubDate ? new Date(input.pubDate) : new Date();
