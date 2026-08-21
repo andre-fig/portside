@@ -45,17 +45,21 @@ export class LicenseService {
     publicKey: string;
   }): Promise<{ token: string; deviceId: string; offlineUntil: string }> {
     const parts = keyParts(input.licenseKey);
+    // Validate the device key before touching the database. Activation must
+    // only ever bind a real P-256 public key that the client can later prove
+    // possession of during challenge validation.
+    this.spkiForRawP256(input.publicKey);
     const keyHmac = hmacHex(this.config.licenseHMACSecret(), parts.hmacInput);
     const keyHash = sha256Hex(input.publicKey);
-    const device = await this.prisma.device.upsert({
-      where: { publicKeyHash: keyHash },
-      update: { publicKey: input.publicKey, lastSeenAt: new Date() },
-      create: { publicKey: input.publicKey, publicKeyHash: keyHash },
-    });
     const result = await this.prisma.$transaction(async (tx) => {
       const license = await tx.license.findUnique({ where: { keyHmac } });
       if (license?.status !== LicenseStatus.active)
         throw new UnauthorizedException("license is not active");
+      const device = await tx.device.upsert({
+        where: { publicKeyHash: keyHash },
+        update: { publicKey: input.publicKey, lastSeenAt: new Date() },
+        create: { publicKey: input.publicKey, publicKeyHash: keyHash },
+      });
       const current = await tx.activation.findFirst({
         where: { licenseId: license.id, status: ActivationStatus.active },
       });
@@ -81,7 +85,7 @@ export class LicenseService {
     const offlineUntil = now + license.offlineGraceDays * 86400;
     const payload: LicenseTokenPayload = {
       licenseId: license.id,
-      deviceId: device.id,
+      deviceId: activation.deviceId,
       plan: license.plan,
       issuedAt: now,
       expiresAt: offlineUntil,
@@ -250,12 +254,18 @@ export class LicenseService {
     const raw = Buffer.from(publicKeyBase64, "base64");
     if (raw.length !== 65 || raw[0] !== 0x04)
       throw new UnauthorizedException("invalid device public key");
-    return Buffer.concat([
+    const spki = Buffer.concat([
       Buffer.from(
         "3059301306072a8648ce3d020106082a8648ce3d030107034200",
         "hex",
       ),
       raw,
     ]);
+    try {
+      createPublicKey({ key: spki, format: "der", type: "spki" });
+    } catch {
+      throw new UnauthorizedException("invalid device public key");
+    }
+    return spki;
   }
 }

@@ -82,6 +82,7 @@ final class PortsideModel: ObservableObject {
     func startAutomatically() {
         guard !startedAutomatically else { return }
         startedAutomatically = true
+        diagnostics.breadcrumb("setup_started", context: context(stage: "startup"))
         if requiresCommercialLicense {
             prepareLicense()
         } else {
@@ -131,6 +132,10 @@ final class PortsideModel: ObservableObject {
         showsInstaller = true
         guard let licenseClient else {
             licenseMessage = "Portside services are not available yet."
+            diagnostics.capture(
+                error: PortsideCommercialError.backendUnavailable,
+                context: context(stage: "license_validation", errorCode: "license_service_unavailable")
+            )
             return
         }
         Task { @MainActor in
@@ -140,6 +145,18 @@ final class PortsideModel: ObservableObject {
                 continueAfterLicense()
             } catch {
                 licenseMessage = "Activate Portside with the purchase key from your order."
+                if case PortsideCommercialError.invalidLicenseToken = error {
+                    return
+                }
+                let failureCode = errorCode(error)
+                diagnostics.capture(
+                    error: error,
+                    context: context(stage: "license_validation", errorCode: failureCode)
+                )
+                logger.write(
+                    "license_validation_failed code=\(failureCode) reason=\(PortsideLogger.sanitize(error.localizedDescription))",
+                    level: .error
+                )
             }
         }
     }
@@ -197,14 +214,17 @@ final class PortsideModel: ObservableObject {
                 setupStep = .downloading
                 message = "Getting Portside ready for you…"
                 progressIsIndeterminate = false
+                diagnostics.breadcrumb("runtime_download_started", context: context(stage: "runtime_download"))
                 let artifacts = try await updateService.downloadBaselineArtifacts { [weak self] value in
                     Task { @MainActor in self?.progress = 0.45 * value }
                 }
+                diagnostics.breadcrumb("runtime_verified", context: context(stage: "runtime_verified"))
 
                 setupStep = .installing
                 message = "Setting up your private Steam experience…"
                 progress = 0.5
                 let installed = try await wrapperInstaller.install(artifacts: artifacts)
+                diagnostics.breadcrumb("prefix_created", context: context(stage: "prefix_installation"))
                 state.wrapperPath = installed.validation.wrapper.path
                 state.prefixPath = installed.validation.prefix.path
                 state.runtimeRecord = installed.runtimeRecord
@@ -223,6 +243,7 @@ final class PortsideModel: ObservableObject {
                 if !FileManager.default.fileExists(atPath: steamExecutable.path) {
                     message = "Installing Steam securely…"
                     diagnostics.breadcrumb("steam_install_started", context: context(stage: "steam_install"))
+                    diagnostics.breadcrumb("steam_update_started", context: context(stage: "steam_update"))
                     let result = try await steamLauncher.installSteam(using: installed.validation.wrapper)
                     guard result.status == 0 else { throw PortsideError.processFailed("Portside runtime Steam setup", result.status) }
                 }
@@ -246,6 +267,7 @@ final class PortsideModel: ObservableObject {
 
                 setupStep = .opening
                 message = "Starting Steam…"
+                diagnostics.breadcrumb("steam_launch_requested", context: context(stage: "steam_launch"))
                 state.phase = .steamLaunching
                 persist()
                 let baselinePIDs = Set(readinessMonitor.captureProcessSnapshot().map(\.pid))
@@ -274,11 +296,14 @@ final class PortsideModel: ObservableObject {
                 state.lastErrorCode = errorCode(error)
                 state.lastSetupDuration = Date().timeIntervalSince(started)
                 persist()
-                errorMessage = "We couldn't finish setting up Portside."
-                message = "We couldn't finish setting up Portside."
+                let userMessage = userFacingSetupFailure(error)
+                errorMessage = userMessage
+                message = userMessage
+                let failureStage = setupStage
+                let failureCode = errorCode(error)
                 setupStep = .failed
-                diagnostics.capture(error: error, context: context(stage: "failed", errorCode: errorCode(error)))
-                logger.write(error.localizedDescription, level: .error)
+                diagnostics.capture(error: error, context: context(stage: failureStage, errorCode: failureCode))
+                logger.write("setup_failed stage=\(failureStage) code=\(failureCode) reason=\(PortsideLogger.sanitize(error.localizedDescription))", level: .error)
             }
             isWorking = false
         }
@@ -309,10 +334,14 @@ final class PortsideModel: ObservableObject {
                 showsInstaller = false
                 hideAfterSteamWindow()
             } catch {
-                errorMessage = "Steam couldn't be opened. Please try again."
+                let userMessage = userFacingSetupFailure(error)
+                errorMessage = userMessage
+                message = userMessage
                 setupStep = .failed
                 showsInstaller = true
-                diagnostics.capture(error: error, context: context(stage: "second_open", errorCode: errorCode(error)))
+                let failureCode = errorCode(error)
+                diagnostics.capture(error: error, context: context(stage: "steam_launch", errorCode: failureCode))
+                logger.write("steam_launch_failed code=\(failureCode) reason=\(PortsideLogger.sanitize(error.localizedDescription))", level: .error)
             }
             isWorking = false
         }
@@ -343,9 +372,12 @@ final class PortsideModel: ObservableObject {
     }
 
     private func context(stage: String, errorCode: String? = nil, report: SteamReadinessReport? = nil) -> DiagnosticContext {
-        DiagnosticContext(
+        let bundle = Bundle.main
+        return DiagnosticContext(
             stage: stage,
             errorCode: errorCode,
+            portsideVersion: (bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.0.0",
+            portsideBuild: (bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String) ?? "0",
             macOSVersion: requirements.macOSVersion,
             architecture: requirements.architecture,
             runtimeVersion: "Portside runtime",
@@ -364,13 +396,75 @@ final class PortsideModel: ObservableObject {
 
     private func errorCode(_ error: Error) -> String {
         switch error {
+        case PortsideError.unsupportedArchitecture: return "unsupported_architecture"
+        case PortsideError.unsupportedOperatingSystem: return "unsupported_macos"
+        case PortsideError.insufficientStorage: return "insufficient_storage"
         case PortsideError.rosettaUnavailable: return "rosetta_unavailable"
         case PortsideError.runtimeUnavailable: return "portside_runtime_unavailable"
+        case PortsideError.invalidArtifact: return "runtime_artifact_invalid"
         case PortsideError.checksumMismatch: return "runtime_artifact_checksum_failed"
         case PortsideError.processTimedOut: return "runtime_process_timeout"
         case PortsideError.processFailed: return "runtime_process_failed"
         case PortsideError.processLaunchFailed: return "steam_window_failed"
+        case PortsideError.invalidPath: return "invalid_runtime_path"
+        case PortsideCommercialError.backendUnavailable: return "runtime_service_unavailable"
+        case PortsideCommercialError.invalidManifest: return "runtime_manifest_invalid"
+        case PortsideCommercialError.invalidSignature: return "runtime_manifest_signature_failed"
+        case PortsideCommercialError.incompatibleVersion: return "runtime_version_incompatible"
+        case PortsideCommercialError.unauthorizedURL: return "runtime_download_not_approved"
+        case PortsideCommercialError.invalidLicenseToken: return "license_token_invalid"
+        case PortsideCommercialError.keychainFailure: return "secure_storage_failed"
+        case DecodingError.dataCorrupted: return "portside_data_corrupted"
+        case DecodingError.keyNotFound: return "portside_data_field_missing"
+        case DecodingError.typeMismatch: return "portside_data_type_invalid"
+        case DecodingError.valueNotFound: return "portside_data_value_missing"
         default: return "portside_setup_failed"
+        }
+    }
+
+    private var setupStage: String {
+        switch setupStep {
+        case .checking: return "requirements"
+        case .license: return "license"
+        case .rosettaRequired: return "macos_compatibility"
+        case .downloading: return "runtime_download"
+        case .installing: return "runtime_installation"
+        case .opening: return "steam_launch"
+        case .ready: return "ready"
+        case .failed: return "failed"
+        }
+    }
+
+    private func userFacingSetupFailure(_ error: Error) -> String {
+        switch error {
+        case PortsideError.unsupportedArchitecture:
+            return "Portside works on Macs with Apple silicon."
+        case PortsideError.unsupportedOperatingSystem:
+            return "This macOS version is not supported by Portside."
+        case PortsideError.insufficientStorage:
+            return "There is not enough free space to finish the setup."
+        case PortsideError.rosettaUnavailable:
+            return "macOS could not prepare the compatibility components."
+        case PortsideError.runtimeUnavailable:
+            return "The Portside environment is not available yet. Please try again."
+        case PortsideError.invalidArtifact, PortsideError.checksumMismatch,
+             PortsideCommercialError.invalidManifest, PortsideCommercialError.invalidSignature:
+            return "A Portside component could not be verified. Please try again."
+        case PortsideCommercialError.backendUnavailable, PortsideCommercialError.unauthorizedURL:
+            return "Portside could not download the required components. Check your connection and try again."
+        case PortsideCommercialError.incompatibleVersion:
+            return "This Portside version is no longer compatible. Please download the latest version."
+        case DecodingError.dataCorrupted, DecodingError.keyNotFound,
+             DecodingError.typeMismatch, DecodingError.valueNotFound:
+            return "Portside could not read its saved setup data. Please try the repair option."
+        case PortsideError.processTimedOut:
+            return "Steam took too long to finish preparing. Please try again."
+        case PortsideError.processFailed:
+            return "Steam could not finish preparing. Please try again."
+        case PortsideError.processLaunchFailed:
+            return "Steam started, but its window could not be opened. Please try again."
+        default:
+            return "Something interrupted the Portside setup. Please try again."
         }
     }
 
@@ -425,7 +519,7 @@ struct RootView: View {
                             Spacer()
                             Text("Activate Portside").font(.title3.weight(.medium))
                             Text(model.licenseMessage).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                            SecureField("Purchase key", text: $model.licenseKey)
+                            TextField("Purchase key", text: $model.licenseKey)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: 330)
                             Button("Activate") { model.activateLicense() }

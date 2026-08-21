@@ -13,6 +13,14 @@ deactivation, revocation and administrative artifact decisions for the
 documented retention window, after which personal records should be deleted or
 anonymized through the operator's retention job.
 
+The desktop sends setup failures and the successful Steam-window checkpoint to
+Sentry. Events contain the Portside version/build, setup stage, stable error
+code, macOS version, architecture, renderer and bounded readiness flags. The
+Sentry integration removes user, context and extra data before transmission;
+purchase keys, Steam credentials, cookies, tokens, Steam IDs, file contents
+and account identifiers are not sent. Event IDs and sanitized failure reasons
+are also written to the local Portside log so a failed upload can be diagnosed.
+
 The 14-day offline grace period is configurable. If it expires, Portside asks
 for a connection without deleting games, the prefix or Steam data. A license
 failure must never be used as a reason to modify or corrupt the runtime.

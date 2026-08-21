@@ -5,7 +5,6 @@ import Sentry
 /// The only Portside type allowed to depend on the Sentry SDK.
 public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Sendable {
     private static let dsn = "https://5aa6a3d7a22bd8bb4b718bc2d6cfaac7@o4511935178080256.ingest.us.sentry.io/4511935182405632"
-    private static let release = "com.portside.app@0.1.0+1"
     private static let allowedTagKeys: Set<String> = [
         "stage", "error_code", "portside_version", "portside_build", "macos_version", "architecture",
         "runtime_version", "template_version", "engine_version", "renderer", "app_id",
@@ -19,8 +18,13 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
         "steam_started", "steamwebhelper_started", "steam_process_handoff_complete", "steam_handoff_failed",
         "steam_window_detected", "second_open"
     ]
+    private let logger = PortsideLogger(logFileName: "sentry.log")
 
     public init() {
+        let bundle = Bundle.main
+        let version = (bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.0.0"
+        let build = (bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String) ?? "0"
+        let release = "com.portside.app@\(version)+\(build)"
         SentrySDK.start { options in
             // Keep diagnostics enabled in Debug as well. The app is often validated
             // directly from Xcode, and a nil DSN there made setup failures disappear.
@@ -32,7 +36,7 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
             options.environment = "production"
             options.debug = false
             #endif
-            options.releaseName = Self.release
+            options.releaseName = release
             options.sendDefaultPii = false
             options.tracesSampleRate = 0
             options.enableAppHangTracking = true
@@ -49,6 +53,7 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
                 return event
             }
         }
+        logger.write("Sentry initialized enabled=\(SentrySDK.isEnabled) release=\(release)")
     }
 
     public func breadcrumb(_ name: String, context: DiagnosticContext) {
@@ -60,25 +65,29 @@ public final class SentryDiagnosticsService: DiagnosticsService, @unchecked Send
 
     public func event(_ name: String, context: DiagnosticContext) {
         guard Self.allowedBreadcrumbs.contains(name) else { return }
-        let crumb = Breadcrumb(level: .info, category: "portside.event")
-        crumb.message = name
-        for (key, value) in context.fields { crumb.setData(value: value, key: key) }
-        SentrySDK.addBreadcrumb(crumb)
+        let eventID = SentrySDK.capture(message: name) { scope in
+            for (key, value) in context.fields where Self.allowedTagKeys.contains(key) {
+                scope.setTag(value: value, key: key)
+            }
+        }
+        logger.write("Sentry event queued id=\(String(describing: eventID)) enabled=\(SentrySDK.isEnabled) name=\(name)")
+        SentrySDK.flush(timeout: 5)
     }
 
     public func capture(error: Error, context: DiagnosticContext) {
         let safeCode = context.errorCode ?? "portside_error"
         let safeDescription = PortsideLogger.sanitize(error.localizedDescription)
         let safeError = NSError(domain: "Portside", code: 1, userInfo: [NSLocalizedDescriptionKey: "\(safeCode): \(safeDescription)"])
-        SentrySDK.configureScope { scope in
+        let eventID = SentrySDK.capture(error: safeError) { scope in
             for (key, value) in context.fields where Self.allowedTagKeys.contains(key) {
                 scope.setTag(value: value, key: key)
             }
+            scope.setTag(value: safeCode, key: "error_code")
         }
-        SentrySDK.capture(error: safeError)
+        logger.write("Sentry event queued id=\(String(describing: eventID)) enabled=\(SentrySDK.isEnabled) code=\(safeCode)", level: .error)
         // Setup failures leave the app open, but flushing here also protects the
         // report when the user immediately quits or retries from the failure view.
-        SentrySDK.flush(timeout: 2)
+        SentrySDK.flush(timeout: 5)
     }
 
 }

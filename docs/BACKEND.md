@@ -69,6 +69,34 @@ configured. Each observed run is upserted as a `RuntimeBuild` with the
 Portside commit, workflow URL/ID, environment, test result and build status.
 It never registers a release by itself; release registration and rollback
 remain authenticated operations.
+
+## License activation security
+
+The customer purchase key is only a lookup credential. The API normalizes its
+`PORT-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX` format, derives an HMAC with
+`LICENSE_HMAC_SECRET` and stores the HMAC rather than the plaintext key. A
+random-looking key that was not issued and registered by the service cannot be
+activated.
+
+Activation also binds the license to a P-256 public key generated and kept in
+the Mac Keychain. The API rejects malformed device keys before creating a
+device record and permits only one active device per license. It returns a
+short-lived, server-signed license token with the device ID and offline expiry.
+
+The desktop verifies that token with the embedded license public key before
+marking the app active or saving anything to the Keychain. It also checks the
+device binding and expiry returned by the API. Refresh responses are verified
+the same way before replacing the stored token. Therefore changing an HTTP
+response to `success` or supplying an unsigned token does not activate the
+app.
+
+This is defense in depth, not an unbreakable DRM boundary: a person who
+modifies the local Portside binary can remove any client-side check. Production
+requests use HTTPS, signed tokens, Keychain-protected device keys, server-side
+license status and rate limiting. Stronger server enforcement would require
+protecting runtime manifest and artifact entitlement endpoints with the same
+license token, which is a separate compatibility/offline-policy change.
+
 The release sequence is `register source snapshot` → `register successful
 build` → `register production release` → `publish signed production manifest`.
 Registration rejects a failed build. The manifest endpoint verifies the Ed25519

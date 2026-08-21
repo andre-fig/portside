@@ -127,8 +127,17 @@ public final class PortsideLicenseClient: @unchecked Sendable {
     public func activate(licenseKey: String) async throws -> PortsideActivationResult {
         let key = try keyStore.publicKeyAndCreateIfNeeded()
         let response: ActivationResponse = try await request(path: "/v1/licenses/activate", body: ["licenseKey": licenseKey, "publicKey": key.base64EncodedString()])
+        let verified = try Self.verifyActivationResponse(
+            token: response.token,
+            deviceID: response.deviceId,
+            offlineUntil: response.offlineUntil,
+            publicKeyBase64: configuration.licensePublicKey,
+            expectedKeyID: configuration.licenseKeyID
+        )
+        // Never persist network data until its server signature and device
+        // binding have been verified locally.
         try tokenStore.save(response.token)
-        return PortsideActivationResult(token: response.token, deviceId: response.deviceId, offlineUntil: response.offlineUntil)
+        return PortsideActivationResult(token: response.token, deviceId: verified.deviceId, offlineUntil: verified.offlineUntil)
     }
 
     public func validate(allowOffline: Bool = true) async throws -> PortsideLicenseToken {
@@ -140,8 +149,14 @@ public final class PortsideLicenseClient: @unchecked Sendable {
         struct ValidateResponse: Decodable { let valid: Bool; let offlineUntil: Date; let token: String }
         let result: ValidateResponse = try await request(path: "/v1/licenses/validate", body: ["token": token, "challenge": challenge.challenge, "signature": signature])
         guard result.valid else { throw PortsideCommercialError.invalidLicenseToken }
+        let refreshed = try Self.verifyLocal(token: result.token, publicKeyBase64: configuration.licensePublicKey, expectedKeyID: configuration.licenseKeyID)
+        guard refreshed.licenseId == decoded.licenseId,
+              refreshed.deviceId == decoded.deviceId,
+              abs(refreshed.offlineUntil.timeIntervalSince(result.offlineUntil)) <= 1 else {
+            throw PortsideCommercialError.invalidLicenseToken
+        }
         try tokenStore.save(result.token)
-        return try Self.verifyLocal(token: result.token, publicKeyBase64: configuration.licensePublicKey, expectedKeyID: configuration.licenseKeyID)
+        return refreshed
     }
 
     public func deactivate(licenseKey: String, deviceID: String) async throws {
@@ -158,6 +173,15 @@ public final class PortsideLicenseClient: @unchecked Sendable {
         if let expectedKeyID, decoded.keyId != expectedKeyID { throw PortsideCommercialError.invalidLicenseToken }
         guard (allowExpired || Date(timeIntervalSince1970: TimeInterval(decoded.offlineUntil)) > Date()), decoded.expiresAt >= decoded.offlineUntil else { throw PortsideCommercialError.invalidLicenseToken }
         return PortsideLicenseToken(licenseId: decoded.licenseId, deviceId: decoded.deviceId, plan: decoded.plan, issuedAt: Date(timeIntervalSince1970: TimeInterval(decoded.issuedAt)), expiresAt: Date(timeIntervalSince1970: TimeInterval(decoded.expiresAt)), offlineUntil: Date(timeIntervalSince1970: TimeInterval(decoded.offlineUntil)), keyId: decoded.keyId)
+    }
+
+    public static func verifyActivationResponse(token: String, deviceID: String, offlineUntil: Date, publicKeyBase64: String?, expectedKeyID: String?) throws -> PortsideLicenseToken {
+        let decoded = try verifyLocal(token: token, publicKeyBase64: publicKeyBase64, expectedKeyID: expectedKeyID)
+        guard decoded.deviceId == deviceID,
+              abs(decoded.offlineUntil.timeIntervalSince(offlineUntil)) <= 1 else {
+            throw PortsideCommercialError.invalidLicenseToken
+        }
+        return decoded
     }
 
     private struct ActivationResponse: Decodable { let token: String; let deviceId: String; let offlineUntil: Date }

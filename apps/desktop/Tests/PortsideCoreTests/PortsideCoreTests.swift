@@ -227,6 +227,24 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertThrowsError(try PortsideLicenseClient.verifyLocal(token: "\(input).\(invalidSignature.base64EncodedString())", publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "license-1"))
     }
 
+    func testActivationResponseRequiresAValidSignatureAndMatchingDeviceBinding() throws {
+        let signingKey = Curve25519.Signing.PrivateKey()
+        let header = Data("{\"alg\":\"EdDSA\",\"typ\":\"PORTSIDE-LICENSE\"}".utf8).base64EncodedString()
+        let payload = Data("{\"licenseId\":\"lic-1\",\"deviceId\":\"dev-1\",\"plan\":\"standard\",\"issuedAt\":4102444800,\"expiresAt\":4103654400,\"offlineUntil\":4103654400,\"keyId\":\"license-1\"}".utf8).base64EncodedString()
+        let input = "\(header).\(payload)"
+        let signature = try signingKey.signature(for: Data(input.utf8)).base64EncodedString()
+        let token = "\(input).\(signature)"
+        let publicKey = signingKey.publicKey.rawRepresentation.base64EncodedString()
+        let offlineUntil = Date(timeIntervalSince1970: 4103654400)
+
+        XCTAssertEqual(
+            try PortsideLicenseClient.verifyActivationResponse(token: token, deviceID: "dev-1", offlineUntil: offlineUntil, publicKeyBase64: publicKey, expectedKeyID: "license-1").deviceId,
+            "dev-1"
+        )
+        XCTAssertThrowsError(try PortsideLicenseClient.verifyActivationResponse(token: token, deviceID: "dev-2", offlineUntil: offlineUntil, publicKeyBase64: publicKey, expectedKeyID: "license-1"))
+        XCTAssertThrowsError(try PortsideLicenseClient.verifyActivationResponse(token: token, deviceID: "dev-1", offlineUntil: offlineUntil.addingTimeInterval(2), publicKeyBase64: publicKey, expectedKeyID: "license-1"))
+    }
+
     func testSteamLibraryScannerParsesAndTracksManagedInstallations() throws {
         let root = PortsidePaths.root.appendingPathComponent(".test-library-" + UUID().uuidString, isDirectory: true)
         let prefix = root.appendingPathComponent("Prefix", isDirectory: true)
