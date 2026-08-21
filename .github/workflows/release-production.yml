@@ -332,7 +332,9 @@ jobs:
           PORTSIDE_UPDATES_DIR: ${{ runner.temp }}/portside-release/updates
           PORTSIDE_APPCAST_OUTPUT: ${{ runner.temp }}/portside-release/appcast.xml
           PORTSIDE_SPARKLE_PRIVATE_KEY_FILE: ${{ runner.temp }}/portside-sparkle-ed25519.key
-          PORTSIDE_DOWNLOAD_URL_PREFIX: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/app/production/
+          # Customer downloads must go through the Portside API proxy, which
+          # authorizes the release and returns a short-lived storage URL.
+          PORTSIDE_DOWNLOAD_URL_PREFIX: ${{ secrets.PORTSIDE_API_BASE_URL }}/app/production/
           SPARKLE_BIN: apps/desktop/.build/artifacts/sparkle/Sparkle/bin
         run: |
           set -eu
@@ -375,7 +377,9 @@ jobs:
       PORTSIDE_RUNTIME_RUN_ID: ${{ needs.build-and-publish-production.outputs.runtime_run_id }}
       API_URL: ${{ secrets.PORTSIDE_API_BASE_URL }}
       ADMIN_TOKEN: ${{ secrets.PORTSIDE_ADMIN_BEARER_TOKEN }}
-      RELEASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/app/production/Portside-${{ needs.build-and-publish-production.outputs.version }}.zip
+      # Store the API proxy URL in AppRelease. The backend signs the private
+      # object-storage request only after the release has been registered.
+      RELEASE_URL: ${{ secrets.PORTSIDE_API_BASE_URL }}/app/production/Portside-${{ needs.build-and-publish-production.outputs.version }}.zip
     steps:
       - name: Check out release metadata
         uses: actions/checkout@v7
