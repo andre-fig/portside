@@ -223,6 +223,15 @@ jobs:
             case "$value" in *example.invalid*) echo "placeholder release value" >&2; exit 1;; esac
           done
 
+      - name: Preflight App Store Connect notary credentials
+        run: |
+          set -eu
+          xcrun notarytool history \
+            --key "$PORTSIDE_NOTARY_KEY_PATH" \
+            --key-id "$PORTSIDE_NOTARY_KEY_ID" \
+            --issuer "$PORTSIDE_NOTARY_ISSUER_ID" \
+            --output-format json >/dev/null
+
       - name: Import Developer ID certificate into ephemeral keychain
         env:
           CODESIGN_P12_BASE64: ${{ secrets.PORTSIDE_CODESIGN_P12_BASE64 }}
