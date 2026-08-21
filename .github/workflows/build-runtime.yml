@@ -67,6 +67,7 @@ jobs:
 
       - name: Install pinned runtime toolchain
         run: |
+          brew trust aws/tap
           for formula in awscli bison mingw-w64 llvm lld freetype pkgconf; do brew list "$formula" >/dev/null 2>&1 || brew install "$formula"; done
           aws --version
           printf 'bison: '; "$(brew --prefix bison)/bin/bison" --version | awk 'NR==1 {print}'
