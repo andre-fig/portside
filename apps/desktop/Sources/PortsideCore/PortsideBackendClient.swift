@@ -170,7 +170,10 @@ public final class PortsideLicenseClient: @unchecked Sendable {
               let keyData = licensePublicKeyData(publicKeyBase64),
               let publicKey = try? Curve25519.Signing.PublicKey(rawRepresentation: keyData) else { throw PortsideCommercialError.invalidLicenseToken }
         let parts = token.split(separator: ".", omittingEmptySubsequences: false)
-        guard parts.count == 3, let signature = Data(base64Encoded: String(parts[2]), options: [.ignoreUnknownCharacters]), publicKey.isValidSignature(signature, for: Data("\(parts[0]).\(parts[1])".utf8)), let payload = Data(base64Encoded: String(parts[1]), options: [.ignoreUnknownCharacters]) else { throw PortsideCommercialError.invalidLicenseToken }
+        guard parts.count == 3,
+              let signature = base64URLData(String(parts[2])),
+              publicKey.isValidSignature(signature, for: Data("\(parts[0]).\(parts[1])".utf8)),
+              let payload = base64URLData(String(parts[1])) else { throw PortsideCommercialError.invalidLicenseToken }
         let decoded = try JSONDecoder.portside.decode(LicensePayload.self, from: payload)
         if let expectedKeyID, decoded.keyId != expectedKeyID { throw PortsideCommercialError.invalidLicenseToken }
         guard (allowExpired || Date(timeIntervalSince1970: TimeInterval(decoded.offlineUntil)) > Date()), decoded.expiresAt >= decoded.offlineUntil else { throw PortsideCommercialError.invalidLicenseToken }
@@ -199,6 +202,17 @@ public final class PortsideLicenseClient: @unchecked Sendable {
         guard der.count == ed25519SPKIPrefix.count + 32,
               der.prefix(ed25519SPKIPrefix.count) == ed25519SPKIPrefix else { return nil }
         return Data(der.suffix(32))
+    }
+
+    private static func base64URLData(_ value: String) -> Data? {
+        var base64 = value
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = base64.count % 4
+        if remainder != 0 {
+            base64.append(String(repeating: "=", count: 4 - remainder))
+        }
+        return Data(base64Encoded: base64)
     }
 
     public static func verifyActivationResponse(token: String, deviceID: String, offlineUntil: Date, publicKeyBase64: String?, expectedKeyID: String?) throws -> PortsideLicenseToken {

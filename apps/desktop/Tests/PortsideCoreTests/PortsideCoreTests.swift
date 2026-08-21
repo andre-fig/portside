@@ -244,6 +244,27 @@ final class PortsideCoreTests: XCTestCase {
         )
     }
 
+    func testLicenseTokenAcceptsTheBackendBase64URLEncoding() throws {
+        func base64URL(_ data: Data) -> String {
+            data.base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "="))
+        }
+
+        let signingKey = Curve25519.Signing.PrivateKey()
+        let header = base64URL(Data("{\"alg\":\"EdDSA\",\"typ\":\"PORTSIDE-LICENSE\"}".utf8))
+        let payload = base64URL(Data("{\"licenseId\":\"lic-url\",\"deviceId\":\"dev-url\",\"plan\":\"standard\",\"issuedAt\":4102444800,\"expiresAt\":4103654400,\"offlineUntil\":4103654400,\"keyId\":\"license-url\"}".utf8))
+        let input = "\(header).\(payload)"
+        let signature = base64URL(try signingKey.signature(for: Data(input.utf8)))
+        let token = "\(input).\(signature)"
+
+        XCTAssertEqual(
+            try PortsideLicenseClient.verifyLocal(token: token, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "license-url").deviceId,
+            "dev-url"
+        )
+    }
+
     func testActivationResponseRequiresAValidSignatureAndMatchingDeviceBinding() throws {
         let signingKey = Curve25519.Signing.PrivateKey()
         let header = Data("{\"alg\":\"EdDSA\",\"typ\":\"PORTSIDE-LICENSE\"}".utf8).base64EncodedString()
