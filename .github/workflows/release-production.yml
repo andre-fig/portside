@@ -17,8 +17,61 @@ permissions:
   actions: read
 
 jobs:
+  validate-desktop:
+    name: Validate desktop package
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Check out tested sources
+        uses: actions/checkout@v7
+
+      - name: Resolve Swift dependencies
+        run: swift package resolve --package-path apps/desktop
+
+      - name: Run desktop tests
+        run: swift test --package-path apps/desktop
+
+  validate-backend:
+    name: Validate backend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out tested sources
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/backend/package-lock.json
+
+      - name: Run backend checks
+        working-directory: apps/backend
+        env:
+          DATABASE_URL: postgresql://portside:portside@127.0.0.1:5432/portside
+        run: |
+          npm ci
+          npm run prisma:validate
+          npm run typecheck
+          npm run lint
+          npm test
+          npm run build
+
+  validate-source-policy:
+    name: Validate production source policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out tested sources
+        uses: actions/checkout@v7
+
+      - name: Validate production source policy
+        run: ./scripts/validate-production-policy.sh
+
   build-stage-and-publish:
     name: Build, notarize and publish validation release
+    needs: [validate-desktop, validate-backend, validate-source-policy]
     runs-on: macos-15
     timeout-minutes: 90
     environment: production
@@ -68,43 +121,25 @@ jobs:
           test -n "$run_id" && test "$run_id" != null
           gh run view "$run_id" --json workflowName,status,conclusion,headBranch \
             | jq -e '(.workflowName == "Build Portside Runtime" and .status == "completed" and .conclusion == "success" and .headBranch == "main")' >/dev/null
-          artifact_name="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" --jq '.artifacts[] | select(.expired == false and (.name | startswith("portside-runtime-staging-"))) | .name' | head -n 1)"
+          metadata_artifact_name="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" --jq '.artifacts[] | select(.expired == false and (.name | startswith("portside-runtime-metadata-staging-"))) | .name' | head -n 1)"
+          full_artifact_name="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" --jq '.artifacts[] | select(.expired == false and (.name | startswith("portside-runtime-staging-"))) | .name' | head -n 1)"
+          if [ -n "$metadata_artifact_name" ]; then
+            artifact_name="$metadata_artifact_name"
+            artifact_kind=metadata
+          else
+            artifact_name="$full_artifact_name"
+            artifact_kind=full
+          fi
           test -n "$artifact_name"
           case "$artifact_name" in
-            portside-runtime-staging-*) ;;
+            portside-runtime-metadata-staging-*|portside-runtime-staging-*) ;;
             *) echo "selected artifact is not a validation runtime artifact" >&2; exit 1 ;;
           esac
-          printf 'runtime_run_id=%s\n' "$run_id" >> "$GITHUB_OUTPUT"
-          printf 'runtime_artifact_name=%s\n' "$artifact_name" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve and build Swift dependencies
-        run: |
-          swift package resolve --package-path apps/desktop
-
-      - name: Run desktop tests
-        run: swift test --package-path apps/desktop
-
-      - name: Set up Node.js for backend validation
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: apps/backend/package-lock.json
-
-      - name: Run backend checks
-        working-directory: apps/backend
-        env:
-          DATABASE_URL: postgresql://portside:portside@127.0.0.1:5432/portside
-        run: |
-          npm ci
-          npm run prisma:validate
-          npm run typecheck
-          npm run lint
-          npm test
-          npm run build
-
-      - name: Validate production source policy
-        run: ./scripts/validate-production-policy.sh
+          {
+            printf 'runtime_run_id=%s\n' "$run_id"
+            printf 'runtime_artifact_name=%s\n' "$artifact_name"
+            printf 'runtime_artifact_kind=%s\n' "$artifact_kind"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Download previously validated runtime artifact
         uses: actions/download-artifact@v7
@@ -118,6 +153,7 @@ jobs:
         id: runtime-evidence
         env:
           PORTSIDE_RUNTIME_BUILD_DIR: ${{ runner.temp }}/portside-release
+          PORTSIDE_RUNTIME_ARTIFACT_KIND: ${{ steps.runtime.outputs.runtime_artifact_kind }}
         run: |
           set -eu
           test -s "$PORTSIDE_RUNTIME_BUILD_DIR/runtime-manifest-unsigned.json"
@@ -127,12 +163,14 @@ jobs:
           ./scripts/build-runtime/validate-manifest.sh "$PORTSIDE_RUNTIME_BUILD_DIR/runtime-manifest.json"
           runtime_version="$(jq -r '.manifestVersion' "$PORTSIDE_RUNTIME_BUILD_DIR/runtime-manifest-unsigned.json")"
           test -n "$runtime_version" && test "$runtime_version" != null
-          for component in Wrapper WineEngine Winetricks; do
-            test -s "$PORTSIDE_RUNTIME_BUILD_DIR/Portside${component}-${runtime_version}.tar.xz"
-          done
-          PORTSIDE_RUNTIME_VERSION="$runtime_version" \
-            PORTSIDE_RUNTIME_BUILD_DIR="$PORTSIDE_RUNTIME_BUILD_DIR" \
-            ./scripts/build-runtime/validate-clean-layout.sh
+          if [ "$PORTSIDE_RUNTIME_ARTIFACT_KIND" = full ]; then
+            for component in Wrapper WineEngine Winetricks; do
+              test -s "$PORTSIDE_RUNTIME_BUILD_DIR/Portside${component}-${runtime_version}.tar.xz"
+            done
+            PORTSIDE_RUNTIME_VERSION="$runtime_version" \
+              PORTSIDE_RUNTIME_BUILD_DIR="$PORTSIDE_RUNTIME_BUILD_DIR" \
+              ./scripts/build-runtime/validate-clean-layout.sh
+          fi
           printf 'runtime_version=%s\n' "$runtime_version" >> "$GITHUB_OUTPUT"
 
       - name: Set release version from validated runtime
@@ -305,6 +343,7 @@ jobs:
         env:
           PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
           PORTSIDE_RUNTIME_VERSION: ${{ steps.runtime-evidence.outputs.runtime_version }}
+          PORTSIDE_SKIP_RUNTIME_ARCHIVES: "1"
         run: ./scripts/publish_release.sh
 
       - name: Upload signed staging release for protected promotion
@@ -345,6 +384,8 @@ jobs:
       PORTSIDE_SECONDARY_S3_ENDPOINT: ${{ secrets.PORTSIDE_SECONDARY_S3_ENDPOINT }}
       PORTSIDE_PUBLIC_BASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}
       PORTSIDE_MANIFEST_SIGNING_KEY_ID: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY_ID }}
+      PORTSIDE_RUNTIME_SOURCE_CHANNEL: staging
+      PORTSIDE_RUNTIME_TARGET_CHANNEL: production
       PORTSIDE_CONFIRM_PRODUCTION: YES
     steps:
       - name: Check out release scripts
@@ -422,10 +463,16 @@ jobs:
           printf '%s\n' "Portside ${PORTSIDE_VERSION}: performance, stability and compatibility improvements." > "$PORTSIDE_UPDATES_DIR/Portside-${PORTSIDE_VERSION}-notarized.md"
           ./scripts/generate_appcast.sh
 
+      - name: Promote runtime archives inside Portside storage
+        env:
+          PORTSIDE_RUNTIME_VERSION: ${{ steps.production-runtime.outputs.runtime_version }}
+        run: ./scripts/promote_runtime_storage.sh
+
       - name: Publish the reviewed artifact to production storage
         env:
           PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
           PORTSIDE_RUNTIME_VERSION: ${{ steps.production-runtime.outputs.runtime_version }}
+          PORTSIDE_SKIP_RUNTIME_ARCHIVES: "1"
         run: ./scripts/publish_release.sh
 
       - name: Require explicit backend promotion

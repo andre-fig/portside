@@ -27,10 +27,21 @@ publish() {
     source_path="$1"
     key="$2"
     content_type="$3"
-    env AWS_ACCESS_KEY_ID="$PRIMARY_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$PRIMARY_SECRET_ACCESS_KEY" AWS_REGION="$PRIMARY_REGION" AWS_DEFAULT_REGION="$PRIMARY_REGION" AWS_ENDPOINT_URL="$PRIMARY_ENDPOINT" \
-        aws s3 cp "$source_path" "s3://$BUCKET/$key" --no-guess-mime-type --content-type "$content_type"
-    env AWS_ACCESS_KEY_ID="$SECONDARY_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$SECONDARY_SECRET_ACCESS_KEY" AWS_REGION="$SECONDARY_REGION" AWS_DEFAULT_REGION="$SECONDARY_REGION" AWS_ENDPOINT_URL="$SECONDARY_ENDPOINT" \
-        aws s3 cp "$source_path" "s3://$SECONDARY_BUCKET/$key" --no-guess-mime-type --content-type "$content_type"
+    publish_to_bucket() {
+        bucket="$1"
+        access_key_id="$2"
+        secret_access_key="$3"
+        region="$4"
+        endpoint="$5"
+        env AWS_ACCESS_KEY_ID="$access_key_id" AWS_SECRET_ACCESS_KEY="$secret_access_key" AWS_REGION="$region" AWS_DEFAULT_REGION="$region" AWS_ENDPOINT_URL="$endpoint" \
+            aws s3 cp "$source_path" "s3://$bucket/$key" --no-guess-mime-type --content-type "$content_type"
+    }
+    publish_to_bucket "$BUCKET" "$PRIMARY_ACCESS_KEY_ID" "$PRIMARY_SECRET_ACCESS_KEY" "$PRIMARY_REGION" "$PRIMARY_ENDPOINT" &
+    primary_pid=$!
+    publish_to_bucket "$SECONDARY_BUCKET" "$SECONDARY_ACCESS_KEY_ID" "$SECONDARY_SECRET_ACCESS_KEY" "$SECONDARY_REGION" "$SECONDARY_ENDPOINT" &
+    secondary_pid=$!
+    wait "$primary_pid"
+    wait "$secondary_pid"
 }
 
 prefix="runtime/$CHANNEL/"

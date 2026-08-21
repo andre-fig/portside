@@ -138,9 +138,14 @@ nos buckets do Portside.
   chave privada Ed25519 externa; só recebe entrada com `signature: null`.
 - `scripts/publish_release.sh`: publica ZIP, DMG, appcast, checksums,
   runtime, proveniência e SBOM nos buckets primário e secundário. Produção
-  exige `PORTSIDE_CONFIRM_PRODUCTION=YES`.
+  exige `PORTSIDE_CONFIRM_PRODUCTION=YES`; pode publicar somente os metadados
+  do runtime quando os archives já estiverem no storage.
+- `scripts/promote_runtime_storage.sh`: promove os três archives do runtime,
+  a proveniência e o SBOM de `runtime/staging/` para `runtime/production/`
+  dentro de cada bucket, sem baixar os arquivos para o runner.
 - `scripts/publish_runtime_staging.sh`: publica apenas os três artefatos do
-  runtime, manifesto assinado, proveniência e SBOM no canal `staging`.
+  runtime, manifesto assinado, proveniência e SBOM no canal `staging`; cada
+  objeto é replicado nos dois buckets em paralelo.
 
 ### Build e validação do runtime
 
@@ -251,15 +256,22 @@ um app assinado, um ZIP notarizado e um DMG notarizado com ticket stapled no
    do próprio workflow não recompilam o Wine. Um `workflow_dispatch` permite
    forçar uma nova build com versão explícita. O app consulta o manifesto
    assinado e baixa somente hosts Portside autorizados.
-4. Para o app macOS, `release-production.yml` seleciona o último runtime
-   validado, compila o app, assina, notariza, publica a validação e aguarda
-   revisão. O job de produção requer promoção explícita e ambiente protegido.
-5. `publish_release.sh` replica cada objeto no bucket primário e secundário;
-   versões anteriores ficam disponíveis para rollback.
-6. O backend registra source snapshot, build, artifact, release, canal,
+4. Para o app macOS, `release-production.yml` primeiro executa em paralelo as
+   validações Swift, backend e política de produção. Só depois o runner macOS
+   compila o app, assina, notariza e publica a validação.
+5. O workflow seleciona primeiro o artefato pequeno
+   `portside-runtime-metadata-staging-<versão>`. O artefato completo
+   `portside-runtime-staging-<versão>` continua retido para evidência e
+   rollback, e é usado como fallback para builds antigas. Assim a release não
+   baixa novamente os archives de aproximadamente 2,8 GB.
+6. `publish_release.sh` publica nos dois buckets em paralelo. Na promoção,
+   `promote_runtime_storage.sh` copia os archives entre prefixos no próprio
+   storage, sem transferi-los pelo GitHub Actions. Versões anteriores ficam
+   disponíveis para rollback.
+7. O backend registra source snapshot, build, artifact, release, canal,
    promoção e rollback. Um checksum correto, sem build/promoção, não torna um
    artefato production.
-7. O Sparkle atualiza o app pelo `appcast.xml`; o runtime usa o manifesto
+8. O Sparkle atualiza o app pelo `appcast.xml`; o runtime usa o manifesto
    assinado, instala atomicamente e mantém a versão anterior. Em caso de
    backend offline, continua usando a instalação válida já ativa.
 

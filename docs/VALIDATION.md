@@ -9,7 +9,7 @@ swift test --package-path apps/desktop
 swift build --package-path apps/desktop
 cd apps/backend && npm run typecheck && npm run lint && npm test && npm run build
 cd ../..
-for file in scripts/build-runtime/*.sh scripts/generate_manifest.sh scripts/publish_runtime_staging.sh; do sh -n "$file"; done
+for file in scripts/build-runtime/*.sh scripts/generate_manifest.sh scripts/publish_runtime_staging.sh scripts/publish_release.sh scripts/promote_runtime_storage.sh; do sh -n "$file"; done
 ./scripts/validate-production-policy.sh
 ./scripts/package_app.sh
 ~~~

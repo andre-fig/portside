@@ -157,3 +157,16 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           path: build/runtime/
+
+      - name: Upload runtime metadata for release orchestration
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: portside-runtime-metadata-staging-${{ env.PORTSIDE_RUNTIME_VERSION }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            build/runtime/runtime-manifest-unsigned.json
+            build/runtime/runtime-manifest.json
+            build/runtime/provenance.json
+            build/runtime/sbom.spdx.json

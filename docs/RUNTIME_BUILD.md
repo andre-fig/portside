@@ -64,7 +64,8 @@ S3-compatible credentials for both Railway buckets (`PORTSIDE_S3_ACCESS_KEY_ID`,
 `PORTSIDE_S3_SECRET_ACCESS_KEY`, `PORTSIDE_S3_REGION`,
 `PORTSIDE_S3_ENDPOINT` and the corresponding `PORTSIDE_SECONDARY_S3_*`
 values). `publish_runtime_staging.sh` writes the archives,
-manifest, provenance and SBOM to the primary and secondary object stores.
+manifest, provenance and SBOM to the primary and secondary object stores in
+parallel per object.
 The Railway buckets remain private. The manifest now points to the stable
 Portside API route; the backend creates a short-lived signed object URL and
 returns a redirect without exposing bucket credentials. This workflow proves
@@ -78,9 +79,18 @@ provenance, a Portside build ID, successful validation and promotion state.
 ## Reusing a validated runtime
 
 `release-production.yml` does not compile Wine or the wrapper. It selects the
-latest successful `Build Portside Runtime` run on `main`, downloads its signed
-evidence and reuses those archives for the app release. The runtime version is
-read from `runtime-manifest-unsigned.json`. The release workflow uses that
-validated runtime version automatically for the app release, so no version
-input is required. A source/runtime change still requires a new runtime build
-before the next commercial release.
+latest successful `Build Portside Runtime` run on `main`, downloads the small
+metadata artifact and reuses its signed evidence for the app release. The
+full `portside-runtime-staging-<version>` artifact remains available for
+evidence and rollback, but is no longer transferred during a normal release.
+The runtime version is read from `runtime-manifest-unsigned.json`. The release
+workflow uses that validated runtime version automatically for the app release,
+so no version input is required. A source/runtime change still requires a new
+runtime build. If an older runtime run has no metadata artifact, the release
+falls back to its full evidence artifact for compatibility.
+
+The runtime archives are published by `build-runtime.yml` to the staging
+prefix before the release starts. Production promotion uses
+`scripts/promote_runtime_storage.sh` to copy the archives, provenance and SBOM
+from the staging prefix to the production prefix inside each bucket. The
+release job publishes only the production manifest and app assets afterward.
