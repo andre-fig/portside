@@ -17,6 +17,7 @@ import { RollbackReleaseDto } from "../runtime/dtos/rollback-release.dto.js";
 import { PublishManifestDto } from "../runtime/dtos/publish-manifest.dto.js";
 import { RegisterAppReleaseDto } from "../runtime/dtos/register-app-release.dto.js";
 import { RuntimeService } from "../runtime/runtime.service.js";
+import { RegisterPublishedArtifactDto } from "./dtos/register-published-artifact.dto.js";
 
 @Controller("/v1/admin")
 @UseGuards(AdminGuard)
@@ -64,6 +65,11 @@ export class AdminController {
   @Post("artifacts/sync")
   sync(@Body() body: SyncArtifactDto) {
     return this.adminService.sync(body);
+  }
+
+  @Post("artifacts/register-published")
+  registerPublishedArtifact(@Body() body: RegisterPublishedArtifactDto) {
+    return this.adminService.registerPublishedArtifact(body);
   }
 
   @Post("artifacts/:id/promote")

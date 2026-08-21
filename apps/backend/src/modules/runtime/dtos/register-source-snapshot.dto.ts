@@ -1,7 +1,7 @@
 import {
   IsBoolean,
+  IsArray,
   IsISO8601,
-  IsObject,
   IsOptional,
   IsString,
   Matches,
@@ -37,12 +37,13 @@ export class RegisterSourceSnapshotDto {
   license!: string;
 
   @IsString()
-  @Matches(/^vendor\/[A-Za-z0-9._/-]+$/)
+  @Matches(/^(vendor|runtime|apps)\/[A-Za-z0-9._+/-]+$/)
   localPath!: string;
 
   @IsOptional()
-  @IsObject()
-  submodules?: Record<string, unknown>;
+  @IsArray()
+  @IsString({ each: true })
+  submodules?: string[];
 
   @IsBoolean()
   lfsUsed!: boolean;

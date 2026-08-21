@@ -12,6 +12,11 @@ import {
 import { BuildStatus } from "@prisma/client";
 
 export class RegisterBuildDto {
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9_-]{1,120}$/)
+  buildId?: string;
+
   @IsString()
   @MinLength(1)
   @MaxLength(120)

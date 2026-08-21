@@ -68,6 +68,7 @@ jobs:
     environment: production
     outputs:
       version: ${{ steps.release-version.outputs.version }}
+      runtime_run_id: ${{ steps.runtime.outputs.runtime_run_id }}
     env:
       PORTSIDE_UPDATE_CHANNEL: production
       PORTSIDE_API_BASE_URL: ${{ secrets.PORTSIDE_API_BASE_URL }}
@@ -371,6 +372,7 @@ jobs:
     environment: production
     env:
       PORTSIDE_VERSION: ${{ needs.build-and-publish-production.outputs.version }}
+      PORTSIDE_RUNTIME_RUN_ID: ${{ needs.build-and-publish-production.outputs.runtime_run_id }}
       API_URL: ${{ secrets.PORTSIDE_API_BASE_URL }}
       ADMIN_TOKEN: ${{ secrets.PORTSIDE_ADMIN_BEARER_TOKEN }}
       RELEASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}/app/production/Portside-${{ needs.build-and-publish-production.outputs.version }}.zip
@@ -383,6 +385,14 @@ jobs:
         with:
           name: portside-release-${{ needs.build-and-publish-production.outputs.version }}
           path: ${{ runner.temp }}/portside-release
+
+      - name: Register the published production runtime
+        env:
+          PORTSIDE_RUNTIME_BUILD_DIR: ${{ runner.temp }}/portside-release
+          PORTSIDE_API_BASE_URL: ${{ secrets.PORTSIDE_API_BASE_URL }}
+          PORTSIDE_ADMIN_BEARER_TOKEN: ${{ secrets.PORTSIDE_ADMIN_BEARER_TOKEN }}
+          PORTSIDE_RUNTIME_RUN_ID: ${{ needs.build-and-publish-production.outputs.runtime_run_id }}
+        run: ./scripts/register_runtime_release.sh
 
       - name: Register production release in the backend
         env:

@@ -75,6 +75,14 @@ export class RuntimeService {
       throw new BadRequestException("app release URL is not an approved Portside host");
     const pubDate = input.pubDate ? new Date(input.pubDate) : new Date();
     if (Number.isNaN(pubDate.getTime())) throw new BadRequestException("app release date is invalid");
+    const existing = await prisma.appRelease.findUnique({
+      where: { channel_version: { channel: Channel.production, version: input.version } },
+    });
+    if (existing) {
+      if (existing.url !== input.url || existing.edSignature !== input.edSignature || existing.length !== BigInt(input.length))
+        throw new BadRequestException("app release identity conflicts with the existing record");
+      return existing;
+    }
     return prisma.$transaction(async (transaction) => {
       await transaction.appRelease.updateMany({
         where: { channel: Channel.production, status: AppReleaseStatus.production },
@@ -178,6 +186,14 @@ export class RuntimeService {
         .map((host) => host.trim())
         .filter(Boolean),
     );
+    for (const value of [process.env.PUBLIC_BASE_URL, process.env.RAILWAY_PUBLIC_DOMAIN]) {
+      if (!value) continue;
+      try {
+        artifactHosts.add(new URL(value.startsWith("http") ? value : `https://${value}`).hostname);
+      } catch {
+        // Invalid optional host values are ignored; required production hosts are validated elsewhere.
+      }
+    }
     for (const component of components) {
       let downloadURL: URL | null = null;
       if (
@@ -249,7 +265,11 @@ export class RuntimeService {
     if (!input.releaseId) throw new BadRequestException("manifest must reference a release");
     const release = await prisma.runtimeRelease.findUnique({
       where: { id: input.releaseId },
-      include: { artifacts: { select: { id: true } } },
+      include: {
+        artifacts: {
+          select: { component: true, version: true, sha256: true, size: true, fileName: true },
+        },
+      },
     });
     if (
       !release ||
@@ -258,14 +278,23 @@ export class RuntimeService {
       release.status !== ReleaseStatus.production
     )
       throw new BadRequestException("manifest release is not eligible for this channel");
-    const releaseArtifactIds = new Set(release.artifacts.map(({ id }) => id));
     if (
       components.some(
-        (component) =>
-          !component ||
-          typeof component !== "object" ||
-          typeof (component as Record<string, unknown>).id !== "string" ||
-          !releaseArtifactIds.has((component as Record<string, string>).id),
+        (component) => {
+          if (!component || typeof component !== "object") return true;
+          const candidate = component as Record<string, unknown>;
+          const size = candidate.size;
+          const artifact = release.artifacts.find(
+            (registered) =>
+              registered.component === candidate.component &&
+              registered.version === candidate.version &&
+              registered.sha256.toLowerCase() === String(candidate.sha256).toLowerCase() &&
+              registered.fileName === String(candidate.downloadURL).split("/").pop() &&
+              typeof size === "number" &&
+              registered.size === BigInt(size),
+          );
+          return !artifact;
+        },
       )
     )
       throw new BadRequestException("manifest references an artifact outside its release");
@@ -274,19 +303,23 @@ export class RuntimeService {
         where: { channel: input.channel, status: "published" },
         data: { status: "superseded" },
       });
-      return transaction.runtimeManifest.create({
-        data: {
-          channel: input.channel,
-          manifestVersion,
-          minimumPortsideVersion,
-          payload: unsigned as Prisma.InputJsonValue,
-          signature,
-          signatureKeyId,
-          releaseId: input.releaseId,
-          status: "published",
-          publishedAt: new Date(),
-        },
+      const data = {
+        channel: input.channel,
+        manifestVersion,
+        minimumPortsideVersion,
+        payload: unsigned as Prisma.InputJsonValue,
+        signature,
+        signatureKeyId,
+        releaseId: input.releaseId,
+        status: "published",
+        publishedAt: new Date(),
+      };
+      const existing = await transaction.runtimeManifest.findUnique({
+        where: { channel_manifestVersion: { channel: input.channel, manifestVersion } },
       });
+      return existing
+        ? transaction.runtimeManifest.update({ where: { id: existing.id }, data })
+        : transaction.runtimeManifest.create({ data });
     });
   }
 
@@ -344,8 +377,23 @@ export class RuntimeService {
       throw new BadRequestException("one or more source snapshots do not exist");
     if (snapshots.some(({ status }) => status !== SourceSnapshotStatus.verified))
       throw new BadRequestException("all source snapshots must be verified");
+    const existingBuild = input.buildId
+      ? await prisma.runtimeBuild.findUnique({ where: { id: input.buildId } })
+      : input.workflowRunId
+        ? await prisma.runtimeBuild.findUnique({ where: { workflowRunId: input.workflowRunId } })
+        : null;
+    if (existingBuild) {
+      if (
+        existingBuild.version !== input.version ||
+        existingBuild.portsideCommit !== input.portsideCommit ||
+        existingBuild.status !== input.status
+      )
+        throw new BadRequestException("build identity conflicts with the existing record");
+      return existingBuild;
+    }
     return prisma.runtimeBuild.create({
       data: {
+        ...(input.buildId ? { id: input.buildId } : {}),
         version: input.version,
         portsideCommit: input.portsideCommit,
         workflowRunId: input.workflowRunId,
@@ -379,6 +427,14 @@ export class RuntimeService {
     if (!build) throw new NotFoundException("runtime build not found");
     if (build.status !== BuildStatus.succeeded)
       throw new BadRequestException("only successful builds can create releases");
+    const existingRelease = await prisma.runtimeRelease.findUnique({
+      where: { channel_version: { channel: Channel.production, version: input.version } },
+    });
+    if (existingRelease) {
+      if (existingRelease.buildId !== input.buildId || existingRelease.status !== ReleaseStatus.production)
+        throw new BadRequestException("release identity conflicts with the existing record");
+      return existingRelease;
+    }
     const artifacts = await prisma.artifact.findMany({
       where: { id: { in: input.artifactIds } },
     });
