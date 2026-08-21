@@ -4,7 +4,7 @@
   "deploy": {
     "healthcheckPath": "/health",
     "healthcheckTimeout": 30,
-    "preDeployCommand": "npx prisma migrate deploy",
+    "preDeployCommand": "npx prisma migrate resolve --rolled-back 20260821030000_production_only_channels && npx prisma migrate deploy",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 5,
     "startCommand": "node dist/main.js"
