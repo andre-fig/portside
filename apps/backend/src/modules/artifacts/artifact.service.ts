@@ -89,6 +89,39 @@ export class ArtifactService {
     return { url, expiresIn };
   }
 
+  async signedAppDownload(
+    channel: string,
+    fileName: string,
+  ): Promise<{ url: string; expiresIn: number }> {
+    if (channel !== Channel.production)
+      throw new BadRequestException("app channel must be production");
+    const match = /^Portside-([A-Za-z0-9][A-Za-z0-9._-]*)\.(zip|dmg)$/.exec(fileName);
+    if (!match)
+      throw new BadRequestException("app release name is invalid");
+    if (!this.s3 || !this.config.s3.bucket)
+      throw new ServiceUnavailableException("artifact storage is not configured");
+
+    const release = await this.prisma.appRelease.findUnique({
+      where: { channel_version: { channel: Channel.production, version: match[1] } },
+    });
+    if (!release || release.status !== "production")
+      throw new ServiceUnavailableException("app release is not available");
+    if (fileName.endsWith(".zip")) {
+      const registeredFileName = new URL(release.url).pathname.split("/").pop();
+      if (registeredFileName !== fileName)
+        throw new ServiceUnavailableException("app release archive is not available");
+    }
+
+    const key = validateStorageKey(`app/${channel}/${fileName}`);
+    const expiresIn = this.config.runtimeSignedURLTtlSeconds;
+    const url = await getSignedUrl(
+      this.s3,
+      new GetObjectCommand({ Bucket: this.config.s3.bucket, Key: key }),
+      { expiresIn },
+    );
+    return { url, expiresIn };
+  }
+
   async production(component: string, channel: Channel): Promise<unknown> {
     return this.prisma.artifact.findMany({
       where: { component, channel, status: ArtifactStatus.production },

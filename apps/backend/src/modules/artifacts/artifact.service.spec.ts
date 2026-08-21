@@ -51,4 +51,32 @@ describe("ArtifactService runtime downloads", () => {
       service.signedRuntimeDownload("production", "runtime-manifest.json"),
     ).rejects.toThrow("runtime artifact name is invalid");
   });
+
+  it("signs the registered production app archive without exposing the private bucket", async () => {
+    vi.mocked(getSignedUrl).mockResolvedValueOnce(
+      "https://storage.example/app/production/Portside-1.0.0.zip?signature=redacted",
+    );
+    const prisma = {
+      appRelease: {
+        findUnique: vi.fn().mockResolvedValue({
+          status: "production",
+          url: "https://api.portside.test/app/production/Portside-1.0.0.zip",
+        }),
+      },
+    };
+    const service = new ArtifactService(prisma as unknown as PrismaService, config);
+
+    await expect(
+      service.signedAppDownload("production", "Portside-1.0.0.zip"),
+    ).resolves.toEqual({
+      url: expect.stringContaining("storage.example"),
+      expiresIn: 300,
+    });
+
+    const command = vi.mocked(getSignedUrl).mock.calls.at(-1)?.[1] as { input: Record<string, string> };
+    expect(command.input).toMatchObject({
+      Bucket: "portside-artifacts",
+      Key: "app/production/Portside-1.0.0.zip",
+    });
+  });
 });
