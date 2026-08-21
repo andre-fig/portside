@@ -170,11 +170,40 @@ jobs:
         id: release-version
         env:
           VALIDATED_RUNTIME_VERSION: ${{ steps.runtime-evidence.outputs.runtime_version }}
+          PORTSIDE_API_BASE_URL: ${{ secrets.PORTSIDE_API_BASE_URL }}
         run: |
           set -eu
           printf '%s\n' "$VALIDATED_RUNTIME_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
-          printf 'PORTSIDE_VERSION=%s\n' "$VALIDATED_RUNTIME_VERSION" >> "$GITHUB_ENV"
-          printf 'version=%s\n' "$VALIDATED_RUNTIME_VERSION" >> "$GITHUB_OUTPUT"
+          current_appcast="$RUNNER_TEMP/portside-current-appcast.xml"
+          latest_app_version=""
+          if curl --fail --silent --show-error --retry 3 \
+            "$PORTSIDE_API_BASE_URL/v1/appcast.xml" \
+            -o "$current_appcast"; then
+            latest_app_version="$(node --input-type=module - "$current_appcast" <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const xml = readFileSync(process.argv[2], 'utf8');
+          const version = xml.match(/sparkle:version="([0-9]+\.[0-9]+\.[0-9]+)"/i)?.[1] ?? '';
+          process.stdout.write(version);
+          NODE
+            )"
+          fi
+          release_version="$(
+            RUNTIME_VERSION="$VALIDATED_RUNTIME_VERSION" \
+            LATEST_APP_VERSION="$latest_app_version" \
+            node --input-type=module <<'NODE'
+          const parse = (value) => value.match(/^(\d+)\.(\d+)\.(\d+)$/)?.slice(1).map(Number) ?? null;
+          const runtime = parse(process.env.RUNTIME_VERSION);
+          const latest = parse(process.env.LATEST_APP_VERSION ?? '');
+          if (!runtime) process.exit(1);
+          let chosen = runtime;
+          if (latest && (latest[0] > chosen[0] || (latest[0] === chosen[0] && (latest[1] > chosen[1] || (latest[1] === chosen[1] && latest[2] >= chosen[2]))))) {
+            chosen = [latest[0], latest[1], latest[2] + 1];
+          }
+          process.stdout.write(chosen.join('.'));
+          NODE
+          )"
+          printf 'PORTSIDE_VERSION=%s\n' "$release_version" >> "$GITHUB_ENV"
+          printf 'version=%s\n' "$release_version" >> "$GITHUB_OUTPUT"
 
       - name: Materialize CI-only signing inputs
         env:
@@ -419,8 +448,19 @@ jobs:
           )"
           length="$(printf '%s' "$metadata" | jq -r '.length')"
           signature="$(printf '%s' "$metadata" | jq -r '.edSignature')"
-          curl --fail --silent --show-error --retry 3 \
+          response_file="$RUNNER_TEMP/portside-app-release-registration.json"
+          http_code="$(curl --silent --show-error --retry 3 \
             -H "Authorization: Bearer $ADMIN_TOKEN" \
             -H 'Content-Type: application/json' \
             -d "$(jq -n --arg version "$PORTSIDE_VERSION" --arg url "$RELEASE_URL" --arg signature "$signature" --argjson length "$length" '{version:$version,build:$version,channel:"production",url:$url,length:$length,edSignature:$signature,minimumOSVersion:"13.0",releaseNotes:("Portside " + $version + ": performance, stability and compatibility improvements.")}')" \
-            "$API_URL/v1/admin/app-releases/register" >/dev/null
+            -o "$response_file" -w '%{http_code}' \
+            "$API_URL/v1/admin/app-releases/register")"
+          case "$http_code" in
+            2??) ;;
+            *)
+              error_body="$(jq -c '{statusCode,error,message}' "$response_file" 2>/dev/null || true)"
+              [ -n "$error_body" ] || error_body="response body unavailable"
+              echo "Portside API rejected app release registration (HTTP $http_code): $error_body" >&2
+              exit 1
+              ;;
+          esac
