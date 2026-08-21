@@ -223,7 +223,7 @@ final class PortsideCoreTests: XCTestCase {
             "signatureKeyId": "manifest-1",
             "signature": NSNull()
         ]
-        let unsignedData = try JSONSerialization.data(withJSONObject: unsigned, options: [.sortedKeys])
+        let unsignedData = try PortsideCanonicalJSON.data(from: unsigned)
         let signature = try signingKey.signature(for: unsignedData).base64EncodedString()
         unsigned["signature"] = signature
         let data = try JSONSerialization.data(withJSONObject: unsigned, options: [.sortedKeys])
@@ -231,6 +231,8 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertEqual(manifest.components.count, 3)
         XCTAssertEqual(manifest.rendererDefaults["D3DMETAL"], "0")
         XCTAssertEqual(manifest.rendererDefaults["WINEMSYNC"], "1")
+        let rendererCanonical = try PortsideCanonicalJSON.data(from: ["rendererDefaults": ["renderer": "wineD3D", "WINEESYNC": 1]])
+        XCTAssertEqual(String(decoding: rendererCanonical, as: UTF8.self), "{\"rendererDefaults\":{\"WINEESYNC\":1,\"renderer\":\"wineD3D\"}}")
         XCTAssertThrowsError(try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", expectedChannel: "development", currentVersion: "0.1.0", allowedHosts: ["downloads.portside.test"]))
         XCTAssertThrowsError(try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", currentVersion: "0.0.9", allowedHosts: ["downloads.portside.test"]))
     }

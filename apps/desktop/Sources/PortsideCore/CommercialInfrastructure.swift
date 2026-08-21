@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import Security
+import CoreFoundation
 
 public struct PortsideBackendConfiguration: Sendable, Equatable {
     public let baseURL: URL?
@@ -87,6 +88,59 @@ public struct PortsideRuntimeComponent: Codable, Equatable, Sendable {
     }
 }
 
+enum PortsideCanonicalJSON {
+    enum Error: Swift.Error {
+        case unsupportedValue
+        case invalidObject
+    }
+
+    static func data(from value: Any) throws -> Data {
+        guard let string = try serialize(value) else { throw Error.unsupportedValue }
+        return Data(string.utf8)
+    }
+
+    static func unsignedManifestData(from data: Data) throws -> Data {
+        guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw Error.invalidObject
+        }
+        object["signature"] = NSNull()
+        return try self.data(from: object)
+    }
+
+    private static func serialize(_ value: Any) throws -> String? {
+        if value is NSNull { return "null" }
+        if let value = value as? String { return try serializeString(value) }
+        if let value = value as? NSNumber {
+            if CFGetTypeID(value) == CFBooleanGetTypeID() {
+                return value.boolValue ? "true" : "false"
+            }
+            let data = try JSONSerialization.data(withJSONObject: [value], options: [])
+            let string = String(decoding: data, as: UTF8.self)
+            return String(string.dropFirst().dropLast())
+        }
+        if let value = value as? Bool { return value ? "true" : "false" }
+        if let value = value as? [Any] {
+            let values = try value.map { try serialize($0).unwrap(or: Error.unsupportedValue) }
+            return "[\(values.joined(separator: ","))]"
+        }
+        if let value = value as? [String: Any] {
+            let entries = try value.keys.sorted().map { key -> String in
+                let keyJSON = try serializeString(key)
+                let valueJSON = try serialize(value[key].unwrap(or: Error.unsupportedValue)).unwrap(or: Error.unsupportedValue)
+                return "\(keyJSON):\(valueJSON)"
+            }
+            return "{\(entries.joined(separator: ","))}"
+        }
+        return nil
+    }
+
+    private static func serializeString(_ value: String) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: [value], options: [])
+        let string = String(decoding: data, as: UTF8.self)
+        return String(string.dropFirst().dropLast()).replacingOccurrences(of: "\\/", with: "/")
+    }
+}
+
 private struct FlexibleManifestString: Codable, Equatable, Sendable {
     let value: String
 
@@ -168,11 +222,7 @@ public enum PortsideManifestVerifier {
         if let expectedChannel, manifest.channel != expectedChannel { throw PortsideCommercialError.invalidManifest("manifest channel is not approved for this build") }
         let signature = try Data(base64Encoded: manifest.signature, options: [.ignoreUnknownCharacters]).unwrap(or: PortsideCommercialError.invalidSignature)
         let publicKey = try Curve25519.Signing.PublicKey(rawRepresentation: Data(base64Encoded: publicKeyBase64, options: [.ignoreUnknownCharacters]).unwrap(or: PortsideCommercialError.invalidSignature))
-        var unsigned = data
-        if var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            object["signature"] = NSNull()
-            unsigned = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-        }
+        let unsigned = try PortsideCanonicalJSON.unsignedManifestData(from: data)
         guard publicKey.isValidSignature(signature, for: unsigned) else { throw PortsideCommercialError.invalidSignature }
         guard compareVersions(currentVersion, manifest.minimumPortsideVersion) >= 0 else { throw PortsideCommercialError.incompatibleVersion }
         guard !allowedHosts.isEmpty else { throw PortsideCommercialError.unauthorizedURL }
