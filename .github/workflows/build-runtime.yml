@@ -73,7 +73,7 @@ jobs:
           for formula in mingw-w64 llvm lld freetype pkgconf; do brew list --versions "$formula"; done
 
       - name: Restore cached Wine engine
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ runner.temp }}/portside-wine-cache
           key: portside-wine-${{ runner.os }}-macos-15-${{ hashFiles('upstream/lock.json', 'scripts/build-runtime/build-wine-engine.sh') }}
