@@ -8,10 +8,14 @@ struct PortsideApp: App {
     private let updateCoordinator: PortsideUpdateCoordinator
 
     init() {
-        updateCoordinator = PortsideUpdateCoordinator()
+        let updateCoordinator = PortsideUpdateCoordinator()
+        self.updateCoordinator = updateCoordinator
         let model = PortsideModel(diagnostics: SentryDiagnosticsService())
         _model = StateObject(wrappedValue: model)
-        Task { @MainActor in model.startAutomatically() }
+        Task { @MainActor in
+            await updateCoordinator.waitForInitialCheck()
+            model.startAutomatically()
+        }
     }
 
     var body: some Scene {
