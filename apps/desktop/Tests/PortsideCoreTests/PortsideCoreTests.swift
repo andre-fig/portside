@@ -227,6 +227,23 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertThrowsError(try PortsideLicenseClient.verifyLocal(token: "\(input).\(invalidSignature.base64EncodedString())", publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "license-1"))
     }
 
+    func testLicenseTokenAcceptsAnEd25519PEMPublicKey() throws {
+        let signingKey = Curve25519.Signing.PrivateKey()
+        let header = Data("{\"alg\":\"EdDSA\",\"typ\":\"PORTSIDE-LICENSE\"}".utf8).base64EncodedString()
+        let payload = Data("{\"licenseId\":\"lic-pem\",\"deviceId\":\"dev-pem\",\"plan\":\"test\",\"issuedAt\":4102444800,\"expiresAt\":4103654400,\"offlineUntil\":4103654400,\"keyId\":\"license-pem\"}".utf8).base64EncodedString()
+        let input = "\(header).\(payload)"
+        let signature = try signingKey.signature(for: Data(input.utf8)).base64EncodedString()
+        let token = "\(input).\(signature)"
+        let spkiPrefix = Data([0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00])
+        let der = spkiPrefix + signingKey.publicKey.rawRepresentation
+        let pem = "-----BEGIN PUBLIC KEY-----\n\(der.base64EncodedString())\n-----END PUBLIC KEY-----"
+
+        XCTAssertEqual(
+            try PortsideLicenseClient.verifyLocal(token: token, publicKeyBase64: pem, expectedKeyID: "license-pem").deviceId,
+            "dev-pem"
+        )
+    }
+
     func testActivationResponseRequiresAValidSignatureAndMatchingDeviceBinding() throws {
         let signingKey = Curve25519.Signing.PrivateKey()
         let header = Data("{\"alg\":\"EdDSA\",\"typ\":\"PORTSIDE-LICENSE\"}".utf8).base64EncodedString()

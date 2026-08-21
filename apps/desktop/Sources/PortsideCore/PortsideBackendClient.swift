@@ -166,13 +166,39 @@ public final class PortsideLicenseClient: @unchecked Sendable {
     }
 
     public static func verifyLocal(token: String, publicKeyBase64: String?, expectedKeyID: String?, allowExpired: Bool = false) throws -> PortsideLicenseToken {
-        guard let publicKeyBase64, let keyData = Data(base64Encoded: publicKeyBase64, options: [.ignoreUnknownCharacters]), let publicKey = try? Curve25519.Signing.PublicKey(rawRepresentation: keyData) else { throw PortsideCommercialError.invalidLicenseToken }
+        guard let publicKeyBase64,
+              let keyData = licensePublicKeyData(publicKeyBase64),
+              let publicKey = try? Curve25519.Signing.PublicKey(rawRepresentation: keyData) else { throw PortsideCommercialError.invalidLicenseToken }
         let parts = token.split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count == 3, let signature = Data(base64Encoded: String(parts[2]), options: [.ignoreUnknownCharacters]), publicKey.isValidSignature(signature, for: Data("\(parts[0]).\(parts[1])".utf8)), let payload = Data(base64Encoded: String(parts[1]), options: [.ignoreUnknownCharacters]) else { throw PortsideCommercialError.invalidLicenseToken }
         let decoded = try JSONDecoder.portside.decode(LicensePayload.self, from: payload)
         if let expectedKeyID, decoded.keyId != expectedKeyID { throw PortsideCommercialError.invalidLicenseToken }
         guard (allowExpired || Date(timeIntervalSince1970: TimeInterval(decoded.offlineUntil)) > Date()), decoded.expiresAt >= decoded.offlineUntil else { throw PortsideCommercialError.invalidLicenseToken }
         return PortsideLicenseToken(licenseId: decoded.licenseId, deviceId: decoded.deviceId, plan: decoded.plan, issuedAt: Date(timeIntervalSince1970: TimeInterval(decoded.issuedAt)), expiresAt: Date(timeIntervalSince1970: TimeInterval(decoded.expiresAt)), offlineUntil: Date(timeIntervalSince1970: TimeInterval(decoded.offlineUntil)), keyId: decoded.keyId)
+    }
+
+    private static func licensePublicKeyData(_ value: String) -> Data? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let raw = Data(base64Encoded: trimmed, options: [.ignoreUnknownCharacters]), raw.count == 32 {
+            return raw
+        }
+
+        let pemBody = trimmed
+            .replacingOccurrences(of: "-----BEGIN PUBLIC KEY-----", with: "")
+            .replacingOccurrences(of: "-----END PUBLIC KEY-----", with: "")
+            .replacingOccurrences(of: "-----BEGIN ED25519 PUBLIC KEY-----", with: "")
+            .replacingOccurrences(of: "-----END ED25519 PUBLIC KEY-----", with: "")
+            .components(separatedBy: .whitespacesAndNewlines)
+            .joined()
+        guard let der = Data(base64Encoded: pemBody) else { return nil }
+
+        // SubjectPublicKeyInfo for Ed25519: algorithm identifier followed by
+        // the 32-byte raw public key. Require the exact prefix and length so
+        // arbitrary PEM/DER data is never accepted as a license key.
+        let ed25519SPKIPrefix = Data([0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00])
+        guard der.count == ed25519SPKIPrefix.count + 32,
+              der.prefix(ed25519SPKIPrefix.count) == ed25519SPKIPrefix else { return nil }
+        return Data(der.suffix(32))
     }
 
     public static func verifyActivationResponse(token: String, deviceID: String, offlineUntil: Date, publicKeyBase64: String?, expectedKeyID: String?) throws -> PortsideLicenseToken {
