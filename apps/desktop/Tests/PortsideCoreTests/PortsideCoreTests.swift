@@ -154,6 +154,25 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertEqual(restored, state)
     }
 
+    func testEnvironmentStoreBacksUpUnreadableStateAndRecreatesIt() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let stateURL = root.appendingPathComponent("environment.json")
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("{not valid setup data".utf8).write(to: stateURL)
+        defer { try? fileManager.removeItem(at: root) }
+
+        let store = EnvironmentStore(fileManager: fileManager, stateURL: stateURL)
+        let recovered = store.load()
+
+        XCTAssertTrue(store.didRecoverCorruptState)
+        XCTAssertFalse(recovered.setupCompleted)
+        XCTAssertTrue(fileManager.fileExists(atPath: stateURL.path))
+        XCTAssertTrue(try fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+            .contains { $0.lastPathComponent.hasPrefix("environment.json.corrupt-") && $0.pathExtension == "bak" })
+        XCTAssertNoThrow(try JSONDecoder.portside.decode(EnvironmentState.self, from: Data(contentsOf: stateURL)))
+    }
+
     func testLocalBuildDisablesAppUpdatesUntilProductionValuesAreInjected() {
         XCTAssertFalse(PortsideAppUpdateConfiguration.isConfigured(feed: "", publicKey: ""))
         XCTAssertFalse(PortsideAppUpdateConfiguration.isConfigured(feed: "https://example.invalid/appcast.xml", publicKey: "public"))
@@ -197,7 +216,7 @@ final class PortsideCoreTests: XCTestCase {
                 "sourceSnapshotChecksum": String(repeating: "c", count: 64),
                 "license": "LGPL-2.1-or-later"
             ]},
-            "rendererDefaults": ["renderer": "wineD3D"],
+            "rendererDefaults": ["renderer": "wineD3D", "D3DMETAL": 0, "DXMT": 0, "DXVK": 0, "WINEESYNC": 1, "WINEMSYNC": 1],
             "compatibilityRules": [],
             "critical": false,
             "rollbackVersion": NSNull(),
@@ -210,6 +229,8 @@ final class PortsideCoreTests: XCTestCase {
         let data = try JSONSerialization.data(withJSONObject: unsigned, options: [.sortedKeys])
         let manifest = try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", currentVersion: "0.1.0", allowedHosts: ["downloads.portside.test"])
         XCTAssertEqual(manifest.components.count, 3)
+        XCTAssertEqual(manifest.rendererDefaults["D3DMETAL"], "0")
+        XCTAssertEqual(manifest.rendererDefaults["WINEMSYNC"], "1")
         XCTAssertThrowsError(try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", expectedChannel: "development", currentVersion: "0.1.0", allowedHosts: ["downloads.portside.test"]))
         XCTAssertThrowsError(try PortsideManifestVerifier.verify(data, publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(), expectedKeyID: "manifest-1", currentVersion: "0.0.9", allowedHosts: ["downloads.portside.test"]))
     }

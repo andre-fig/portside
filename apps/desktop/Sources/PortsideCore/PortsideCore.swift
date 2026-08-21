@@ -223,27 +223,67 @@ public struct NoopDiagnosticsService: DiagnosticsService {
 public final class EnvironmentStore: @unchecked Sendable {
     private let fileManager: FileManager
     private let stateURL: URL
+    public private(set) var didRecoverCorruptState = false
 
-    public init(fileManager: FileManager = .default) {
+    public init(fileManager: FileManager = .default, stateURL: URL? = nil) {
         self.fileManager = fileManager
-        self.stateURL = PortsidePaths.root.appendingPathComponent("environment.json")
+        self.stateURL = stateURL ?? PortsidePaths.root.appendingPathComponent("environment.json")
     }
 
     public func prepareDirectories() throws {
         for directory in PortsidePaths.allDirectories {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         }
+        try fileManager.createDirectory(at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
     }
 
     public func load() -> EnvironmentState {
+        guard fileManager.fileExists(atPath: stateURL.path) else { return EnvironmentState() }
         guard let data = try? Data(contentsOf: stateURL),
-              let state = try? JSONDecoder.portside.decode(EnvironmentState.self, from: data) else { return EnvironmentState() }
+              let state = try? JSONDecoder.portside.decode(EnvironmentState.self, from: data) else {
+            return recoverCorruptState()
+        }
         return state
     }
 
     public func save(_ state: EnvironmentState) throws {
         try prepareDirectories()
         try JSONEncoder.portside.encode(state).write(to: stateURL, options: .atomic)
+    }
+
+    private func recoverCorruptState() -> EnvironmentState {
+        didRecoverCorruptState = true
+        let backupName = "\(stateURL.lastPathComponent).corrupt-\(UUID().uuidString).bak"
+        let backupURL = stateURL.deletingLastPathComponent().appendingPathComponent(backupName)
+        try? fileManager.moveItem(at: stateURL, to: backupURL)
+
+        var recovered = EnvironmentState()
+        let wrapper = PortsidePaths.baselineWrapper
+        let prefix = PortsidePaths.steamPrefix
+        let steamExecutable = PortsideSteamFlow.steamExecutable(prefix: prefix)
+
+        if fileManager.fileExists(atPath: wrapper.path) {
+            recovered.wrapperPath = wrapper.path
+        }
+        if fileManager.fileExists(atPath: prefix.path) {
+            recovered.prefixPath = prefix.path
+        }
+        if fileManager.fileExists(atPath: steamExecutable.path) {
+            recovered.steamInstalled = true
+            recovered.steamExecutablePath = steamExecutable.path
+        }
+
+        if recovered.steamInstalled,
+           let wrapperPath = recovered.wrapperPath,
+           (try? PortsideRuntimeValidator.validate(wrapper: URL(fileURLWithPath: wrapperPath))) != nil {
+            recovered.setupCompleted = true
+            recovered.phase = .steamReady
+        } else if recovered.wrapperPath != nil || recovered.prefixPath != nil {
+            recovered.phase = .failedRecoverable
+        }
+
+        try? save(recovered)
+        return recovered
     }
 }
 

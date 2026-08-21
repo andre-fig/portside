@@ -87,6 +87,37 @@ public struct PortsideRuntimeComponent: Codable, Equatable, Sendable {
     }
 }
 
+private struct FlexibleManifestString: Codable, Equatable, Sendable {
+    let value: String
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(String.self) {
+            self.value = value
+        } else if let value = try? container.decode(Int.self) {
+            self.value = String(value)
+        } else if let value = try? container.decode(Double.self) {
+            self.value = String(value)
+        } else if let value = try? container.decode(Bool.self) {
+            self.value = String(value)
+        } else {
+            throw DecodingError.typeMismatch(
+                String.self,
+                DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Expected a text, number or boolean value")
+            )
+        }
+    }
+
+    init(_ value: String) {
+        self.value = value
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(value)
+    }
+}
+
 public struct PortsideRuntimeManifest: Codable, Equatable, Sendable {
     public let schemaVersion: Int
     public let channel: String
@@ -101,8 +132,31 @@ public struct PortsideRuntimeManifest: Codable, Equatable, Sendable {
     public let signatureKeyId: String
     public let signature: String
 
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, channel, manifestVersion, minimumPortsideVersion, publishedAt
+        case components, rendererDefaults, compatibilityRules, critical, rollbackVersion
+        case signatureKeyId, signature
+    }
+
     public init(schemaVersion: Int, channel: String, manifestVersion: String, minimumPortsideVersion: String, publishedAt: Date, components: [PortsideRuntimeComponent], rendererDefaults: [String: String], compatibilityRules: [[String: String]], critical: Bool, rollbackVersion: String?, signatureKeyId: String, signature: String) {
         self.schemaVersion = schemaVersion; self.channel = channel; self.manifestVersion = manifestVersion; self.minimumPortsideVersion = minimumPortsideVersion; self.publishedAt = publishedAt; self.components = components; self.rendererDefaults = rendererDefaults; self.compatibilityRules = compatibilityRules; self.critical = critical; self.rollbackVersion = rollbackVersion; self.signatureKeyId = signatureKeyId; self.signature = signature
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        channel = try container.decode(String.self, forKey: .channel)
+        manifestVersion = try container.decode(String.self, forKey: .manifestVersion)
+        minimumPortsideVersion = try container.decode(String.self, forKey: .minimumPortsideVersion)
+        publishedAt = try container.decode(Date.self, forKey: .publishedAt)
+        components = try container.decode([PortsideRuntimeComponent].self, forKey: .components)
+        let flexibleDefaults = try container.decode([String: FlexibleManifestString].self, forKey: .rendererDefaults)
+        rendererDefaults = flexibleDefaults.mapValues(\.value)
+        compatibilityRules = try container.decode([[String: String]].self, forKey: .compatibilityRules)
+        critical = try container.decode(Bool.self, forKey: .critical)
+        rollbackVersion = try container.decodeIfPresent(String.self, forKey: .rollbackVersion)
+        signatureKeyId = try container.decode(String.self, forKey: .signatureKeyId)
+        signature = try container.decode(String.self, forKey: .signature)
     }
 }
 

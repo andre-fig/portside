@@ -456,7 +456,7 @@ final class PortsideModel: ObservableObject {
             return "This Portside version is no longer compatible. Please download the latest version."
         case DecodingError.dataCorrupted, DecodingError.keyNotFound,
              DecodingError.typeMismatch, DecodingError.valueNotFound:
-            return "Portside could not read its saved setup data. Please try the repair option."
+            return "Portside could not finish refreshing your setup. Please try again."
         case PortsideError.processTimedOut:
             return "Steam took too long to finish preparing. Please try again."
         case PortsideError.processFailed:
