@@ -1,5 +1,12 @@
 # Portside architecture
 
+The canonical, current architecture documentation is
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). This file is retained as the
+root-level compatibility entry point for existing links.
+
+The sections below describe the original baseline details; consult the
+canonical document before changing the runtime or release pipeline.
+
 ## Runtime boundary
 
 PortsideCore owns the Sikarugir lifecycle:

@@ -577,7 +577,7 @@ gerenciado para não afetar a Steam nativa ou outro usuário.
 ## 13. Documentação de referência
 
 - [`README.md`](../README.md): visão geral e comandos rápidos.
-- [`ARCHITECTURE.md`](../ARCHITECTURE.md): limites do runtime, baseline e
+- [`ARCHITECTURE.md`](ARCHITECTURE.md): limites do runtime, baseline e
   diagnóstico.
 - [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md): mapa detalhado, scripts e runbooks.
 - [`BACKEND.md`](BACKEND.md): API, módulos e modelo comercial.
