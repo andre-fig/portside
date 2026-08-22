@@ -99,6 +99,21 @@ PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX=https://api.example.invalid/v1/runtime/arti
 Uma build local gera evidência unsigned. Ela não prova assinatura, publicação,
 download pelo desktop ou funcionamento visual da Steam.
 
+### Hooks locais
+
+Depois de clonar, habilite os hooks versionados uma vez:
+
+```sh
+./scripts/install-git-hooks.sh
+```
+
+O `pre-commit` executa somente verificações rápidas dos arquivos staged:
+diff whitespace, sintaxe shell, JSON e `actionlint` quando instalado. O
+`pre-push` identifica as áreas alteradas e executa apenas os checks locais
+correspondentes: Swift, backend, landing, política de produção e validações
+de scripts. Os hooks aceleram o feedback, mas o CI continua obrigatório e
+autoritativo, pois hooks podem ser ignorados ou não estar instalados.
+
 ## Workflows e autoridade de cada um
 
 - `CI`: valida política de fontes, Swift e backend em push/PR para `main`.

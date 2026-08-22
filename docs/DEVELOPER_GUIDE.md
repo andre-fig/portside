@@ -403,11 +403,26 @@ e `SIKARUGIR_AUTHORIZATION.md` antes de publicar.
 | `scripts/validate-production-policy.sh` | bloqueia dependências upstream no release |
 | `scripts/upstream/sync.sh` | sincroniza snapshots autorizados |
 | `scripts/upstream/validate_snapshot.sh` | valida layout, symlinks e exclusões |
+| `scripts/install-git-hooks.sh` | habilita os hooks locais de pre-commit/pre-push |
 
 Use [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) para o catálogo completo e os
 parâmetros esperados por cada script. Leia o script antes de alterar suas
 variáveis: vários comandos usam diretórios temporários, chaves externas e
 contratos de manifesto.
+
+### Checks locais antes do push
+
+Após clonar o repositório, habilite os hooks com:
+
+```sh
+./scripts/install-git-hooks.sh
+```
+
+O `pre-commit` faz apenas verificações rápidas nos arquivos staged. O
+`pre-push` detecta as áreas alteradas e executa os testes locais relevantes,
+sem reconstruir o Wine ou publicar artefatos. Esses hooks não substituem o CI:
+eles são uma camada de feedback local e podem ser ignorados, enquanto o GitHub
+continua sendo a autoridade para proteger a `main`.
 
 ## 9. Como criar um DMG
 
@@ -424,11 +439,9 @@ ditto -c -k --sequesterRsrc --keepParent \
 shasum -a 256 build/Portside-validation.app.zip build/Portside-validation.dmg
 ```
 
-O DMG contém `Portside.app` e o atalho `Applications`. A configuração pode ser
-concluída pela própria janela do Portside mesmo quando ele for aberto
-diretamente do DMG; o app não bloqueia esse fluxo nem exige uma segunda
-abertura. O atalho `Applications` continua disponível para quem preferir
-instalar o app antes de usá-lo.
+O DMG contém somente `Portside.app`. A configuração pode ser concluída pela
+própria janela do Portside mesmo quando ele for aberto diretamente do DMG; o
+app não bloqueia esse fluxo nem exige uma segunda abertura.
 
 Esse DMG não é para clientes.
 

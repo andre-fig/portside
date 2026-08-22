@@ -15,7 +15,6 @@ trap cleanup EXIT INT TERM
 
 mkdir -p "$(dirname "$OUTPUT_DMG")"
 ditto "$APP_PATH" "$STAGING_DIR/Portside.app"
-ln -s /Applications "$STAGING_DIR/Applications"
 
 hdiutil create \
     -volname "$VOLUME_NAME" \
@@ -24,4 +23,4 @@ hdiutil create \
     -format UDZO \
     "$OUTPUT_DMG" >/dev/null
 
-echo "Created installer DMG with Applications shortcut: $OUTPUT_DMG"
+echo "Created installer DMG containing Portside.app: $OUTPUT_DMG"

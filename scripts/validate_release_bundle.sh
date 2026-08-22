@@ -38,8 +38,8 @@ trap cleanup EXIT INT TERM
 hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$MOUNT_POINT" >/dev/null
 DMG_PLIST="$MOUNT_POINT/Portside.app/Contents/Info.plist"
 [ -f "$DMG_PLIST" ] || { echo "DMG does not contain Portside.app" >&2; exit 1; }
-[ -L "$MOUNT_POINT/Applications" ] || { echo "DMG does not contain an Applications shortcut" >&2; exit 1; }
-[ "$(readlink "$MOUNT_POINT/Applications")" = "/Applications" ] || { echo "DMG Applications shortcut is invalid" >&2; exit 1; }
+extra_entry="$(find "$MOUNT_POINT" -mindepth 1 -maxdepth 1 ! -name 'Portside.app' -print -quit)"
+[ -z "$extra_entry" ] || { echo "DMG contains an unexpected top-level entry: $(basename "$extra_entry")" >&2; exit 1; }
 for key in PortsideAPIBaseURL SUFeedURL SUPublicEDKey PortsideArtifactHosts PortsideRuntimeManifestPublicKey PortsideLicensePublicKey PortsideLicenseKeyID; do
     value="$(/usr/libexec/PlistBuddy -c "Print :$key" "$DMG_PLIST")"
     case "$value" in ""|*example.invalid*) echo "Production DMG has an invalid $key" >&2; exit 1;; esac
