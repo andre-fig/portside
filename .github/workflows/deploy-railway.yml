@@ -9,17 +9,55 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: verify-railway-${{ github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    name: Check backend changes
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    outputs:
+      should_verify: ${{ steps.filter.outputs.should_verify }}
+      target_sha: ${{ steps.target.outputs.sha }}
+    steps:
+      - name: Resolve tested commit
+        id: target
+        shell: bash
+        run: echo "sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Check for backend or deploy changes
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        shell: bash
+        run: |
+          set -eu
+          files="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/commits/${TARGET_SHA}/files" \
+            --jq '.[].filename')"
+          if printf '%s\n' "$files" | grep -Eq \
+            '^(apps/backend/|Dockerfile$|railway\.(json|toml)$|nixpacks\.toml$|\.github/workflows/deploy-railway\.yml$)'; then
+            echo "Backend or deploy files changed; verifying Railway."
+            echo "should_verify=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No backend or deploy files changed; skipping Railway verification."
+            echo "should_verify=false" >> "$GITHUB_OUTPUT"
+          fi
+
   verify-api:
     name: Verify Railway API
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    needs: changes
+    if: needs.changes.outputs.should_verify == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Check out tested commit
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ needs.changes.outputs.target_sha }}
       - name: Wait for Railway API healthcheck
         env:
           API_URL: https://api-production-6d06.up.railway.app

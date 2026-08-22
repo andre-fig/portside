@@ -7,62 +7,53 @@ permissions:
   contents: read
   actions: read
 
+concurrency:
+  group: release-production
+  cancel-in-progress: false
+
 jobs:
-  validate-desktop:
-    name: Validate desktop package
-    runs-on: macos-15
-    timeout-minutes: 20
-    steps:
-      - name: Check out tested sources
-        uses: actions/checkout@v7
-
-      - name: Resolve Swift dependencies
-        run: swift package resolve --package-path apps/desktop
-
-      - name: Run desktop tests
-        run: swift test --package-path apps/desktop
-
-  validate-backend:
-    name: Validate backend
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - name: Check out tested sources
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: apps/backend/package-lock.json
-
-      - name: Run backend checks
-        working-directory: apps/backend
-        env:
-          DATABASE_URL: postgresql://portside:portside@127.0.0.1:5432/portside
-        run: |
-          npm ci
-          npm run prisma:validate
-          npm run typecheck
-          npm run lint
-          npm test
-          npm run build
-
-  validate-source-policy:
-    name: Validate production source policy
+  verify-ci:
+    name: Verify CI for this commit
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Check out tested sources
-        uses: actions/checkout@v7
+      - name: Require the main branch
+        env:
+          TARGET_REF: ${{ github.ref }}
+        run: |
+          set -eu
+          test "$TARGET_REF" = "refs/heads/main" || {
+            echo "Production releases must be started from main (received $TARGET_REF)." >&2
+            exit 1
+          }
 
-      - name: Validate production source policy
-        run: ./scripts/validate-production-policy.sh
+      - name: Find successful CI for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          ci_run_id="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${TARGET_SHA}&per_page=20" \
+            --jq '.workflow_runs[] | select(.head_branch == "main" and .status == "completed" and .conclusion == "success") | .id' \
+            | head -n 1)"
+          test -n "$ci_run_id" || {
+            echo "No successful CI run was found for commit ${TARGET_SHA}." >&2
+            echo "Wait for CI to finish, then start the release again." >&2
+            exit 1
+          }
+
+          passed="$(gh run view "$ci_run_id" --json jobs \
+            --jq '[.jobs[] | select(.name == "Production source policy" or .name == "Swift tests" or .name == "Backend tests and build")] | length == 3 and all(.[]; .conclusion == "success")')"
+          test "$passed" = true || {
+            echo "CI run $ci_run_id did not pass all required jobs." >&2
+            exit 1
+          }
+          echo "Using successful CI run $ci_run_id for commit ${TARGET_SHA}."
 
   build-and-publish-production:
     name: Build, notarize and publish production release
-    needs: [validate-desktop, validate-backend, validate-source-policy]
+    needs: [verify-ci]
     runs-on: macos-15
     timeout-minutes: 90
     environment: production
