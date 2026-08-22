@@ -30,9 +30,39 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: build-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  preflight:
+    name: Validate runtime sources on Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out Portside sources
+        uses: actions/checkout@v7
+
+      - name: Validate sources, snapshots and build inputs
+        run: |
+          set -eu
+          ./scripts/build-runtime/source-audit.sh
+          ./scripts/upstream/validate_snapshot.sh vendor/wine
+          ./scripts/upstream/validate_snapshot.sh vendor/winetricks
+          jq -e . upstream/lock.json >/dev/null
+          jq -e . upstream/dependencies.json >/dev/null
+          for script in \
+            scripts/build-runtime/*.sh \
+            scripts/upstream/*.sh \
+            scripts/generate_manifest.sh \
+            scripts/publish_runtime.sh; do
+            sh -n "$script"
+          done
+          ./scripts/validate-production-policy.sh
+
   build-runtime:
     name: Build and publish production runtime
+    needs: preflight
     runs-on: macos-15
     timeout-minutes: 180
     environment: production

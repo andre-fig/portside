@@ -126,9 +126,10 @@ antes do push.
 - `Build Landing`: gera o build da landing em PR, push relevante ou execução
   manual e armazena `.output` como artifact.
 - `Build Portside Runtime`: em mudanças de fontes/runtime na `main` ou
-  manualmente, compila wrapper, Wine e winetricks a partir de `vendor`, assina
-  o manifesto e publica somente no canal de validação, replicando nos dois
-  buckets configurados. O Wine usa cache por snapshot e toolchain.
+  manualmente, valida fontes e scripts primeiro em Ubuntu; depois compila o
+  wrapper, Wine e winetricks a partir de `vendor` em macOS, assina o manifesto
+  e publica nos buckets configurados. O Wine usa cache por snapshot e
+  toolchain, e execuções concorrentes são canceladas.
 - `Sync Upstreams`: roda diariamente às 03:17 UTC ou manualmente, atualiza
   snapshots autorizados e abre PR. Nunca faz merge, promoção ou publicação.
 - `Validate Clean Portside Runtime`: execução manual em Mac self-hosted com

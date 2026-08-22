@@ -274,13 +274,15 @@ e geração de artifacts necessária no GitHub.
 
 ### Runtime
 
-`Build Portside Runtime` roda em `macos-15`, instala a toolchain registrada,
-audita fontes locais, constrói wrapper/Wine/winetricks, materializa a chave
-privada apenas no runner, assina e valida o manifesto e publica em dois
-buckets de validação. O Wine usa cache por snapshot, arquitetura, flags e
-toolchain; um cache compatível evita o `configure`/`make` completo. A versão
-automática é `0.1.<run_number>`; o dispatch permite informar versão e prefixo
-HTTPS.
+`Build Portside Runtime` começa com um preflight em Ubuntu que audita os
+snapshots, lockfiles, scripts e política de produção. Somente depois disso o
+job `macos-15` instala a toolchain registrada, constrói wrapper/Wine/winetricks,
+materializa a chave privada apenas no runner, assina e valida o manifesto e
+publica nos dois buckets. O Wine usa cache por snapshot, arquitetura, flags e
+toolchain; um cache compatível evita o `configure`/`make` completo. Execuções
+concorrentes do runtime são canceladas para não manter dois macOS pagos
+trabalhando no mesmo branch. A versão automática é `0.1.<run_number>`; o
+dispatch permite informar versão e prefixo HTTPS.
 
 O artifact de runtime contém arquivos necessários para auditoria, incluindo:
 
