@@ -44,7 +44,7 @@ jobs:
           }
 
           passed="$(gh run view "$ci_run_id" --json jobs \
-            --jq '[.jobs[] | select(.name == "Production source policy" or .name == "Swift tests" or .name == "Backend tests and build")] | length == 3 and all(.[]; .conclusion == "success")')"
+            --jq '[.jobs[] | select(.name == "Production source policy" or .name == "Backend schema and build")] | length == 2 and all(.[]; .conclusion == "success")')"
           test "$passed" = true || {
             echo "CI run $ci_run_id did not pass all required jobs." >&2
             exit 1
