@@ -424,10 +424,11 @@ ditto -c -k --sequesterRsrc --keepParent \
 shasum -a 256 build/Portside-validation.app.zip build/Portside-validation.dmg
 ```
 
-O DMG contém `Portside.app` e o atalho `Applications`. O usuário deve arrastar
-o app para `Applications` antes de executá-lo; não abra o app diretamente do
-DMG, pois o macOS pode executá-lo em um caminho temporário e impedir as
-atualizações automáticas.
+O DMG contém `Portside.app` e o atalho `Applications`. A configuração pode ser
+concluída pela própria janela do Portside mesmo quando ele for aberto
+diretamente do DMG; o app não bloqueia esse fluxo nem exige uma segunda
+abertura. O atalho `Applications` continua disponível para quem preferir
+instalar o app antes de usá-lo.
 
 Esse DMG não é para clientes.
 

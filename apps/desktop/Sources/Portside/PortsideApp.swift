@@ -66,10 +66,6 @@ final class PortsideModel: ObservableObject {
         (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.0.0"
     }
 
-    var isRunningFromAppTranslocation: Bool {
-        Bundle.main.bundleURL.path.contains("/AppTranslocation/")
-    }
-
     init(diagnostics: DiagnosticsService = NoopDiagnosticsService()) {
         self.diagnostics = diagnostics
         let backendConfiguration = PortsideBackendConfiguration.fromBundle()
@@ -94,13 +90,6 @@ final class PortsideModel: ObservableObject {
     func startAutomatically() {
         guard !startedAutomatically else { return }
         startedAutomatically = true
-        if isRunningFromAppTranslocation {
-            setupStep = .failed
-            message = "Move Portside to Applications to continue."
-            errorMessage = "Portside must be installed in Applications before it can update or prepare Steam."
-            logger.write("setup_blocked reason=app_translocation version=\(appVersion)", level: .warning)
-            return
-        }
         diagnostics.breadcrumb("setup_started", context: context(stage: "startup"))
         if requiresCommercialLicense {
             prepareLicense()
@@ -561,15 +550,7 @@ struct RootView: View {
                         VStack(spacing: 16) {
                             Spacer()
                             Text(model.message).font(.title3.weight(.medium))
-                            if model.isRunningFromAppTranslocation {
-                                Text("In the installer window, drag Portside to Applications, then open it from there.")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.center)
-                                    .frame(maxWidth: 330)
-                            } else {
-                                Button("Try Again") { model.repair() }.buttonStyle(.borderedProminent).disabled(model.isWorking)
-                            }
+                            Button("Try Again") { model.repair() }.buttonStyle(.borderedProminent).disabled(model.isWorking)
                             Spacer()
                         }
                     } else {
