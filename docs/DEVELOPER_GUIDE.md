@@ -420,11 +420,14 @@ swift build --package-path apps/desktop
 
 ditto -c -k --sequesterRsrc --keepParent \
   build/Portside.app build/Portside-validation.app.zip
-hdiutil create -volname Portside \
-  -srcfolder build/Portside.app -ov -format UDZO \
-  build/Portside-validation.dmg
+./scripts/create_dmg.sh build/Portside.app build/Portside-validation.dmg Portside
 shasum -a 256 build/Portside-validation.app.zip build/Portside-validation.dmg
 ```
+
+O DMG contém `Portside.app` e o atalho `Applications`. O usuário deve arrastar
+o app para `Applications` antes de executá-lo; não abra o app diretamente do
+DMG, pois o macOS pode executá-lo em um caminho temporário e impedir as
+atualizações automáticas.
 
 Esse DMG não é para clientes.
 

@@ -40,7 +40,10 @@ xcrun stapler validate "$BUILD_DIR/Portside.app"
 codesign --verify --deep --strict --verbose=2 "$BUILD_DIR/Portside.app"
 spctl --assess --type execute --verbose=4 "$BUILD_DIR/Portside.app"
 rm -f "$BUILD_DIR/Portside-${VERSION}.dmg" "$BUILD_DIR/Portside-${VERSION}-notarized.zip"
-hdiutil create -volname Portside -srcfolder "$BUILD_DIR/Portside.app" -ov -format UDZO "$BUILD_DIR/Portside-${VERSION}.dmg" >/dev/null
+"$ROOT_DIR/scripts/create_dmg.sh" \
+  "$BUILD_DIR/Portside.app" \
+  "$BUILD_DIR/Portside-${VERSION}.dmg" \
+  Portside
 submit_for_notarization "$BUILD_DIR/Portside-${VERSION}.dmg"
 xcrun stapler staple "$BUILD_DIR/Portside-${VERSION}.dmg"
 xcrun stapler validate "$BUILD_DIR/Portside-${VERSION}.dmg"

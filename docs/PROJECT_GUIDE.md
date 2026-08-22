@@ -197,8 +197,7 @@ open build/Portside.app
 
 ditto -c -k --sequesterRsrc --keepParent \
   build/Portside.app build/Portside-validation.app.zip
-hdiutil create -volname Portside -srcfolder build/Portside.app \
-  -ov -format UDZO build/Portside-validation.dmg
+./scripts/create_dmg.sh build/Portside.app build/Portside-validation.dmg Portside
 ```
 
 Esse DMG é apenas de validação e pode gerar aviso do macOS. Não o distribua a

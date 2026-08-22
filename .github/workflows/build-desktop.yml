@@ -34,12 +34,10 @@ jobs:
             build/Portside.app build/Portside-validation.app.zip
           ditto -c -k --sequesterRsrc --keepParent \
             build/Portside.app.dSYM build/Portside.app.dSYM.zip
-          hdiutil create \
-            -volname Portside \
-            -srcfolder build/Portside.app \
-            -ov \
-            -format UDZO \
-            build/Portside-validation.dmg
+          ./scripts/create_dmg.sh \
+            build/Portside.app \
+            build/Portside-validation.dmg \
+            Portside
           shasum -a 256 \
             build/Portside-validation.app.zip \
             build/Portside-validation.dmg \
