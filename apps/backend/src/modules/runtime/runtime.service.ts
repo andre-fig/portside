@@ -46,7 +46,9 @@ export class RuntimeService {
         const releases = await this.prisma.appRelease.findMany({
           where: {
             channel: Channel.production,
-            status: { in: [AppReleaseStatus.production, AppReleaseStatus.superseded] },
+            status: {
+              in: [AppReleaseStatus.production, AppReleaseStatus.superseded],
+            },
           },
           orderBy: { pubDate: "desc" },
           take: 3,
@@ -57,10 +59,15 @@ export class RuntimeService {
       }
     }
     if (process.env.NODE_ENV === "production") {
-      throw new ServiceUnavailableException("production appcast is not published");
+      throw new ServiceUnavailableException(
+        "production appcast is not published",
+      );
     }
     try {
-      return await readFile(join(process.cwd(), "manifests", "appcast.xml"), "utf8");
+      return await readFile(
+        join(process.cwd(), "manifests", "appcast.xml"),
+        "utf8",
+      );
     } catch {
       throw new ServiceUnavailableException("appcast is not published");
     }
@@ -68,33 +75,75 @@ export class RuntimeService {
 
   async registerAppRelease(input: RegisterAppReleaseDto) {
     const prisma = this.requireDatabase();
-    if (input.channel !== Channel.production)
-      throw new BadRequestException("app releases must use the production channel");
+    if (input.channel !== Channel.production) {
+      throw new BadRequestException(
+        "app releases must use the production channel",
+      );
+    }
     const url = new URL(input.url);
-    const hosts = new Set((process.env.PORTSIDE_APP_HOSTS ?? process.env.PORTSIDE_ARTIFACT_HOSTS ?? "").split(",").map((host) => host.trim()).filter(Boolean));
-    for (const value of [process.env.PUBLIC_BASE_URL, process.env.RAILWAY_PUBLIC_DOMAIN]) {
+    const hosts = new Set(
+      (
+        process.env.PORTSIDE_APP_HOSTS ??
+        process.env.PORTSIDE_ARTIFACT_HOSTS ??
+        ""
+      )
+        .split(",")
+        .map((host) => host.trim())
+        .filter(Boolean),
+    );
+    for (const value of [
+      process.env.PUBLIC_BASE_URL,
+      process.env.RAILWAY_PUBLIC_DOMAIN,
+    ]) {
       if (!value) continue;
       try {
-        hosts.add(new URL(value.startsWith("http") ? value : `https://${value}`).hostname);
+        hosts.add(
+          new URL(value.startsWith("http") ? value : `https://${value}`)
+            .hostname,
+        );
       } catch {
         // Invalid optional host values are ignored; required production hosts are validated elsewhere.
       }
     }
-    if (url.protocol !== "https:" || (hosts.size > 0 && !hosts.has(url.hostname)) || url.hostname.includes("example.invalid"))
-      throw new BadRequestException("app release URL is not an approved Portside host");
+    if (
+      url.protocol !== "https:" ||
+      (hosts.size > 0 && !hosts.has(url.hostname)) ||
+      url.hostname.includes("example.invalid")
+    ) {
+      throw new BadRequestException(
+        "app release URL is not an approved Portside host",
+      );
+    }
     const pubDate = input.pubDate ? new Date(input.pubDate) : new Date();
-    if (Number.isNaN(pubDate.getTime())) throw new BadRequestException("app release date is invalid");
+    if (Number.isNaN(pubDate.getTime())) {
+      throw new BadRequestException("app release date is invalid");
+    }
     const existing = await prisma.appRelease.findUnique({
-      where: { channel_version: { channel: Channel.production, version: input.version } },
+      where: {
+        channel_version: {
+          channel: Channel.production,
+          version: input.version,
+        },
+      },
     });
     if (existing) {
-      if (existing.url !== input.url || existing.edSignature !== input.edSignature || existing.length !== BigInt(input.length))
-        throw new BadRequestException("app release identity conflicts with the existing record");
+      if (
+        existing.url !== input.url ||
+        existing.edSignature !== input.edSignature ||
+        existing.length !== BigInt(input.length)
+      ) {
+        throw new BadRequestException(
+          "app release identity conflicts with the existing record",
+        );
+      }
       return this.appReleaseResponse(existing);
     }
     return prisma.$transaction(async (transaction) => {
       await transaction.appRelease.updateMany({
-        where: { channel: Channel.production, status: AppReleaseStatus.production },
+        where: {
+          channel: Channel.production,
+          status: AppReleaseStatus.production,
+        },
         data: { status: AppReleaseStatus.superseded },
       });
       const created = await transaction.appRelease.create({
@@ -123,13 +172,39 @@ export class RuntimeService {
       prisma.appRelease.findUnique({ where: { id } }),
       prisma.appRelease.findUnique({ where: { id: targetReleaseId } }),
     ]);
-    if (!current || !target) throw new NotFoundException("app release not found");
-    if (current.channel !== Channel.production || current.status !== AppReleaseStatus.production || target.channel !== Channel.production || (target.status !== AppReleaseStatus.production && target.status !== AppReleaseStatus.superseded))
-      throw new BadRequestException("rollback requires production app releases");
+    if (!current || !target) {
+      throw new NotFoundException("app release not found");
+    }
+    if (
+      current.channel !== Channel.production ||
+      current.status !== AppReleaseStatus.production ||
+      target.channel !== Channel.production ||
+      (target.status !== AppReleaseStatus.production &&
+        target.status !== AppReleaseStatus.superseded)
+    ) {
+      throw new BadRequestException(
+        "rollback requires production app releases",
+      );
+    }
     return prisma.$transaction(async (transaction) => {
-      await transaction.appRelease.update({ where: { id }, data: { status: AppReleaseStatus.rolled_back, rolledBackAt: new Date() } });
-      await transaction.appRelease.updateMany({ where: { channel: Channel.production, status: AppReleaseStatus.production }, data: { status: AppReleaseStatus.superseded } });
-      return transaction.appRelease.update({ where: { id: targetReleaseId }, data: { status: AppReleaseStatus.production, promotedAt: new Date() } });
+      await transaction.appRelease.update({
+        where: { id },
+        data: {
+          status: AppReleaseStatus.rolled_back,
+          rolledBackAt: new Date(),
+        },
+      });
+      await transaction.appRelease.updateMany({
+        where: {
+          channel: Channel.production,
+          status: AppReleaseStatus.production,
+        },
+        data: { status: AppReleaseStatus.superseded },
+      });
+      return transaction.appRelease.update({
+        where: { id: targetReleaseId },
+        data: { status: AppReleaseStatus.production, promotedAt: new Date() },
+      });
     });
   }
 
@@ -161,7 +236,10 @@ export class RuntimeService {
     }
     const path = join(process.cwd(), "manifests", "runtime-manifest.json");
     try {
-      const payload = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+      const payload = JSON.parse(await readFile(path, "utf8")) as Record<
+        string,
+        unknown
+      >;
       this.validatePublishedManifest(payload, Channel.production);
       return payload;
     } catch {
@@ -174,32 +252,75 @@ export class RuntimeService {
   async publishManifest(input: PublishManifestDto) {
     const prisma = this.requireDatabase();
     const manifest = { ...input.manifest };
-    const signature = typeof manifest.signature === "string" ? manifest.signature : "";
-    const signatureKeyId = typeof manifest.signatureKeyId === "string" ? manifest.signatureKeyId : "";
-    const manifestVersion = typeof manifest.manifestVersion === "string" ? manifest.manifestVersion : "";
-    const minimumPortsideVersion = typeof manifest.minimumPortsideVersion === "string" ? manifest.minimumPortsideVersion : "";
-    if (!signature || !signatureKeyId || !manifestVersion || !minimumPortsideVersion)
-      throw new BadRequestException("manifest identity and signature are required");
+    const signature =
+      typeof manifest.signature === "string" ? manifest.signature : "";
+    const signatureKeyId =
+      typeof manifest.signatureKeyId === "string"
+        ? manifest.signatureKeyId
+        : "";
+    const manifestVersion =
+      typeof manifest.manifestVersion === "string"
+        ? manifest.manifestVersion
+        : "";
+    const minimumPortsideVersion =
+      typeof manifest.minimumPortsideVersion === "string"
+        ? manifest.minimumPortsideVersion
+        : "";
+    if (
+      !signature ||
+      !signatureKeyId ||
+      !manifestVersion ||
+      !minimumPortsideVersion
+    ) {
+      throw new BadRequestException(
+        "manifest identity and signature are required",
+      );
+    }
     const configuredKeyID = process.env.MANIFEST_SIGNING_KEY_ID?.trim();
-    if (configuredKeyID && configuredKeyID !== signatureKeyId)
-      throw new BadRequestException("manifest signing key ID is not configured");
-    if (manifest.channel !== input.channel)
-      throw new BadRequestException("manifest channel does not match the release channel");
-    const components = Array.isArray(manifest.components) ? manifest.components : [];
-    if (components.length !== 3)
-      throw new BadRequestException("runtime manifest must contain wrapper, engine and winetricks artifacts");
-    if (manifest.buildStatus !== input.channel || manifest.builtBy !== "Portside" || typeof manifest.buildId !== "string" || !manifest.buildId)
-      throw new BadRequestException("runtime manifest must reference a successful Portside build");
+    if (configuredKeyID && configuredKeyID !== signatureKeyId) {
+      throw new BadRequestException(
+        "manifest signing key ID is not configured",
+      );
+    }
+    if (manifest.channel !== input.channel) {
+      throw new BadRequestException(
+        "manifest channel does not match the release channel",
+      );
+    }
+    const components = Array.isArray(manifest.components)
+      ? manifest.components
+      : [];
+    if (components.length !== 3) {
+      throw new BadRequestException(
+        "runtime manifest must contain wrapper, engine and winetricks artifacts",
+      );
+    }
+    if (
+      manifest.buildStatus !== input.channel ||
+      manifest.builtBy !== "Portside" ||
+      typeof manifest.buildId !== "string" ||
+      !manifest.buildId
+    ) {
+      throw new BadRequestException(
+        "runtime manifest must reference a successful Portside build",
+      );
+    }
     const artifactHosts = new Set(
       (process.env.PORTSIDE_ARTIFACT_HOSTS ?? "")
         .split(",")
         .map((host) => host.trim())
         .filter(Boolean),
     );
-    for (const value of [process.env.PUBLIC_BASE_URL, process.env.RAILWAY_PUBLIC_DOMAIN]) {
+    for (const value of [
+      process.env.PUBLIC_BASE_URL,
+      process.env.RAILWAY_PUBLIC_DOMAIN,
+    ]) {
       if (!value) continue;
       try {
-        artifactHosts.add(new URL(value.startsWith("http") ? value : `https://${value}`).hostname);
+        artifactHosts.add(
+          new URL(value.startsWith("http") ? value : `https://${value}`)
+            .hostname,
+        );
       } catch {
         // Invalid optional host values are ignored; required production hosts are validated elsewhere.
       }
@@ -220,45 +341,63 @@ export class RuntimeService {
         }
       }
       const sha256 =
-        component && typeof component === "object" &&
+        component &&
+        typeof component === "object" &&
         typeof (component as Record<string, unknown>).sha256 === "string"
           ? (component as Record<string, string>).sha256
           : "";
       const size =
-        component && typeof component === "object" &&
+        component &&
+        typeof component === "object" &&
         typeof (component as Record<string, unknown>).size === "number"
           ? (component as Record<string, number>).size
           : 0;
       if (
-        (!downloadURL ||
-          downloadURL.protocol !== "https:" ||
-          !downloadURL.hostname ||
-          !artifactHosts.has(downloadURL.hostname) ||
-          !/^[a-f0-9]{64}$/i.test(sha256) ||
-          !Number.isSafeInteger(size) ||
-          size <= 0 ||
-          typeof component !== "object" ||
-          (component as Record<string, unknown>).builtBy !== "Portside" ||
-          typeof (component as Record<string, unknown>).sourcePath !== "string" ||
-          typeof (component as Record<string, unknown>).sourceCommit !== "string" ||
-          typeof (component as Record<string, unknown>).sourceSnapshotChecksum !== "string" ||
-          typeof (component as Record<string, unknown>).license !== "string" ||
-          !["wrapper", "engine", "winetricks"].includes(String((component as Record<string, unknown>).component)) ||
-          /sikarugir|raw\.githubusercontent\.com|github\.com\/Sikarugir-App/i.test(String((component as Record<string, unknown>).downloadURL)))
-      )
+        !downloadURL ||
+        downloadURL.protocol !== "https:" ||
+        !downloadURL.hostname ||
+        !artifactHosts.has(downloadURL.hostname) ||
+        !/^[a-f0-9]{64}$/i.test(sha256) ||
+        !Number.isSafeInteger(size) ||
+        size <= 0 ||
+        typeof component !== "object" ||
+        (component as Record<string, unknown>).builtBy !== "Portside" ||
+        typeof (component as Record<string, unknown>).sourcePath !== "string" ||
+        typeof (component as Record<string, unknown>).sourceCommit !==
+          "string" ||
+        typeof (component as Record<string, unknown>).sourceSnapshotChecksum !==
+          "string" ||
+        typeof (component as Record<string, unknown>).license !== "string" ||
+        !["wrapper", "engine", "winetricks"].includes(
+          String((component as Record<string, unknown>).component),
+        ) ||
+        /sikarugir|raw\.githubusercontent\.com|github\.com\/Sikarugir-App/i.test(
+          String((component as Record<string, unknown>).downloadURL),
+        )
+      ) {
         throw new BadRequestException(
           "runtime manifest contains an invalid or non-Portside artifact",
         );
+      }
     }
     const unsigned = { ...manifest, signature: null };
     const publicKeyBase64 = process.env.MANIFEST_SIGNING_PUBLIC_KEY?.trim();
-    if (!publicKeyBase64) throw new ServiceUnavailableException("manifest signing key is not configured");
+    if (!publicKeyBase64) {
+      throw new ServiceUnavailableException(
+        "manifest signing key is not configured",
+      );
+    }
     let publicKey: ReturnType<typeof createPublicKey>;
     try {
       const rawKey = Buffer.from(publicKeyBase64, "base64");
-      if (rawKey.length !== 32) throw new Error("invalid Ed25519 public key length");
+      if (rawKey.length !== 32) {
+        throw new Error("invalid Ed25519 public key length");
+      }
       publicKey = createPublicKey({
-        key: Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), rawKey]),
+        key: Buffer.concat([
+          Buffer.from("302a300506032b6570032100", "hex"),
+          rawKey,
+        ]),
         format: "der",
         type: "spki",
       });
@@ -272,12 +411,20 @@ export class RuntimeService {
       Buffer.from(signature, "base64"),
     );
     if (!valid) throw new BadRequestException("manifest signature is invalid");
-    if (!input.releaseId) throw new BadRequestException("manifest must reference a release");
+    if (!input.releaseId) {
+      throw new BadRequestException("manifest must reference a release");
+    }
     const release = await prisma.runtimeRelease.findUnique({
       where: { id: input.releaseId },
       include: {
         artifacts: {
-          select: { component: true, version: true, sha256: true, size: true, fileName: true },
+          select: {
+            component: true,
+            version: true,
+            sha256: true,
+            size: true,
+            fileName: true,
+          },
         },
       },
     });
@@ -286,28 +433,34 @@ export class RuntimeService {
       input.channel !== Channel.production ||
       release.channel !== Channel.production ||
       release.status !== ReleaseStatus.production
-    )
-      throw new BadRequestException("manifest release is not eligible for this channel");
+    ) {
+      throw new BadRequestException(
+        "manifest release is not eligible for this channel",
+      );
+    }
     if (
-      components.some(
-        (component) => {
-          if (!component || typeof component !== "object") return true;
-          const candidate = component as Record<string, unknown>;
-          const size = candidate.size;
-          const artifact = release.artifacts.find(
-            (registered) =>
-              registered.component === candidate.component &&
-              registered.version === candidate.version &&
-              registered.sha256.toLowerCase() === String(candidate.sha256).toLowerCase() &&
-              registered.fileName === String(candidate.downloadURL).split("/").pop() &&
-              typeof size === "number" &&
-              registered.size === BigInt(size),
-          );
-          return !artifact;
-        },
-      )
-    )
-      throw new BadRequestException("manifest references an artifact outside its release");
+      components.some((component) => {
+        if (!component || typeof component !== "object") return true;
+        const candidate = component as Record<string, unknown>;
+        const size = candidate.size;
+        const artifact = release.artifacts.find(
+          (registered) =>
+            registered.component === candidate.component &&
+            registered.version === candidate.version &&
+            registered.sha256.toLowerCase() ===
+              String(candidate.sha256).toLowerCase() &&
+            registered.fileName ===
+              String(candidate.downloadURL).split("/").pop() &&
+            typeof size === "number" &&
+            registered.size === BigInt(size),
+        );
+        return !artifact;
+      })
+    ) {
+      throw new BadRequestException(
+        "manifest references an artifact outside its release",
+      );
+    }
     return prisma.$transaction(async (transaction) => {
       await transaction.runtimeManifest.updateMany({
         where: { channel: input.channel, status: "published" },
@@ -325,10 +478,15 @@ export class RuntimeService {
         publishedAt: new Date(),
       };
       const existing = await transaction.runtimeManifest.findUnique({
-        where: { channel_manifestVersion: { channel: input.channel, manifestVersion } },
+        where: {
+          channel_manifestVersion: { channel: input.channel, manifestVersion },
+        },
       });
       return existing
-        ? transaction.runtimeManifest.update({ where: { id: existing.id }, data })
+        ? transaction.runtimeManifest.update({
+            where: { id: existing.id },
+            data,
+          })
         : transaction.runtimeManifest.create({ data });
     });
   }
@@ -355,7 +513,7 @@ export class RuntimeService {
         snapshotChecksum: input.snapshotChecksum,
         license: input.license,
         localPath: input.localPath,
-        submodules: input.submodules as Prisma.InputJsonValue | undefined,
+        submodules: input.submodules,
         lfsUsed: input.lfsUsed,
         status: SourceSnapshotStatus.verified,
         syncedAt: new Date(),
@@ -367,7 +525,7 @@ export class RuntimeService {
         snapshotChecksum: input.snapshotChecksum,
         license: input.license,
         localPath: input.localPath,
-        submodules: input.submodules as Prisma.InputJsonValue | undefined,
+        submodules: input.submodules,
         lfsUsed: input.lfsUsed,
         status: SourceSnapshotStatus.verified,
         syncedAt: new Date(),
@@ -377,28 +535,40 @@ export class RuntimeService {
 
   async registerBuild(input: RegisterBuildDto) {
     const prisma = this.requireDatabase();
-    if (input.sourceSnapshotIds.length === 0)
+    if (input.sourceSnapshotIds.length === 0) {
       throw new BadRequestException("a build must reference source snapshots");
+    }
     const snapshots = await prisma.sourceSnapshot.findMany({
       where: { id: { in: input.sourceSnapshotIds } },
       select: { id: true, status: true },
     });
-    if (snapshots.length !== new Set(input.sourceSnapshotIds).size)
-      throw new BadRequestException("one or more source snapshots do not exist");
-    if (snapshots.some(({ status }) => status !== SourceSnapshotStatus.verified))
+    if (snapshots.length !== new Set(input.sourceSnapshotIds).size) {
+      throw new BadRequestException(
+        "one or more source snapshots do not exist",
+      );
+    }
+    if (
+      snapshots.some(({ status }) => status !== SourceSnapshotStatus.verified)
+    ) {
       throw new BadRequestException("all source snapshots must be verified");
+    }
     const existingBuild = input.buildId
       ? await prisma.runtimeBuild.findUnique({ where: { id: input.buildId } })
       : input.workflowRunId
-        ? await prisma.runtimeBuild.findUnique({ where: { workflowRunId: input.workflowRunId } })
+        ? await prisma.runtimeBuild.findUnique({
+            where: { workflowRunId: input.workflowRunId },
+          })
         : null;
     if (existingBuild) {
       if (
         existingBuild.version !== input.version ||
         existingBuild.portsideCommit !== input.portsideCommit ||
         existingBuild.status !== input.status
-      )
-        throw new BadRequestException("build identity conflicts with the existing record");
+      ) {
+        throw new BadRequestException(
+          "build identity conflicts with the existing record",
+        );
+      }
       return existingBuild;
     }
     return prisma.runtimeBuild.create({
@@ -417,7 +587,8 @@ export class RuntimeService {
         testResult: input.testResult as Prisma.InputJsonValue | undefined,
         startedAt: input.status === BuildStatus.queued ? undefined : new Date(),
         finishedAt:
-          input.status === BuildStatus.succeeded || input.status === BuildStatus.failed
+          input.status === BuildStatus.succeeded ||
+          input.status === BuildStatus.failed
             ? new Date()
             : undefined,
         sourceSnapshots: {
@@ -429,27 +600,47 @@ export class RuntimeService {
 
   async registerRelease(input: RegisterReleaseDto) {
     const prisma = this.requireDatabase();
-    if (input.channel !== Channel.production)
-      throw new BadRequestException("runtime releases must use the production channel");
+    if (input.channel !== Channel.production) {
+      throw new BadRequestException(
+        "runtime releases must use the production channel",
+      );
+    }
     const build = await prisma.runtimeBuild.findUnique({
       where: { id: input.buildId },
     });
     if (!build) throw new NotFoundException("runtime build not found");
-    if (build.status !== BuildStatus.succeeded)
-      throw new BadRequestException("only successful builds can create releases");
+    if (build.status !== BuildStatus.succeeded) {
+      throw new BadRequestException(
+        "only successful builds can create releases",
+      );
+    }
     const existingRelease = await prisma.runtimeRelease.findUnique({
-      where: { channel_version: { channel: Channel.production, version: input.version } },
+      where: {
+        channel_version: {
+          channel: Channel.production,
+          version: input.version,
+        },
+      },
     });
     if (existingRelease) {
-      if (existingRelease.buildId !== input.buildId || existingRelease.status !== ReleaseStatus.production)
-        throw new BadRequestException("release identity conflicts with the existing record");
+      if (
+        existingRelease.buildId !== input.buildId ||
+        existingRelease.status !== ReleaseStatus.production
+      ) {
+        throw new BadRequestException(
+          "release identity conflicts with the existing record",
+        );
+      }
       return existingRelease;
     }
     const artifacts = await prisma.artifact.findMany({
       where: { id: { in: input.artifactIds } },
     });
-    if (artifacts.length !== new Set(input.artifactIds).size)
-      throw new BadRequestException("one or more release artifacts do not exist");
+    if (artifacts.length !== new Set(input.artifactIds).size) {
+      throw new BadRequestException(
+        "one or more release artifacts do not exist",
+      );
+    }
     if (
       artifacts.some(
         (artifact) =>
@@ -457,10 +648,11 @@ export class RuntimeService {
             artifact.status !== ArtifactStatus.approved) ||
           (artifact.buildId !== null && artifact.buildId !== input.buildId),
       )
-    )
+    ) {
       throw new BadRequestException(
         "release artifacts must be verified or approved and belong to the build",
       );
+    }
     return prisma.$transaction(async (transaction) => {
       await transaction.artifact.updateMany({
         where: { id: { in: input.artifactIds } },
@@ -497,7 +689,10 @@ export class RuntimeService {
   ) {
     const prisma = this.requireDatabase();
     const [release, target] = await Promise.all([
-      prisma.runtimeRelease.findUnique({ where: { id }, include: { build: true } }),
+      prisma.runtimeRelease.findUnique({
+        where: { id },
+        include: { build: true },
+      }),
       prisma.runtimeRelease.findUnique({
         where: { id: targetReleaseId },
         include: {
@@ -509,15 +704,20 @@ export class RuntimeService {
         },
       }),
     ]);
-    if (!release || !target) throw new NotFoundException("runtime release not found");
+    if (!release || !target) {
+      throw new NotFoundException("runtime release not found");
+    }
     if (
       release.channel !== Channel.production ||
       release.status !== ReleaseStatus.production ||
       target.channel !== Channel.production ||
       target.status !== ReleaseStatus.production ||
       target.manifests.length === 0
-    )
-      throw new BadRequestException("rollback requires two production releases");
+    ) {
+      throw new BadRequestException(
+        "rollback requires two production releases",
+      );
+    }
     return prisma.$transaction(async (transaction) => {
       const rolledBack = await transaction.runtimeRelease.update({
         where: { id },
@@ -550,13 +750,34 @@ export class RuntimeService {
     });
   }
 
-  private validatePublishedManifest(payload: Record<string, unknown>, channel: Channel): void {
-    const components = Array.isArray(payload.components) ? payload.components : [];
-    if (payload.buildStatus !== channel || payload.builtBy !== "Portside" || components.length !== 3)
-      throw new ServiceUnavailableException("runtime manifest is not a complete Portside build");
-    const names = components.map((component) => component && typeof component === "object" ? String((component as Record<string, unknown>).component) : "").sort();
-    if (names.join(",") !== "engine,winetricks,wrapper")
-      throw new ServiceUnavailableException("runtime manifest components are incomplete");
+  private validatePublishedManifest(
+    payload: Record<string, unknown>,
+    channel: Channel,
+  ): void {
+    const components = Array.isArray(payload.components)
+      ? payload.components
+      : [];
+    if (
+      payload.buildStatus !== channel ||
+      payload.builtBy !== "Portside" ||
+      components.length !== 3
+    ) {
+      throw new ServiceUnavailableException(
+        "runtime manifest is not a complete Portside build",
+      );
+    }
+    const names = components
+      .map((component) =>
+        component && typeof component === "object"
+          ? String((component as Record<string, unknown>).component)
+          : "",
+      )
+      .sort();
+    if (names.join(",") !== "engine,winetricks,wrapper") {
+      throw new ServiceUnavailableException(
+        "runtime manifest components are incomplete",
+      );
+    }
   }
 
   private appReleaseResponse(release: {
@@ -576,28 +797,45 @@ export class RuntimeService {
   }
 
   private requireDatabase(): PrismaService {
-    if (!this.prisma)
+    if (!this.prisma) {
       throw new ServiceUnavailableException("database is not configured");
+    }
     return this.prisma;
   }
 
-  private renderAppcast(releases: Array<{
-    version: string;
-    build: string;
-    url: string;
-    length: bigint;
-    edSignature: string;
-    minimumOSVersion: string;
-    releaseNotesURL: string | null;
-    releaseNotes: string | null;
-    pubDate: Date;
-  }>): string {
-    const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
-    const items = releases.map((release) => {
-      const notes = release.releaseNotesURL ? `<sparkle:releaseNotesLink>${escape(release.releaseNotesURL)}</sparkle:releaseNotesLink>` : release.releaseNotes ? `<description><![CDATA[${release.releaseNotes.replace(/]]>/g, "]]]]><![CDATA[>")}]]></description>` : "";
-      return `<item><title>Portside ${escape(release.version)}</title><pubDate>${release.pubDate.toUTCString()}</pubDate>${notes}<enclosure url="${escape(release.url)}" sparkle:version="${escape(release.build)}" sparkle:shortVersionString="${escape(release.version)}" sparkle:minimumSystemVersion="${escape(release.minimumOSVersion)}" sparkle:edSignature="${escape(release.edSignature)}" length="${release.length.toString()}" type="application/octet-stream" /></item>`;
-    }).join("");
-    const link = process.env.PORTSIDE_APPCAST_URL ?? "https://api-production-6d06.up.railway.app/v1/appcast.xml";
+  private renderAppcast(
+    releases: Array<{
+      version: string;
+      build: string;
+      url: string;
+      length: bigint;
+      edSignature: string;
+      minimumOSVersion: string;
+      releaseNotesURL: string | null;
+      releaseNotes: string | null;
+      pubDate: Date;
+    }>,
+  ): string {
+    const escape = (value: string) =>
+      value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&apos;");
+    const items = releases
+      .map((release) => {
+        const notes = release.releaseNotesURL
+          ? `<sparkle:releaseNotesLink>${escape(release.releaseNotesURL)}</sparkle:releaseNotesLink>`
+          : release.releaseNotes
+            ? `<description><![CDATA[${release.releaseNotes.replace(/]]>/g, "]]]]><![CDATA[>")}]]></description>`
+            : "";
+        return `<item><title>Portside ${escape(release.version)}</title><pubDate>${release.pubDate.toUTCString()}</pubDate>${notes}<enclosure url="${escape(release.url)}" sparkle:version="${escape(release.build)}" sparkle:shortVersionString="${escape(release.version)}" sparkle:minimumSystemVersion="${escape(release.minimumOSVersion)}" sparkle:edSignature="${escape(release.edSignature)}" length="${release.length.toString()}" type="application/octet-stream" /></item>`;
+      })
+      .join("");
+    const link =
+      process.env.PORTSIDE_APPCAST_URL ??
+      "https://api-production-6d06.up.railway.app/v1/appcast.xml";
     return `<?xml version="1.0" encoding="utf-8"?><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0"><channel><title>Portside</title><link>${escape(link)}</link><description>Portside updates</description><language>en</language>${items}</channel></rss>`;
   }
 }

@@ -34,17 +34,19 @@ export class ArtifactService {
   async signedDownload(
     id: string,
   ): Promise<{ url: string; expiresIn: number; sha256: string; size: string }> {
-    if (!this.s3 || !this.config.s3.bucket)
+    if (!this.s3 || !this.config.s3.bucket) {
       throw new ServiceUnavailableException(
         "artifact storage is not configured",
       );
+    }
     const artifact = await this.prisma.artifact.findUnique({ where: { id } });
     if (
       !artifact ||
       (artifact.status !== ArtifactStatus.production &&
         artifact.status !== ArtifactStatus.approved)
-    )
+    ) {
       throw new ServiceUnavailableException("artifact is not available");
+    }
     const key = validateStorageKey(artifact.storageKey);
     const expiresIn = 300;
     const url = await getSignedUrl(
@@ -64,8 +66,9 @@ export class ArtifactService {
     channel: string,
     fileName: string,
   ): Promise<{ url: string; expiresIn: number }> {
-    if (channel !== Channel.production)
+    if (channel !== Channel.production) {
       throw new BadRequestException("runtime channel must be production");
+    }
     if (
       !/^(PortsideWrapper|PortsideWineEngine|PortsideWinetricks)-[A-Za-z0-9][A-Za-z0-9._-]*\.tar\.xz$/.test(
         fileName,
@@ -93,23 +96,36 @@ export class ArtifactService {
     channel: string,
     fileName: string,
   ): Promise<{ url: string; expiresIn: number }> {
-    if (channel !== Channel.production)
+    if (channel !== Channel.production) {
       throw new BadRequestException("app channel must be production");
-    const match = /^Portside-([A-Za-z0-9][A-Za-z0-9._-]*)\.(zip|dmg)$/.exec(fileName);
-    if (!match)
+    }
+    const match = /^Portside-([A-Za-z0-9][A-Za-z0-9._-]*)\.(zip|dmg)$/.exec(
+      fileName,
+    );
+    if (!match) {
       throw new BadRequestException("app release name is invalid");
-    if (!this.s3 || !this.config.s3.bucket)
-      throw new ServiceUnavailableException("artifact storage is not configured");
+    }
+    if (!this.s3 || !this.config.s3.bucket) {
+      throw new ServiceUnavailableException(
+        "artifact storage is not configured",
+      );
+    }
 
     const release = await this.prisma.appRelease.findUnique({
-      where: { channel_version: { channel: Channel.production, version: match[1] } },
+      where: {
+        channel_version: { channel: Channel.production, version: match[1] },
+      },
     });
-    if (!release || release.status !== "production")
+    if (!release || release.status !== "production") {
       throw new ServiceUnavailableException("app release is not available");
+    }
     if (fileName.endsWith(".zip")) {
       const registeredFileName = new URL(release.url).pathname.split("/").pop();
-      if (registeredFileName !== fileName)
-        throw new ServiceUnavailableException("app release archive is not available");
+      if (registeredFileName !== fileName) {
+        throw new ServiceUnavailableException(
+          "app release archive is not available",
+        );
+      }
     }
 
     const key = validateStorageKey(`app/${channel}/${fileName}`);

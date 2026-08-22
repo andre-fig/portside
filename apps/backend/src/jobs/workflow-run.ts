@@ -35,14 +35,20 @@ function versionFor(run: GitHubWorkflowRun): string {
 }
 
 function statusFor(run: GitHubWorkflowRun): BuildStatus {
-  if (run.status === "completed")
-    return run.conclusion === "success" ? BuildStatus.succeeded : BuildStatus.failed;
+  if (run.status === "completed") {
+    return run.conclusion === "success"
+      ? BuildStatus.succeeded
+      : BuildStatus.failed;
+  }
   if (run.status === "in_progress") return BuildStatus.running;
   return BuildStatus.queued;
 }
 
-export function workflowRunToBuildUpdate(run: GitHubWorkflowRun): WorkflowBuildUpdate {
-  const finished = run.status === "completed" ? new Date(run.updated_at) : undefined;
+export function workflowRunToBuildUpdate(
+  run: GitHubWorkflowRun,
+): WorkflowBuildUpdate {
+  const finished =
+    run.status === "completed" ? new Date(run.updated_at) : undefined;
   return {
     workflowRunId: String(run.id),
     workflowURL: run.html_url,

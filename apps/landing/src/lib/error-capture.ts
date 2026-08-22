@@ -18,7 +18,11 @@ const DESCRIPTION_LENGTH_LIMIT = 8_000;
 export function describeError(error: unknown): string {
   const parts: string[] = [];
   let current: unknown = error;
-  for (let depth = 0; depth < CAUSE_DEPTH_LIMIT && current != null; depth++) {
+  for (
+    let depth = 0;
+    depth < CAUSE_DEPTH_LIMIT && current !== null && current !== undefined;
+    depth++
+  ) {
     if (!(current instanceof Error)) {
       parts.push(typeof current === "string" ? current : safeStringify(current));
       break;
@@ -63,10 +67,8 @@ console.error = (...args: unknown[]) => {
 };
 
 if (typeof globalThis.addEventListener === "function") {
-  globalThis.addEventListener("error", (event) => record((event as ErrorEvent).error ?? event));
-  globalThis.addEventListener("unhandledrejection", (event) =>
-    record((event as PromiseRejectionEvent).reason),
-  );
+  globalThis.addEventListener("error", (event) => record(event.error ?? event));
+  globalThis.addEventListener("unhandledrejection", (event) => record(event.reason));
 }
 
 export function consumeLastCapturedError(): unknown {

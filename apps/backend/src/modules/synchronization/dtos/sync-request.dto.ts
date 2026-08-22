@@ -1,4 +1,4 @@
-import { Channel } from "@prisma/client";
+import type { Channel } from "@prisma/client";
 
 export type SyncRequest = {
   component: string;

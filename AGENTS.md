@@ -78,6 +78,7 @@ cd ../..
 cd apps/landing
 bun install --frozen-lockfile
 bun run lint
+bun run typecheck
 bun run build
 cd ../..
 

@@ -244,6 +244,31 @@ testado, cria `Portside-validation.app.zip`, `Portside-validation.dmg`, dSYM e
 checksums por 14 dias. Esses arquivos são apenas para validação e podem gerar
 avisos do macOS.
 
+### ESLint e tipagem
+
+Backend e landing usam ESLint flat config com regras tipadas do
+`typescript-eslint`. O lint falha com qualquer warning (`--max-warnings 0`) e
+verifica, entre outras regras, imports de tipo, variáveis não utilizadas,
+`any` explícito, comparações estritas, blocos condicionais, imports duplicados,
+uso de `const`, promessas não aguardadas e APIs assíncronas mal conectadas.
+
+O backend usa `strictTypeChecked` sobre `src/**/*.ts`, além do
+`tsc --noEmit`. A landing usa `recommendedTypeChecked`, `tsc --noEmit` e as
+regras de hooks do React. O arquivo gerado `src/routeTree.gen.ts` fica fora do
+ESLint, e o adaptador compartilhado de Recharts possui apenas uma exceção
+local para a API `any` fornecida pela dependência; o restante do código não
+recebe essa exceção.
+
+Comandos locais:
+
+```sh
+(cd apps/backend && npm run lint && npm run typecheck)
+(cd apps/landing && bun run lint && bun run typecheck)
+```
+
+O `pre-push` executa esses checks quando a área correspondente foi alterada,
+enquanto o workflow `CI` e `Build Landing` repetem a validação no GitHub.
+
 ### Runtime
 
 `Build Portside Runtime` roda em `macos-15`, instala a toolchain registrada,

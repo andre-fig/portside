@@ -21,8 +21,9 @@ export function consumeChallenge(
   challenge: ChallengeState,
   now = Date.now(),
 ): ChallengeState {
-  if (challenge.used || challenge.expiresAt <= now)
+  if (challenge.used || challenge.expiresAt <= now) {
     throw new Error("challenge expired or already used");
+  }
   return { ...challenge, used: true };
 }
 

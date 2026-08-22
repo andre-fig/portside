@@ -40,8 +40,9 @@ export class AdminService {
       engine: "PortsideWineEngine",
       winetricks: "PortsideWinetricks",
     }[input.component];
-    if (!artifactPrefix)
+    if (!artifactPrefix) {
       throw new BadRequestException("runtime component is not supported");
+    }
 
     const sourceURL = new URL(input.sourceURL);
     const approvedHosts = new Set([
@@ -56,15 +57,22 @@ export class AdminService {
       sourceURL.username ||
       sourceURL.password ||
       !approvedHosts.has(sourceURL.hostname) ||
-      sourceURL.pathname !== `/v1/runtime/artifacts/production/${input.fileName}` ||
+      sourceURL.pathname !==
+        `/v1/runtime/artifacts/production/${input.fileName}` ||
       sourceURL.search ||
       sourceURL.hash
-    )
-      throw new BadRequestException("runtime artifact URL is not an approved Portside route");
+    ) {
+      throw new BadRequestException(
+        "runtime artifact URL is not an approved Portside route",
+      );
+    }
 
     const expectedFileName = `${artifactPrefix}-${input.version}.tar.xz`;
-    if (input.fileName !== expectedFileName)
-      throw new BadRequestException("runtime artifact filename does not match its component and version");
+    if (input.fileName !== expectedFileName) {
+      throw new BadRequestException(
+        "runtime artifact filename does not match its component and version",
+      );
+    }
 
     const prisma = this.prisma;
     const [snapshot, build] = await Promise.all([
@@ -77,14 +85,29 @@ export class AdminService {
         include: { sourceSnapshots: { select: { id: true } } },
       }),
     ]);
-    if (!snapshot || snapshot.status !== SourceSnapshotStatus.verified)
-      throw new BadRequestException("artifact requires a verified source snapshot");
-    if (!build || build.status !== BuildStatus.succeeded)
-      throw new BadRequestException("artifact requires a successful Portside build");
-    if (!build.sourceSnapshots.some(({ id }) => id === snapshot.id))
-      throw new BadRequestException("artifact source snapshot is not attached to its build");
-    if (snapshot.commit !== input.sourceCommitOrTag || snapshot.source.repository !== input.sourceRepository)
-      throw new BadRequestException("artifact source provenance does not match the registered snapshot");
+    if (!snapshot || snapshot.status !== SourceSnapshotStatus.verified) {
+      throw new BadRequestException(
+        "artifact requires a verified source snapshot",
+      );
+    }
+    if (!build || build.status !== BuildStatus.succeeded) {
+      throw new BadRequestException(
+        "artifact requires a successful Portside build",
+      );
+    }
+    if (!build.sourceSnapshots.some(({ id }) => id === snapshot.id)) {
+      throw new BadRequestException(
+        "artifact source snapshot is not attached to its build",
+      );
+    }
+    if (
+      snapshot.commit !== input.sourceCommitOrTag ||
+      snapshot.source.repository !== input.sourceRepository
+    ) {
+      throw new BadRequestException(
+        "artifact source provenance does not match the registered snapshot",
+      );
+    }
 
     const storageKey = `runtime/production/${input.fileName}`;
     const unique = {
@@ -100,9 +123,13 @@ export class AdminService {
         existing.sha256.toLowerCase() !== input.expectedSHA256.toLowerCase() ||
         existing.size !== BigInt(input.size) ||
         (existing.buildId && existing.buildId !== input.buildId) ||
-        (existing.sourceSnapshotId && existing.sourceSnapshotId !== input.sourceSnapshotId)
-      )
-        throw new BadRequestException("published artifact identity conflicts with the existing record");
+        (existing.sourceSnapshotId &&
+          existing.sourceSnapshotId !== input.sourceSnapshotId)
+      ) {
+        throw new BadRequestException(
+          "published artifact identity conflicts with the existing record",
+        );
+      }
       const updated = await prisma.artifact.update({
         where: { id: existing.id },
         data: {
@@ -116,7 +143,10 @@ export class AdminService {
           buildId: input.buildId,
           provenance: input.provenance as Prisma.InputJsonValue | undefined,
           sbom: input.sbom as Prisma.InputJsonValue | undefined,
-          status: existing.status === ArtifactStatus.production ? ArtifactStatus.production : ArtifactStatus.verified,
+          status:
+            existing.status === ArtifactStatus.production
+              ? ArtifactStatus.production
+              : ArtifactStatus.verified,
           verifiedAt: existing.verifiedAt ?? new Date(),
         },
       });
@@ -152,7 +182,10 @@ export class AdminService {
       .filter((value): value is string => Boolean(value))
       .flatMap((value) => {
         try {
-          return [new URL(value.startsWith("http") ? value : `https://${value}`).hostname];
+          return [
+            new URL(value.startsWith("http") ? value : `https://${value}`)
+              .hostname,
+          ];
         } catch {
           return [];
         }
@@ -165,19 +198,21 @@ export class AdminService {
       include: { sourceSnapshot: true, build: true },
     });
     if (!artifact) throw new NotFoundException("artifact not found");
-    if (artifact.status !== "approved" && artifact.status !== "verified")
+    if (artifact.status !== "approved" && artifact.status !== "verified") {
       throw new BadRequestException(
         "artifact must pass approval before promotion",
       );
+    }
     if (
       !artifact.sourceSnapshot ||
       artifact.sourceSnapshot.status !== "verified" ||
       !artifact.build ||
       artifact.build.status !== "succeeded"
-    )
+    ) {
       throw new BadRequestException(
         "artifact requires a verified source snapshot and successful Portside build",
       );
+    }
     return this.prisma.artifact.update({
       where: { id },
       data: { status: "production", promotedAt: new Date() },
@@ -197,12 +232,9 @@ export class AdminService {
         status: { in: ["approved", "production"] },
       },
     });
-    if (
-      !target ||
-      !target.sourceSnapshotId ||
-      !target.buildId
-    )
+    if (!target || !target.sourceSnapshotId || !target.buildId) {
       throw new BadRequestException("rollback target is not approved");
+    }
     await this.prisma.artifact.update({
       where: { id },
       data: { status: "deprecated" },

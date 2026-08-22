@@ -28,8 +28,9 @@ export type LicenseTokenPayload = {
 
 function keyParts(value: string): { prefix: string; hmacInput: string } {
   const normalized = value.trim().toUpperCase();
-  if (!/^PORT-[A-Z0-9]{8}(?:-[A-Z0-9]{8}){3}$/.test(normalized))
+  if (!/^PORT-[A-Z0-9]{8}(?:-[A-Z0-9]{8}){3}$/.test(normalized)) {
     throw new UnauthorizedException("invalid license key");
+  }
   return { prefix: normalized.slice(0, 13), hmacInput: normalized };
 }
 
@@ -53,8 +54,9 @@ export class LicenseService {
     const keyHash = sha256Hex(input.publicKey);
     const result = await this.prisma.$transaction(async (tx) => {
       const license = await tx.license.findUnique({ where: { keyHmac } });
-      if (license?.status !== LicenseStatus.active)
+      if (license?.status !== LicenseStatus.active) {
         throw new UnauthorizedException("license is not active");
+      }
       const device = await tx.device.upsert({
         where: { publicKeyHash: keyHash },
         update: { publicKey: input.publicKey, lastSeenAt: new Date() },
@@ -63,10 +65,11 @@ export class LicenseService {
       const current = await tx.activation.findFirst({
         where: { licenseId: license.id, status: ActivationStatus.active },
       });
-      if (current && current.deviceId !== device.id)
+      if (current && current.deviceId !== device.id) {
         throw new ConflictException(
           "license is already active on another device",
         );
+      }
       const activation = await tx.activation.upsert({
         where: {
           licenseId_deviceId: { licenseId: license.id, deviceId: device.id },
@@ -106,15 +109,17 @@ export class LicenseService {
     const license = await this.prisma.license.findUnique({
       where: { id: input.licenseId },
     });
-    if (license?.status !== LicenseStatus.active)
+    if (license?.status !== LicenseStatus.active) {
       throw new UnauthorizedException("license is not active");
+    }
     const activation = await this.prisma.activation.findUnique({
       where: {
         licenseId_deviceId: { licenseId: license.id, deviceId: input.deviceId },
       },
     });
-    if (activation?.status !== ActivationStatus.active)
+    if (activation?.status !== ActivationStatus.active) {
       throw new UnauthorizedException("device is not active for this license");
+    }
     const challenge = randomToken(32);
     const expiresAt = new Date(Date.now() + 120_000);
     await this.prisma.activationChallenge.create({
@@ -148,8 +153,9 @@ export class LicenseService {
       !payload.deviceId ||
       !payload.plan ||
       payload.keyId !== this.config.licenseKeyId()
-    )
+    ) {
       throw new UnauthorizedException("invalid token payload");
+    }
     if (
       !verify(
         null,
@@ -157,8 +163,9 @@ export class LicenseService {
         this.config.licensePublicKey(),
         Buffer.from(parts[2], "base64url"),
       )
-    )
+    ) {
       throw new UnauthorizedException("invalid token signature");
+    }
     const verifier = createVerify("SHA256");
     verifier.update(Buffer.from(input.challenge));
     const publicKey = createPublicKey({
@@ -171,8 +178,9 @@ export class LicenseService {
         { key: publicKey, dsaEncoding: "der" },
         Buffer.from(input.signature, "base64url"),
       )
-    )
+    ) {
       throw new UnauthorizedException("invalid challenge signature");
+    }
     const challenge = await this.prisma.activationChallenge.findFirst({
       where: {
         nonceHash: sha256Hex(input.challenge),
@@ -181,19 +189,22 @@ export class LicenseService {
         usedAt: null,
       },
     });
-    if (!challenge || challenge.expiresAt.getTime() <= Date.now())
+    if (!challenge || challenge.expiresAt.getTime() <= Date.now()) {
       throw new UnauthorizedException("challenge expired or already used");
+    }
     const consumed = await this.prisma.activationChallenge.updateMany({
       where: { id: challenge.id, usedAt: null },
       data: { usedAt: new Date() },
     });
-    if (consumed.count !== 1)
+    if (consumed.count !== 1) {
       throw new UnauthorizedException("challenge expired or already used");
+    }
     const license = await this.prisma.license.findUnique({
       where: { id: payload.licenseId },
     });
-    if (license?.status !== LicenseStatus.active)
+    if (license?.status !== LicenseStatus.active) {
       throw new UnauthorizedException("license token is not valid");
+    }
     await this.prisma.activation.update({
       where: {
         licenseId_deviceId: {
@@ -252,8 +263,9 @@ export class LicenseService {
 
   private spkiForRawP256(publicKeyBase64: string): Buffer {
     const raw = Buffer.from(publicKeyBase64, "base64");
-    if (raw.length !== 65 || raw[0] !== 0x04)
+    if (raw.length !== 65 || raw[0] !== 0x04) {
       throw new UnauthorizedException("invalid device public key");
+    }
     const spki = Buffer.concat([
       Buffer.from(
         "3059301306072a8648ce3d020106082a8648ce3d030107034200",

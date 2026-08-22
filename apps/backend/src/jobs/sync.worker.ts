@@ -1,11 +1,21 @@
 import "reflect-metadata";
-import { BuildStatus, Prisma, PrismaClient, SourceSnapshotStatus, SyncStatus } from "@prisma/client";
-import { workflowRunToBuildUpdate, type GitHubWorkflowRun } from "./workflow-run.js";
+import {
+  BuildStatus,
+  PrismaClient,
+  SourceSnapshotStatus,
+  SyncStatus,
+  type Prisma,
+} from "@prisma/client";
+import {
+  workflowRunToBuildUpdate,
+  type GitHubWorkflowRun,
+} from "./workflow-run.js";
 
 const prisma = new PrismaClient();
 const pollIntervalMs = Number(process.env.SYNC_WORKER_POLL_MS ?? 60_000);
 const timeoutMs = Number(process.env.SYNC_WORKER_TIMEOUT_MS ?? 30 * 60_000);
-const repository = process.env.PORTSIDE_GITHUB_REPOSITORY ?? "andre-fig/portside";
+const repository =
+  process.env.PORTSIDE_GITHUB_REPOSITORY ?? "andre-fig/portside";
 const workflow = process.env.PORTSIDE_RUNTIME_WORKFLOW ?? "build-runtime.yml";
 
 async function reconcileStaleWork(): Promise<void> {
@@ -14,7 +24,11 @@ async function reconcileStaleWork(): Promise<void> {
   const [syncExecutions, builds, snapshots] = await prisma.$transaction([
     prisma.syncExecution.updateMany({
       where: { status: SyncStatus.running, startedAt: { lt: cutoff } },
-      data: { status: SyncStatus.failed, errorCode: "sync_timeout", finishedAt },
+      data: {
+        status: SyncStatus.failed,
+        errorCode: "sync_timeout",
+        finishedAt,
+      },
     }),
     prisma.runtimeBuild.updateMany({
       where: {
@@ -29,18 +43,23 @@ async function reconcileStaleWork(): Promise<void> {
       },
     }),
     prisma.sourceSnapshot.updateMany({
-      where: { status: SourceSnapshotStatus.discovered, createdAt: { lt: cutoff } },
+      where: {
+        status: SourceSnapshotStatus.discovered,
+        createdAt: { lt: cutoff },
+      },
       data: { status: SourceSnapshotStatus.failed },
     }),
   ]);
-  console.log(JSON.stringify({
-    level: "info",
-    event: "sync_worker_reconciled",
-    syncExecutionsFailed: syncExecutions.count,
-    buildsFailed: builds.count,
-    snapshotsFailed: snapshots.count,
-    at: finishedAt.toISOString(),
-  }));
+  console.log(
+    JSON.stringify({
+      level: "info",
+      event: "sync_worker_reconciled",
+      syncExecutionsFailed: syncExecutions.count,
+      buildsFailed: builds.count,
+      snapshotsFailed: snapshots.count,
+      at: finishedAt.toISOString(),
+    }),
+  );
 }
 
 function githubHeaders(): HeadersInit {
@@ -55,7 +74,9 @@ function githubHeaders(): HeadersInit {
 async function fetchWorkflowRuns(): Promise<GitHubWorkflowRun[]> {
   const token = process.env.PORTSIDE_GITHUB_TOKEN?.trim();
   if (!token) return [];
-  const url = new URL(`https://api.github.com/repos/${repository}/actions/workflows/${workflow}/runs`);
+  const url = new URL(
+    `https://api.github.com/repos/${repository}/actions/workflows/${workflow}/runs`,
+  );
   url.searchParams.set("branch", "main");
   url.searchParams.set("per_page", "20");
   const response = await fetch(url, {
@@ -63,17 +84,21 @@ async function fetchWorkflowRuns(): Promise<GitHubWorkflowRun[]> {
     signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) throw new Error(`github_actions_${response.status}`);
-  const payload = (await response.json()) as { workflow_runs?: GitHubWorkflowRun[] };
+  const payload = (await response.json()) as {
+    workflow_runs?: GitHubWorkflowRun[];
+  };
   return payload.workflow_runs ?? [];
 }
 
 async function reconcileWorkflowRuns(): Promise<void> {
   if (!process.env.PORTSIDE_GITHUB_TOKEN?.trim()) {
-    console.log(JSON.stringify({
-      level: "info",
-      event: "workflow_sync_disabled",
-      reason: "PORTSIDE_GITHUB_TOKEN_not_configured",
-    }));
+    console.log(
+      JSON.stringify({
+        level: "info",
+        event: "workflow_sync_disabled",
+        reason: "PORTSIDE_GITHUB_TOKEN_not_configured",
+      }),
+    );
     return;
   }
   const runs = await fetchWorkflowRuns();
@@ -109,13 +134,15 @@ async function reconcileWorkflowRuns(): Promise<void> {
       },
     });
   }
-  console.log(JSON.stringify({
-    level: "info",
-    event: "workflow_runs_reconciled",
-    repository,
-    workflow,
-    count: runs.length,
-  }));
+  console.log(
+    JSON.stringify({
+      level: "info",
+      event: "workflow_runs_reconciled",
+      repository,
+      workflow,
+      count: runs.length,
+    }),
+  );
 }
 
 function waitForShutdown(): Promise<void> {
@@ -133,24 +160,34 @@ function waitForShutdown(): Promise<void> {
 async function run(): Promise<void> {
   try {
     await reconcileStaleWork();
-    await reconcileWorkflowRuns().catch((error) => {
-      console.error(JSON.stringify({
-        level: "error",
-        event: "workflow_sync_failed",
-        error: error instanceof Error ? error.name : "workflow_sync_failed",
-      }));
+    await reconcileWorkflowRuns().catch((error: unknown) => {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          event: "workflow_sync_failed",
+          error: error instanceof Error ? error.name : "workflow_sync_failed",
+        }),
+      );
     });
     const poller = setInterval(() => {
-      reconcileStaleWork().catch((error) => console.error(JSON.stringify({
-        level: "error",
-        event: "sync_worker_reconcile_failed",
-        error: error instanceof Error ? error.name : "reconcile_failed",
-      })));
-      reconcileWorkflowRuns().catch((error) => console.error(JSON.stringify({
-        level: "error",
-        event: "workflow_sync_failed",
-        error: error instanceof Error ? error.name : "workflow_sync_failed",
-      })));
+      reconcileStaleWork().catch((error: unknown) => {
+        console.error(
+          JSON.stringify({
+            level: "error",
+            event: "sync_worker_reconcile_failed",
+            error: error instanceof Error ? error.name : "reconcile_failed",
+          }),
+        );
+      });
+      reconcileWorkflowRuns().catch((error: unknown) => {
+        console.error(
+          JSON.stringify({
+            level: "error",
+            event: "workflow_sync_failed",
+            error: error instanceof Error ? error.name : "workflow_sync_failed",
+          }),
+        );
+      });
     }, pollIntervalMs);
     await waitForShutdown();
     clearInterval(poller);
@@ -159,11 +196,13 @@ async function run(): Promise<void> {
   }
 }
 
-run().catch((error) => {
-  console.error(JSON.stringify({
-    level: "error",
-    event: "sync_worker_failed",
-    error: error instanceof Error ? error.name : "worker_failed",
-  }));
+run().catch((error: unknown) => {
+  console.error(
+    JSON.stringify({
+      level: "error",
+      event: "sync_worker_failed",
+      error: error instanceof Error ? error.name : "worker_failed",
+    }),
+  );
   process.exit(1);
 });

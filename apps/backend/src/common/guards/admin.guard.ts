@@ -20,8 +20,9 @@ export class AdminGuard implements CanActivate {
       scheme !== "Bearer" ||
       !token ||
       !safeEqualText(this.config.adminToken(), token)
-    )
+    ) {
       throw new UnauthorizedException();
+    }
     return true;
   }
 }

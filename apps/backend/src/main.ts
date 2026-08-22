@@ -21,7 +21,7 @@ async function bootstrap(): Promise<void> {
   await app.listen(config.port, "0.0.0.0");
 }
 
-bootstrap().catch((error) => {
+bootstrap().catch((error: unknown) => {
   console.error(
     JSON.stringify({
       level: "fatal",

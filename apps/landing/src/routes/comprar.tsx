@@ -98,7 +98,12 @@ function Comprar() {
               </p>
             )}
 
-            <form onSubmit={onSubmit} className="mt-7">
+            <form
+              onSubmit={(event) => {
+                void onSubmit(event);
+              }}
+              className="mt-7"
+            >
               <label htmlFor="email" className="text-sm font-medium">
                 E-mail para receber a licença
               </label>

@@ -13,7 +13,7 @@ export type OrderStatus =
  */
 export const getOrderStatus = createServerFn({ method: "POST" })
   .validator((data: unknown) => schema.parse(data))
-  .handler(async ({ data }): Promise<OrderStatus> => {
+  .handler(({ data }): OrderStatus => {
     void data;
     return {
       status: "pending",

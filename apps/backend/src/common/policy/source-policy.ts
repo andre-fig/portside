@@ -10,8 +10,9 @@ export function validateHTTPSHost(
   ) {
     throw new Error("source host is not allowlisted for HTTPS download");
   }
-  if (url.username || url.password)
+  if (url.username || url.password) {
     throw new Error("source URL may not contain credentials");
+  }
   return url;
 }
 

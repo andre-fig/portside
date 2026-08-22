@@ -47,15 +47,21 @@ if has_path '(^|/)scripts/.*\.sh$'; then
 fi
 
 if has_path '\.json$'; then
-    command -v jq >/dev/null 2>&1 || {
-        echo "jq is required to validate changed JSON files." >&2
-        exit 1
-    }
-    printf '%s\n' "$changed_files" | while IFS= read -r file; do
-        case "$file" in
-            *.json) [ -f "$file" ] && jq -e empty "$file" >/dev/null ;;
-        esac
-    done
+    if command -v jq >/dev/null 2>&1; then
+        printf '%s\n' "$changed_files" | while IFS= read -r file; do
+            case "$file" in
+                *.json) [ -f "$file" ] && jq -e . "$file" >/dev/null ;;
+            esac
+        done
+    else
+        printf '%s\n' "$changed_files" | while IFS= read -r file; do
+            case "$file" in
+                *.json)
+                    [ -f "$file" ] && node -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))' "$file"
+                    ;;
+            esac
+        done
+    fi
 fi
 
 if has_path '^apps/desktop/'; then
@@ -69,7 +75,11 @@ if has_path '^apps/backend/'; then
     }
     (
         cd apps/backend
-        npm run prisma:validate
+        if [ -n "${DATABASE_URL:-}" ]; then
+            npm run prisma:validate
+        else
+            DATABASE_URL='postgresql://postgres:postgres@localhost:5432/portside' npm run prisma:validate
+        fi
         npm run typecheck
         npm run lint
         npm test
@@ -78,15 +88,20 @@ if has_path '^apps/backend/'; then
 fi
 
 if has_path '^apps/landing/'; then
-    command -v bun >/dev/null 2>&1 || {
-        echo "bun is required for landing checks." >&2
-        exit 1
-    }
     [ -d apps/landing/node_modules ] || {
         echo "Landing dependencies are missing. Run: (cd apps/landing && bun install --frozen-lockfile)" >&2
         exit 1
     }
-    (cd apps/landing && bun run lint)
+    (
+        cd apps/landing
+        if command -v bun >/dev/null 2>&1; then
+            bun run lint
+            bun run typecheck
+        else
+            npm run lint
+            npm run typecheck
+        fi
+    )
 fi
 
 if has_path '^(apps/backend/|apps/desktop/|apps/runtime-host/|runtime/|vendor/|upstream/|scripts/build-runtime/|scripts/(build_release|create_dmg|generate_manifest|generate_appcast|notarize_release|package_app|publish_release|publish_runtime|register_runtime_release|sign_release|validate-production-policy|validate_release_bundle)\.sh$)'; then

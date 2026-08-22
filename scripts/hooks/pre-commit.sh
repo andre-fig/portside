@@ -17,11 +17,11 @@ printf '%s\n' "$changed_files" | while IFS= read -r file; do
             sh -n "$file"
             ;;
         *.json)
-            command -v jq >/dev/null 2>&1 || {
-                echo "jq is required to validate staged JSON: $file" >&2
-                exit 1
-            }
-            jq -e empty "$file" >/dev/null
+            if command -v jq >/dev/null 2>&1; then
+                jq -e . "$file" >/dev/null
+            else
+                node -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))' "$file"
+            fi
             ;;
     esac
 done

@@ -4,7 +4,14 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { ArtifactStatus, BuildStatus, Channel, Prisma, SourceSnapshotStatus, SyncStatus } from "@prisma/client";
+import {
+  ArtifactStatus,
+  BuildStatus,
+  Channel,
+  Prisma,
+  SourceSnapshotStatus,
+  SyncStatus,
+} from "@prisma/client";
 import { createHash, verify } from "node:crypto";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { AppConfig } from "../../core/app-config.js";
@@ -24,7 +31,7 @@ export class SyncService {
     private readonly config: AppConfig,
   ) {
     const s3 = config.s3;
-    if (s3.endpoint && s3.bucket && s3.accessKeyId && s3.secretAccessKey)
+    if (s3.endpoint && s3.bucket && s3.accessKeyId && s3.secretAccessKey) {
       this.s3 = new S3Client({
         endpoint: s3.endpoint,
         region: s3.region,
@@ -34,13 +41,14 @@ export class SyncService {
           secretAccessKey: s3.secretAccessKey,
         },
       });
+    }
     const secondary = config.secondaryS3;
     if (
       secondary.endpoint &&
       secondary.bucket &&
       secondary.accessKeyId &&
       secondary.secretAccessKey
-    )
+    ) {
       this.secondaryS3 = new S3Client({
         endpoint: secondary.endpoint,
         region: secondary.region,
@@ -50,28 +58,38 @@ export class SyncService {
           secretAccessKey: secondary.secretAccessKey,
         },
       });
+    }
   }
 
   async sync(
     request: SyncRequest,
   ): Promise<{ id: string; status: ArtifactStatus; sha256: string }> {
-    if (!/^[a-f0-9]{64}$/i.test(request.expectedSHA256))
+    if (!/^[a-f0-9]{64}$/i.test(request.expectedSHA256)) {
       throw new BadRequestException("expectedSHA256 must be a SHA-256 digest");
+    }
     const sourceSnapshotId = request.sourceSnapshotId;
-    if (request.channel !== Channel.production)
-      throw new BadRequestException("artifacts must use the production channel");
-    if (!request.sourceSnapshotId || !request.buildId)
+    if (request.channel !== Channel.production) {
+      throw new BadRequestException(
+        "artifacts must use the production channel",
+      );
+    }
+    if (!request.sourceSnapshotId || !request.buildId) {
       throw new BadRequestException(
         "production artifacts require a verified source snapshot and build",
       );
+    }
     const [snapshot, build] = await Promise.all([
-      this.prisma.sourceSnapshot.findUnique({ where: { id: request.sourceSnapshotId } }),
+      this.prisma.sourceSnapshot.findUnique({
+        where: { id: request.sourceSnapshotId },
+      }),
       this.prisma.runtimeBuild.findUnique({ where: { id: request.buildId } }),
     ]);
-    if (!snapshot || snapshot.status !== SourceSnapshotStatus.verified)
+    if (!snapshot || snapshot.status !== SourceSnapshotStatus.verified) {
       throw new BadRequestException("source snapshot is not verified");
-    if (!build || build.status !== BuildStatus.succeeded)
+    }
+    if (!build || build.status !== BuildStatus.succeeded) {
       throw new BadRequestException("runtime build is not successful");
+    }
     const existingRun = await this.prisma.syncExecution.findUnique({
       where: { idempotencyKey: request.idempotencyKey },
     });
@@ -83,12 +101,13 @@ export class SyncService {
           channel: request.channel,
         },
       });
-      if (existing)
+      if (existing) {
         return {
           id: existing.id,
           status: existing.status,
           sha256: existing.sha256,
         };
+      }
       throw new ConflictException("idempotency record has no artifact");
     }
     const run =
@@ -103,28 +122,36 @@ export class SyncService {
         },
       }));
     try {
-      if (!this.s3 || !this.config.s3.bucket)
+      if (!this.s3 || !this.config.s3.bucket) {
         throw new ServiceUnavailableException(
           "private artifact storage is not configured",
         );
-      const source = validateHTTPSHost(request.sourceURL, this.config.artifactHosts);
+      }
+      const source = validateHTTPSHost(
+        request.sourceURL,
+        this.config.artifactHosts,
+      );
       const response = await fetch(source, {
         redirect: "manual",
         signal: AbortSignal.timeout(120_000),
       });
-      if (!response.ok || (response.status >= 300 && response.status < 400))
+      if (!response.ok || (response.status >= 300 && response.status < 400)) {
         throw new BadRequestException(
           "upstream response is not a direct successful download",
         );
+      }
       const contentLength = Number(response.headers.get("content-length") ?? 0);
-      if (contentLength > this.config.maxDownloadBytes)
+      if (contentLength > this.config.maxDownloadBytes) {
         throw new BadRequestException("download exceeds configured size limit");
+      }
       const data = Buffer.from(await response.arrayBuffer());
-      if (data.length > this.config.maxDownloadBytes)
+      if (data.length > this.config.maxDownloadBytes) {
         throw new BadRequestException("download exceeds configured size limit");
+      }
       const sha256 = createHash("sha256").update(data).digest("hex");
-      if (sha256.toLowerCase() !== request.expectedSHA256.toLowerCase())
+      if (sha256.toLowerCase() !== request.expectedSHA256.toLowerCase()) {
         throw new BadRequestException("checksum mismatch");
+      }
       if (request.signature) {
         const key = request.signatureKeyId
           ? this.config.upstreamSigningKeys[request.signatureKeyId]
@@ -132,10 +159,11 @@ export class SyncService {
         if (
           !key ||
           !verify(null, data, key, Buffer.from(request.signature, "base64"))
-        )
+        ) {
           throw new BadRequestException(
             "upstream signature verification failed",
           );
+        }
       }
       const storageKey = validateStorageKey(
         `artifacts/${request.channel}/${request.component}/${request.version}/${request.fileName}`,
@@ -231,7 +259,12 @@ export class SyncService {
           verified: 1,
           sourceSnapshotId,
           sourceSnapshotChecksum: sourceSnapshotId
-            ? (await this.prisma.sourceSnapshot.findUnique({ where: { id: sourceSnapshotId }, select: { snapshotChecksum: true } }))?.snapshotChecksum
+            ? (
+                await this.prisma.sourceSnapshot.findUnique({
+                  where: { id: sourceSnapshotId },
+                  select: { snapshotChecksum: true },
+                })
+              )?.snapshotChecksum
             : undefined,
           finishedAt: new Date(),
         },
