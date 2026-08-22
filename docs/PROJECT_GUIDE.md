@@ -95,7 +95,7 @@ provado necessário para construir o runtime.
 | `Portside.app` | `apps/desktop` + dependências SwiftPM | `build_release.sh` compila os produtos e monta o bundle |
 | `Portside-<versão>.dmg` | `Portside.app` assinado | `notarize_release.sh` cria o DMG, envia ao `notarytool`, staple e valida |
 | `PortsideWrapper-<versão>.tar.xz` | `runtime/wrapper-template` + `apps/runtime-host` | `build-runtime/build-wrapper.sh` |
-| `PortsideWineEngine-<versão>.tar.xz` | `vendor/wine` + toolchain fixado | `build-runtime/build-wine-engine.sh` |
+| `PortsideWineEngine-<versão>.tar.xz` | `vendor/wine` + toolchain fixado | `build-runtime/build-engine.sh` / `build-wine-engine.sh` |
 | `PortsideWinetricks-<versão>.tar.xz` | `vendor/winetricks` | `build-runtime/build-winetricks.sh` |
 | `runtime-manifest.json` | checksums e proveniência da build | `generate_manifest.sh` assina o manifesto Ed25519 |
 | `appcast.xml` | ZIP notarizado do app | `generate_appcast.sh` usa o `generate_appcast` do Sparkle |
@@ -147,13 +147,23 @@ nos buckets do Portside.
 ### Build e validação do runtime
 
 - `scripts/build-runtime/build.sh`: orquestra auditoria de fontes, wrapper,
-  engine Wine e winetricks; calcula checksums, cria proveniência/SBOM, monta o
-  manifesto unsigned e valida tudo.
+  engine validado e winetricks; calcula checksums, cria proveniência/SBOM,
+  monta o manifesto unsigned e valida tudo.
 - `scripts/build-runtime/build-wrapper.sh`: compila `PortsideRuntimeHost`,
   materializa `PortsideBaseline.app` e empacota o template.
 - `scripts/build-runtime/build-wine-engine.sh`: configura e compila o Wine
   arm64/macOS e os binários PE necessários diretamente de `vendor/wine`, com a
   toolchain fixada; não baixa um engine pronto.
+- `scripts/build-runtime/build-engine.sh`: cria o engine persistente, metadata,
+  checksum e proveniência a partir do Wine vendorizado.
+- `scripts/build-runtime/fetch-engine.sh`: baixa do bucket Portside o engine
+  aprovado pelo commit/checksum do lockfile e valida seu conteúdo antes da
+  montagem.
+- `scripts/build-runtime/resolve-engine.sh`: calcula o identificador imutável
+  e a storage key do engine a partir de `vendor/wine/VERSION` e
+  `upstream/lock.json`.
+- `scripts/publish_engine.sh`: replica o engine validado e sua metadata nos
+  dois buckets de production.
 - `scripts/build-runtime/build-winetricks.sh`: empacota o script e os verbos
   do snapshot local de winetricks.
 - `scripts/build-runtime/create-archive.sh`: cria arquivos tar.xz com IDs,

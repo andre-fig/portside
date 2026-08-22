@@ -19,7 +19,7 @@ command -v aws >/dev/null 2>&1 || { echo "AWS CLI is required for production pub
 
 manifest="$BUILD_DIR/runtime-manifest.json"
 [ -s "$manifest" ] || { echo "signed runtime-manifest.json is missing" >&2; exit 1; }
-for file in "$BUILD_DIR/PortsideWrapper-${PORTSIDE_RUNTIME_VERSION:?}.tar.xz" "$BUILD_DIR/PortsideWineEngine-$PORTSIDE_RUNTIME_VERSION.tar.xz" "$BUILD_DIR/PortsideWinetricks-$PORTSIDE_RUNTIME_VERSION.tar.xz" "$BUILD_DIR/provenance.json" "$BUILD_DIR/sbom.spdx.json"; do
+for file in "$BUILD_DIR/PortsideWrapper-${PORTSIDE_RUNTIME_VERSION:?}.tar.xz" "$BUILD_DIR/PortsideWineEngine-$PORTSIDE_RUNTIME_VERSION.tar.xz" "$BUILD_DIR/PortsideWinetricks-$PORTSIDE_RUNTIME_VERSION.tar.xz" "$BUILD_DIR/engine-input.json" "$BUILD_DIR/provenance.json" "$BUILD_DIR/sbom.spdx.json"; do
     [ -s "$file" ] || { echo "production artifact is missing: $file" >&2; exit 1; }
 done
 
@@ -49,6 +49,7 @@ publish "$BUILD_DIR/PortsideWrapper-$PORTSIDE_RUNTIME_VERSION.tar.xz" "${prefix}
 publish "$BUILD_DIR/PortsideWineEngine-$PORTSIDE_RUNTIME_VERSION.tar.xz" "${prefix}PortsideWineEngine-$PORTSIDE_RUNTIME_VERSION.tar.xz" "application/x-xz"
 publish "$BUILD_DIR/PortsideWinetricks-$PORTSIDE_RUNTIME_VERSION.tar.xz" "${prefix}PortsideWinetricks-$PORTSIDE_RUNTIME_VERSION.tar.xz" "application/x-xz"
 publish "$BUILD_DIR/runtime-manifest.json" "${prefix}runtime-manifest.json" "application/json"
+publish "$BUILD_DIR/engine-input.json" "${prefix}engine-input.json" "application/json"
 publish "$BUILD_DIR/provenance.json" "${prefix}provenance.json" "application/json"
 publish "$BUILD_DIR/sbom.spdx.json" "${prefix}sbom.spdx.json" "application/json"
 echo "Published the signed Portside runtime build to production storage."

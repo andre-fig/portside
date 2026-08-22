@@ -19,11 +19,13 @@ open build/Portside.app
 
 The `Build Desktop` GitHub Actions workflow runs after a successful `CI` run
 on `main` (or manually) and publishes the unsigned validation build as
-`Portside.app.zip`, `Portside.dmg`, its checksum file and debug symbols. After
-a source/runtime merge, `Build Portside Runtime` builds, signs and publishes
-the runtime to the protected validation channel; Wine is restored from a
-snapshot/toolchain cache when possible. Commercial releases reuse the last
-successful validated runtime instead of rebuilding it.
+`Portside.app.zip`, `Portside.dmg`, its checksum file and debug symbols. A
+Wine/source change first runs `Build Portside Engine`, which publishes an
+immutable engine with metadata and checksums. `Build Portside Runtime` then
+assembles wrapper and winetricks around that approved engine, signs and
+publishes the production runtime. Wrapper-only changes do not recompile Wine.
+Commercial releases reuse the last successful validated runtime instead of
+rebuilding it.
 
 ## Monorepo layout
 

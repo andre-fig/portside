@@ -31,11 +31,13 @@ PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX=https://api.example.invalid/v1/runtime/arti
 ./scripts/build-runtime/build.sh
 ```
 
-The command builds the Portside wrapper/template, the native runtime host, a
-Wine engine from `vendor/wine`, and a winetricks source archive. The pinned
-Wrapper and Engines snapshots are retained as provenance only because they do
-not contain executable build source. The workflow never substitutes a
-downloaded compiled runtime when the source build fails.
+The command assembles the Portside wrapper/template, the native runtime host,
+the validated Wine engine selected from `upstream/lock.json`, and a winetricks
+source archive. The engine itself is produced independently by
+`scripts/build-runtime/build-engine.sh` and persisted in the Portside buckets.
+The pinned Wrapper and Engines snapshots are retained as provenance only
+because they do not contain executable build source. The workflow never
+substitutes a downloaded upstream runtime when the source build fails.
 
 The exact host dependencies are recorded in `upstream/dependencies.json`.
 `docs/RUNTIME_BUILD.md` records the current validation result, architecture,

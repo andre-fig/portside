@@ -194,8 +194,10 @@ upstreams autorizados
         ↓ sync-upstreams.yml
 vendor/ + upstream/lock.json
         ↓ PR revisada e merge em main
-CI + build-runtime.yml
-        ↓ build, checksums, proveniência, SBOM e manifesto assinado
+Build Portside Engine (somente quando Wine/toolchain muda)
+        ↓ engine imutável + metadata/checksum nos buckets Portside
+Build Portside Runtime (wrapper/winetricks + engine aprovado)
+        ↓ checksums, proveniência, SBOM e manifesto assinado
 Railway object storage: production primário + réplica
         ↓ validação limpa/GUI e promoção explícita
 API Portside → manifesto compatível
@@ -226,7 +228,8 @@ Não confunda uma atualização do app com uma atualização do runtime.
 | `ci.yml` / CI | push e PR para `main` | política de produção, Prisma e build do backend | corrigir/revisar e mergear |
 | `build-desktop.yml` | CI concluído com sucesso na `main` ou dispatch | ZIP, DMG e dSYM unsigned de validação | abrir/inspecionar localmente se necessário |
 | `build-landing.yml` | mudanças na landing, PR, push ou dispatch | `.output` e artifact de build | deploy público do provedor |
-| `build-runtime.yml` | mudanças em fontes/runtime na `main` ou dispatch | runtime próprio, manifesto assinado, evidência e publicação production | validar GUI e registrar |
+| `build-engine.yml` | mudança real em Wine, patches, toolchain ou dispatch | engine Wine persistente, metadata, checksum e proveniência nos dois buckets | validar a build e a compatibilidade |
+| `build-runtime.yml` | mudança real em wrapper/winetricks/montagem ou após engine aprovado | runtime próprio, manifesto assinado, evidência e publicação production | validar GUI e registrar |
 | `sync-upstreams.yml` | diariamente às 03:17 UTC ou dispatch | PR com novos snapshots/lock/checksums | revisar licença/diff e mergear |
 | `validate-clean-install.yml` | dispatch | instalação limpa e logs de aceitação em Mac self-hosted | sessão gráfica, login e janela real |
 | `deploy-railway.yml` / Verify Railway | CI concluído na `main` | healthcheck da API | investigar se `/health` falhar |
@@ -274,25 +277,34 @@ e geração de artifacts necessária no GitHub.
 
 ### Runtime
 
-`Build Portside Runtime` começa com um preflight em Ubuntu que audita os
-snapshots, lockfiles, scripts e política de produção. Somente depois disso o
-job `macos-15` instala a toolchain registrada, constrói wrapper/Wine/winetricks,
-materializa a chave privada apenas no runner, assina e valida o manifesto e
-publica nos dois buckets. O Wine usa cache por snapshot, arquitetura, flags e
-toolchain; um cache compatível evita o `configure`/`make` completo. Execuções
-concorrentes do runtime são canceladas para não manter dois macOS pagos
-trabalhando no mesmo branch. A versão automática é `0.1.<run_number>`; o
-dispatch permite informar versão e prefixo HTTPS.
+`Build Portside Engine` começa com um preflight em Ubuntu. Somente quando há
+mudança real em `vendor/wine`, patches, toolchain ou no commit Wine do lockfile
+o job `macos-15` compila o engine, gera metadata/checksum/proveniência e publica
+uma versão imutável nos dois buckets. O cache por snapshot, arquitetura, flags
+e toolchain acelera recompilações, mas o bucket é a fonte durável usada por
+montagens futuras.
+
+`Build Portside Runtime` também começa com preflight em Ubuntu. O job macOS
+compila apenas wrapper e winetricks; `fetch-engine.sh` baixa o engine aprovado
+correspondente ao commit do lockfile e verifica metadata, SHA-256 e tamanho.
+Quando uma mudança de Wine é mergeada, o workflow aguarda a conclusão bem-
+sucedida de `Build Portside Engine` e então monta o runtime automaticamente.
+Execuções concorrentes são canceladas para não manter dois macOS pagos
+trabalhando no mesmo branch. A versão automática continua sendo
+`0.1.<run_number>`.
 
 O artifact de runtime contém arquivos necessários para auditoria, incluindo:
 
 - archives do wrapper, engine e winetricks;
+- `engine-input.json`, identificando o engine persistente consumido;
 - `runtime-manifest.json` assinado;
 - `provenance.json` com commit Portside, commits fonte, build ID e toolchain;
 - SBOM, checksums e evidência de validação.
 
-O workflow não baixa um engine pronto do Sikarugir nem publica a Steam. A build
-é rejeitada se não conseguir usar as fontes registradas.
+O workflow de engine compila somente `vendor/wine`; o workflow de runtime não
+recompila Wine e falha se não encontrar o engine persistente correspondente.
+Nenhum workflow publica a Steam: ela continua sendo obtida da Valve durante a
+instalação do usuário.
 
 ### Como consultar a versão atual
 

@@ -15,7 +15,7 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for the Portside runtime
 mkdir -p "$BUILD_DIR"
 "$ROOT_DIR/scripts/build-runtime/source-audit.sh"
 "$ROOT_DIR/scripts/build-runtime/build-wrapper.sh"
-"$ROOT_DIR/scripts/build-runtime/build-wine-engine.sh"
+"$ROOT_DIR/scripts/build-runtime/fetch-engine.sh"
 "$ROOT_DIR/scripts/build-runtime/build-winetricks.sh"
 "$ROOT_DIR/scripts/build-runtime/validate-clean-layout.sh"
 
@@ -27,8 +27,14 @@ for artifact in "$wrapper_file" "$engine_file" "$winetricks_file"; do
     case "$artifact" in *Sikarugir*|*Template*) echo "legacy artifact name produced: $artifact" >&2; exit 1 ;; esac
 done
 
-wine_commit="$(jq -r '.repositories[] | select(.name == "wine") | .commit' "$ROOT_DIR/upstream/lock.json")"
-wine_checksum="$(jq -r '.repositories[] | select(.name == "wine") | .snapshotChecksum' "$ROOT_DIR/upstream/lock.json")"
+engine_input="$BUILD_DIR/engine-input.json"
+[ -s "$engine_input" ] || { echo "validated engine input metadata is missing" >&2; exit 1; }
+wine_commit="$(jq -r '.source.commit' "$engine_input")"
+wine_checksum="$(jq -r '.source.snapshotChecksum' "$engine_input")"
+engine_version="$(jq -r '.engineVersion' "$engine_input")"
+engine_build_id="$(jq -r '.build.id' "$engine_input")"
+engine_storage_key="$(jq -r '.artifact.storageKey' "$engine_input")"
+engine_source_archive_checksum="$(jq -r '.artifact.sha256' "$engine_input")"
 winetricks_commit="$(jq -r '.repositories[] | select(.name == "winetricks") | .commit' "$ROOT_DIR/upstream/lock.json")"
 winetricks_checksum="$(jq -r '.repositories[] | select(.name == "winetricks") | .snapshotChecksum' "$ROOT_DIR/upstream/lock.json")"
 wrapper_source_root="$BUILD_DIR/source-checksums"
@@ -57,6 +63,7 @@ cat > "$BUILD_DIR/provenance.json" <<EOF
   "sourcePolicy": "checked-in vendor sources only; no compiled upstream input",
   "sourceCommits": {"portside": "$PORTSIDE_COMMIT", "wine": "$wine_commit", "winetricks": "$winetricks_commit"},
   "sourceSnapshotChecksums": {"portsideWrapper": "$wrapper_source_checksum", "wine": "$wine_checksum", "winetricks": "$winetricks_checksum"},
+  "engine": {"version": "$engine_version", "buildId": "$engine_build_id", "storageKey": "$engine_storage_key", "sourceArchiveSha256": "$engine_source_archive_checksum", "runtimeArchiveSha256": "$engine_checksum"},
   "artifacts": ["$wrapper_file", "$engine_file", "$winetricks_file"]
 }
 EOF
@@ -79,18 +86,19 @@ jq -n \
   --arg winetricksURL "$winetricks_url" --arg winetricksSHA "$winetricks_artifact_checksum" --arg winetricksSize "$winetricks_size" \
   --arg wineCommit "$wine_commit" --arg wineChecksum "$wine_checksum" \
   --arg winetricksCommit "$winetricks_commit" --arg winetricksChecksum "$winetricks_checksum" --arg wrapperSourceChecksum "$wrapper_source_checksum" \
+  --arg engineVersion "$engine_version" \
   '{schemaVersion: 2, channel: $channel, manifestVersion: $version, minimumPortsideVersion: "0.1.0", publishedAt: $publishedAt, buildStatus: $channel, builtBy: "Portside", buildId: $buildId, portsideCommit: $portsideCommit, components: [
     {id: "wrapper", component: "wrapper", version: $version, downloadURL: $wrapperURL, sha256: $wrapperSHA, size: ($wrapperSize|tonumber), critical: true, rollbackVersion: null, builtBy: "Portside", sourcePath: "runtime/wrapper-template + apps/runtime-host", sourceCommit: $portsideCommit, sourceSnapshotChecksum: $wrapperSourceChecksum, license: "Portside runtime host and template"},
-    {id: "engine", component: "engine", version: $version, downloadURL: $engineURL, sha256: $engineSHA, size: ($engineSize|tonumber), critical: true, rollbackVersion: null, builtBy: "Portside", sourcePath: "vendor/wine", sourceCommit: $wineCommit, sourceSnapshotChecksum: $wineChecksum, license: "LGPL-2.1-or-later"},
+    {id: "engine", component: "engine", version: $engineVersion, downloadURL: $engineURL, sha256: $engineSHA, size: ($engineSize|tonumber), critical: true, rollbackVersion: null, builtBy: "Portside", sourcePath: "vendor/wine", sourceCommit: $wineCommit, sourceSnapshotChecksum: $wineChecksum, license: "LGPL-2.1-or-later"},
     {id: "winetricks", component: "winetricks", version: $version, downloadURL: $winetricksURL, sha256: $winetricksSHA, size: ($winetricksSize|tonumber), critical: true, rollbackVersion: null, builtBy: "Portside", sourcePath: "vendor/winetricks", sourceCommit: $winetricksCommit, sourceSnapshotChecksum: $winetricksChecksum, license: "LGPL-2.1-or-later"}
   ], rendererDefaults: {renderer: "wineD3D", D3DMETAL: 0, DXMT: 0, DXVK: 0, WINEMSYNC: 1, WINEESYNC: 1}, compatibilityRules: [], critical: true, rollbackVersion: null, signatureKeyId: "", signature: null}' \
   > "$BUILD_DIR/runtime-manifest-unsigned.json"
 
 jq -n \
-  --arg version "$VERSION" --arg wineCommit "$wine_commit" --arg wineChecksum "$wine_checksum" --arg winetricksCommit "$winetricks_commit" --arg winetricksChecksum "$winetricks_checksum" --arg wrapperSHA "$wrapper_checksum" --arg engineSHA "$engine_checksum" --arg winetricksSHA "$winetricks_artifact_checksum" \
+  --arg version "$VERSION" --arg engineVersion "$engine_version" --arg wineCommit "$wine_commit" --arg wineChecksum "$wine_checksum" --arg winetricksCommit "$winetricks_commit" --arg winetricksChecksum "$winetricks_checksum" --arg wrapperSHA "$wrapper_checksum" --arg engineSHA "$engine_checksum" --arg winetricksSHA "$winetricks_artifact_checksum" \
   '{spdxVersion: "SPDX-2.3", dataLicense: "CC0-1.0", SPDXID: "SPDXRef-DOCUMENT", name: ("Portside runtime " + $version), documentNamespace: ("https://portside.invalid/sbom/" + $version), packages: [
     {SPDXID: "SPDXRef-wrapper", name: "Portside wrapper", versionInfo: $version, downloadLocation: "NOASSERTION", licenseConcluded: "NOASSERTION", supplier: "Portside", checksums: [{algorithm: "SHA256", checksumValue: $wrapperSHA}]},
-    {SPDXID: "SPDXRef-wine", name: "Wine", versionInfo: $version, downloadLocation: "NOASSERTION", licenseConcluded: "LGPL-2.1-or-later", supplier: "Portside", checksums: [{algorithm: "SHA256", checksumValue: $engineSHA}], externalRefs: [{referenceType: "source-commit", referenceLocator: $wineCommit}, {referenceType: "source-snapshot-sha256", referenceLocator: $wineChecksum}]},
+    {SPDXID: "SPDXRef-wine", name: "Wine", versionInfo: $engineVersion, downloadLocation: "NOASSERTION", licenseConcluded: "LGPL-2.1-or-later", supplier: "Portside", checksums: [{algorithm: "SHA256", checksumValue: $engineSHA}], externalRefs: [{referenceType: "source-commit", referenceLocator: $wineCommit}, {referenceType: "source-snapshot-sha256", referenceLocator: $wineChecksum}]},
     {SPDXID: "SPDXRef-winetricks", name: "Winetricks", versionInfo: $version, downloadLocation: "NOASSERTION", licenseConcluded: "LGPL-2.1-or-later", supplier: "Portside", checksums: [{algorithm: "SHA256", checksumValue: $winetricksSHA}], externalRefs: [{referenceType: "source-commit", referenceLocator: $winetricksCommit}, {referenceType: "source-snapshot-sha256", referenceLocator: $winetricksChecksum}]}
   ]}' > "$BUILD_DIR/sbom.spdx.json"
 

@@ -125,11 +125,14 @@ antes do push.
   DMG e dSYM de validação; não é release comercial e não é notarizado.
 - `Build Landing`: gera o build da landing em PR, push relevante ou execução
   manual e armazena `.output` como artifact.
-- `Build Portside Runtime`: em mudanças de fontes/runtime na `main` ou
-  manualmente, valida fontes e scripts primeiro em Ubuntu; depois compila o
-  wrapper, Wine e winetricks a partir de `vendor` em macOS, assina o manifesto
-  e publica nos buckets configurados. O Wine usa cache por snapshot e
-  toolchain, e execuções concorrentes são canceladas.
+- `Build Portside Engine`: em mudança real de Wine, patches, toolchain ou
+  commit Wine do lockfile, valida fontes em Ubuntu e compila o engine em
+  macOS. Publica o componente imutável, metadata, checksum e proveniência nos
+  dois buckets de `production`.
+- `Build Portside Runtime`: em mudanças de wrapper, host, winetricks ou
+  montagem, valida fontes em Ubuntu e monta o runtime em macOS usando o engine
+  persistente correspondente ao lockfile. Após um engine novo passar, ele é
+  acionado automaticamente. Não recompila Wine.
 - `Sync Upstreams`: roda diariamente às 03:17 UTC ou manualmente, atualiza
   snapshots autorizados e abre PR. Nunca faz merge, promoção ou publicação.
 - `Validate Clean Portside Runtime`: execução manual em Mac self-hosted com
