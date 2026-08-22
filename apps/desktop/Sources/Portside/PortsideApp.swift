@@ -562,9 +562,11 @@ struct RootView: View {
                             Spacer()
                             Text(model.message).font(.title3.weight(.medium))
                             if model.isRunningFromAppTranslocation {
-                                Button("Open Applications") {
-                                    NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications", isDirectory: true))
-                                }.buttonStyle(.borderedProminent)
+                                Text("In the installer window, drag Portside to Applications, then open it from there.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .frame(maxWidth: 330)
                             } else {
                                 Button("Try Again") { model.repair() }.buttonStyle(.borderedProminent).disabled(model.isWorking)
                             }
