@@ -62,6 +62,14 @@ final class PortsideModel: ObservableObject {
     private var hasValidLicense = false
     private var startedAutomatically = false
 
+    var appVersion: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.0.0"
+    }
+
+    var isRunningFromAppTranslocation: Bool {
+        Bundle.main.bundleURL.path.contains("/AppTranslocation/")
+    }
+
     init(diagnostics: DiagnosticsService = NoopDiagnosticsService()) {
         self.diagnostics = diagnostics
         let backendConfiguration = PortsideBackendConfiguration.fromBundle()
@@ -86,6 +94,13 @@ final class PortsideModel: ObservableObject {
     func startAutomatically() {
         guard !startedAutomatically else { return }
         startedAutomatically = true
+        if isRunningFromAppTranslocation {
+            setupStep = .failed
+            message = "Move Portside to Applications to continue."
+            errorMessage = "Portside must be installed in Applications before it can update or prepare Steam."
+            logger.write("setup_blocked reason=app_translocation version=\(appVersion)", level: .warning)
+            return
+        }
         diagnostics.breadcrumb("setup_started", context: context(stage: "startup"))
         if requiresCommercialLicense {
             prepareLicense()
@@ -521,6 +536,7 @@ struct RootView: View {
                         VStack(alignment: .leading) {
                             Text("Portside").font(.headline)
                             Text("Your private gaming environment").font(.subheadline).foregroundStyle(.secondary)
+                            Text("Version \(model.appVersion)").font(.caption).foregroundStyle(.tertiary)
                         }
                         Spacer()
                     }
@@ -545,7 +561,13 @@ struct RootView: View {
                         VStack(spacing: 16) {
                             Spacer()
                             Text(model.message).font(.title3.weight(.medium))
-                            Button("Try Again") { model.repair() }.buttonStyle(.borderedProminent).disabled(model.isWorking)
+                            if model.isRunningFromAppTranslocation {
+                                Button("Open Applications") {
+                                    NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications", isDirectory: true))
+                                }.buttonStyle(.borderedProminent)
+                            } else {
+                                Button("Try Again") { model.repair() }.buttonStyle(.borderedProminent).disabled(model.isWorking)
+                            }
                             Spacer()
                         }
                     } else {
@@ -563,6 +585,7 @@ struct RootView: View {
                     PortsideLogoView(size: 54)
                     Text("Portside").font(.title2.weight(.semibold))
                     Text("Steam is ready to play").font(.subheadline).foregroundStyle(.secondary)
+                    Text("Version \(model.appVersion)").font(.caption).foregroundStyle(.tertiary)
                     Button("Open Steam") { model.launchSteam() }
                         .buttonStyle(.borderedProminent)
                 }

@@ -4,10 +4,10 @@ import PortsideCore
 
 @MainActor
 private final class PortsideSparkleDelegate: NSObject, SPUUpdaterDelegate {
-    var didFinishUpdateCycle: (() -> Void)?
+    var didFinishUpdateCycle: ((Error?) -> Void)?
 
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
-        didFinishUpdateCycle?()
+        didFinishUpdateCycle?(error)
     }
 }
 
@@ -18,6 +18,7 @@ private final class PortsideSparkleDelegate: NSObject, SPUUpdaterDelegate {
 final class PortsideUpdateCoordinator: NSObject {
     private let controller: SPUStandardUpdaterController?
     private let delegate: PortsideSparkleDelegate?
+    private let logger = PortsideLogger(logFileName: "portside-update.log")
     private var initialCheckFinished = false
     private var initialCheckWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -33,14 +34,15 @@ final class PortsideUpdateCoordinator: NSObject {
             controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: delegate, userDriverDelegate: nil)
         }
         super.init()
-        delegate?.didFinishUpdateCycle = { [weak self] in self?.finishInitialCheck() }
+        delegate?.didFinishUpdateCycle = { [weak self] error in self?.finishInitialCheck(error: error) }
         // Sparkle schedules regular checks from Info.plist. This one launch-time
         // check is intentionally limited to the moment immediately after the
         // updater starts, as required by Sparkle's programmatic setup guidance.
         if let updater = controller?.updater, updater.automaticallyChecksForUpdates {
             updater.checkForUpdatesInBackground()
         } else {
-            finishInitialCheck()
+            logger.write("sparkle_update_check_skipped reason=automatic_checks_disabled")
+            finishInitialCheck(error: nil)
         }
     }
 
@@ -55,9 +57,14 @@ final class PortsideUpdateCoordinator: NSObject {
         controller?.checkForUpdates(nil)
     }
 
-    private func finishInitialCheck() {
+    private func finishInitialCheck(error: Error?) {
         guard !initialCheckFinished else { return }
         initialCheckFinished = true
+        if let error {
+            logger.write("sparkle_update_check_finished error=\(PortsideLogger.sanitize(error.localizedDescription))", level: .warning)
+        } else {
+            logger.write("sparkle_update_check_finished")
+        }
         let waiters = initialCheckWaiters
         initialCheckWaiters.removeAll()
         waiters.forEach { $0.resume() }
