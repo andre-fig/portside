@@ -223,9 +223,9 @@ Não confunda uma atualização do app com uma atualização do runtime.
 
 | Workflow | Quando roda | Resultado | O que ainda é manual |
 | --- | --- | --- | --- |
-| `ci.yml` / CI | push e PR para `main` | política de produção, Swift, Prisma, typecheck, lint, testes e build backend | corrigir/revisar e mergear |
+| `ci.yml` / CI | push e PR para `main` | política de produção, Prisma e build do backend | corrigir/revisar e mergear |
 | `build-desktop.yml` | CI concluído com sucesso na `main` ou dispatch | ZIP, DMG e dSYM unsigned de validação | abrir/inspecionar localmente se necessário |
-| `build-landing.yml` | mudanças na landing, PR, push ou dispatch | lint, `.output` e artifact de build | deploy público do provedor |
+| `build-landing.yml` | mudanças na landing, PR, push ou dispatch | `.output` e artifact de build | deploy público do provedor |
 | `build-runtime.yml` | mudanças em fontes/runtime na `main` ou dispatch | runtime próprio, manifesto assinado, evidência e publicação production | validar GUI e registrar |
 | `sync-upstreams.yml` | diariamente às 03:17 UTC ou dispatch | PR com novos snapshots/lock/checksums | revisar licença/diff e mergear |
 | `validate-clean-install.yml` | dispatch | instalação limpa e logs de aceitação em Mac self-hosted | sessão gráfica, login e janela real |
@@ -236,8 +236,10 @@ Não confunda uma atualização do app com uma atualização do runtime.
 
 Um push/PR em `main` começa por `CI`. O job de produção impede que URLs diretas
 do Sikarugir ou artefatos compilados indevidos sejam usados pelo caminho de
-produção. Swift roda em `macos-15`; backend roda em Ubuntu com Node 22 e um
-`DATABASE_URL` local de validação.
+produção. O backend roda em Ubuntu com Node 22, valida o schema Prisma e faz o
+build de produção usando um `DATABASE_URL` local de validação. Lint, typecheck
+e testes ficam no `pre-push` para evitar repetir a mesma bateria no GitHub a
+cada push.
 
 Depois de CI bem-sucedido em `main`, `Build Desktop Validation` compila o app
 testado, cria `Portside-validation.app.zip`, `Portside-validation.dmg`, dSYM e
@@ -266,8 +268,9 @@ Comandos locais:
 (cd apps/landing && bun run lint && bun run typecheck)
 ```
 
-O `pre-push` executa esses checks quando a área correspondente foi alterada,
-enquanto o workflow `CI` e `Build Landing` repetem a validação no GitHub.
+O `pre-push` executa esses checks quando a área correspondente foi alterada.
+Os workflows mantêm apenas validação de workflow, política, build de produção
+e geração de artifacts necessária no GitHub.
 
 ### Runtime
 

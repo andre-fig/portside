@@ -110,17 +110,20 @@ Depois de clonar, habilite os hooks versionados uma vez:
 
 O `pre-commit` executa somente verificações rápidas dos arquivos staged:
 diff whitespace, sintaxe shell, JSON e `actionlint` quando instalado. O
-`pre-push` identifica as áreas alteradas e executa apenas os checks locais
-correspondentes: Swift, backend, landing, política de produção e validações
-de scripts. Os hooks aceleram o feedback, mas o CI continua obrigatório e
-autoritativo, pois hooks podem ser ignorados ou não estar instalados.
+`pre-push` identifica as áreas alteradas e executa lint, typecheck, testes e
+build locais correspondentes: Swift, backend, landing, política de produção e
+validações de scripts. O CI mantém somente validações de integração, política
+de produção e builds necessários para a infraestrutura do GitHub. Hooks podem
+ser ignorados em uma emergência, mas a rotina normal deve passar por eles
+antes do push.
 
 ## Workflows e autoridade de cada um
 
-- `CI`: valida política de fontes, Swift e backend em push/PR para `main`.
+- `CI`: valida política de fontes, schema Prisma e build do backend em push/PR
+  para `main`.
 - `Build Desktop Validation`: depois de um CI bem-sucedido, cria app, ZIP,
   DMG e dSYM de validação; não é release comercial e não é notarizado.
-- `Build Landing`: faz lint/build da landing em PR, push relevante ou execução
+- `Build Landing`: gera o build da landing em PR, push relevante ou execução
   manual e armazena `.output` como artifact.
 - `Build Portside Runtime`: em mudanças de fontes/runtime na `main` ou
   manualmente, compila wrapper, Wine e winetricks a partir de `vendor`, assina

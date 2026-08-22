@@ -23,17 +23,8 @@ jobs:
       - name: Reject direct upstream runtime dependencies
         run: ./scripts/validate-production-policy.sh
 
-  swift:
-    name: Swift tests
-    runs-on: macos-15
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-      - name: Run Swift tests
-        run: swift test --package-path apps/desktop
-
   backend:
-    name: Backend tests and build
+    name: Backend schema and build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -53,11 +44,5 @@ jobs:
         run: npm ci
       - name: Validate Prisma schema
         run: npm run prisma:validate
-      - name: Type-check backend
-        run: npm run typecheck
-      - name: Lint backend
-        run: npm run lint
-      - name: Run backend tests
-        run: npm test
       - name: Build backend
         run: npm run build

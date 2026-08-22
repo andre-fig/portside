@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   validate:
-    name: Lint and build landing page
+    name: Build landing page
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -33,12 +33,6 @@ jobs:
 
       - name: Install locked dependencies
         run: bun install --frozen-lockfile
-
-      - name: Lint landing page
-        run: bun run lint
-
-      - name: Type-check landing page
-        run: bun run typecheck
 
       - name: Build landing page
         run: bun run build
