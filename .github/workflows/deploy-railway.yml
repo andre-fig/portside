@@ -36,8 +36,8 @@ jobs:
         run: |
           set -eu
           files="$(gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/commits/${TARGET_SHA}/files" \
-            --jq '.[].filename')"
+            "repos/${GITHUB_REPOSITORY}/commits/${TARGET_SHA}" \
+            --jq '.files[].filename')"
           if printf '%s\n' "$files" | grep -Eq \
             '^(apps/backend/|Dockerfile$|railway\.(json|toml)$|nixpacks\.toml$|\.github/workflows/deploy-railway\.yml$)'; then
             echo "Backend or deploy files changed; verifying Railway."
