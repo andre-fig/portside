@@ -197,7 +197,11 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
 
         let destination = PortsidePaths.baselineWrapper
         if fileManager.fileExists(atPath: destination.path) {
-            let rollback = PortsidePaths.runtime.appendingPathComponent("rollback-(Int(Date().timeIntervalSince1970))", isDirectory: true)
+            // Setup can be retried several times within the same second. A
+            // timestamp-only rollback name makes the second attempt fail with
+            // "an item with the same name already exists" before the atomic
+            // install can run.
+            let rollback = PortsidePaths.runtime.appendingPathComponent("rollback-\(UUID().uuidString)", isDirectory: true)
             try fileManager.createDirectory(at: rollback.deletingLastPathComponent(), withIntermediateDirectories: true)
             try fileManager.moveItem(at: destination, to: rollback)
         }

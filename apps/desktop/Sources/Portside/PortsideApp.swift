@@ -399,6 +399,7 @@ final class PortsideModel: ObservableObject {
     }
 
     private func errorCode(_ error: Error) -> String {
+        if isFileConflict(error) { return "runtime_installation_conflict" }
         switch error {
         case PortsideError.unsupportedArchitecture: return "unsupported_architecture"
         case PortsideError.unsupportedOperatingSystem: return "unsupported_macos"
@@ -440,6 +441,9 @@ final class PortsideModel: ObservableObject {
     }
 
     private func userFacingSetupFailure(_ error: Error) -> String {
+        if isFileConflict(error) {
+            return "Portside found an incomplete previous setup and is ready to try again."
+        }
         switch error {
         case PortsideError.unsupportedArchitecture:
             return "Portside works on Macs with Apple silicon."
@@ -470,6 +474,11 @@ final class PortsideModel: ObservableObject {
         default:
             return "Something interrupted the Portside setup. Please try again."
         }
+    }
+
+    private func isFileConflict(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == NSCocoaErrorDomain && nsError.code == CocoaError.Code.fileWriteFileExists.rawValue
     }
 
     private func persist() {
