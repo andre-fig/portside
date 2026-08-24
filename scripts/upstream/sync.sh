@@ -5,6 +5,7 @@ ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 LOCK_FILE="$ROOT_DIR/upstream/lock.json"
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/portside-upstream-sync.XXXXXX")"
 changed=0
+license_change_count=0
 
 cleanup() {
     rm -rf "$TEMP_ROOT"
@@ -73,6 +74,7 @@ while IFS=$(printf '\t') read -r name repository local_path; do
     license_changed=0
     if [ -n "$locked_license_checksum" ] && [ "$locked_license_checksum" != "$license_checksum" ]; then
         license_changed=1
+        license_change_count=$((license_change_count + 1))
         echo "LICENSE_CHANGE_DETECTED $name: $locked_license_checksum -> $license_checksum" >&2
     fi
     commit_date=$(git -C "$work" show -s --format=%cI HEAD)
@@ -88,9 +90,8 @@ if [ "$changed" -eq 0 ]; then
     exit 0
 fi
 
-if jq -e '[.repositories[] | select(.licenseChangeDetected == true)] | length > 0' "$TEMP_ROOT/lock.json" >/dev/null; then
-    echo "A license/notice change was detected. The source snapshot is not replaced; review and update the lockfile explicitly." >&2
-    exit 2
+if [ "$license_change_count" -gt 0 ]; then
+    echo "A license/notice change was detected. The updated snapshot will be proposed in the pull request with licenseChangeDetected=true; review it before merging." >&2
 fi
 
 jq -r '.repositories[] | select(.sync == true) | [.name, .localPath] | @tsv' "$TEMP_ROOT/lock.json" > "$TEMP_ROOT/updated.tsv"

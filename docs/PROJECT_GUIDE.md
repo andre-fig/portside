@@ -187,7 +187,9 @@ nos buckets do Portside.
 - `scripts/upstream/sync.sh`: clona snapshots autorizados de forma rasa,
   usa `--filter=blob:none` para Wine, resolve submódulos/LFS quando declarados,
   compara commits, valida o snapshot, detecta mudança de licença e atualiza
-  `vendor/` e `upstream/lock.json`. A revisão e o merge continuam manuais.
+  `vendor/` e `upstream/lock.json`. Mudanças de licença ficam marcadas com
+  `licenseChangeDetected` e são destacadas na PR automática; a revisão e o
+  merge continuam manuais.
 - `scripts/upstream/validate_snapshot.sh`: rejeita `.git`, caches, diretórios
   gerados e symlinks que escapem do snapshot.
 - `scripts/upstream/snapshot_checksum.sh`: calcula checksum estável de paths,

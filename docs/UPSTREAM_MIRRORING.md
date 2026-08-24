@@ -10,8 +10,10 @@ checksum.
 `scripts/upstream/sync.sh`, which stages a shallow clone in a temporary
 directory, resolves the remote commit, checks submodules/LFS, validates the
 source tree, preserves notices and opens a pull request. The workflow never
-merges or publishes automatically. If an upstream disappears, the workflow
-fails before replacing the existing snapshot.
+merges or publishes automatically. If a license or notice checksum changes,
+the new snapshot is included in the PR and its lock entry is marked with
+`licenseChangeDetected: true`; review that diff before merging. If an upstream
+disappears, the workflow fails before replacing the existing snapshot.
 
 The Creator application remains provenance-only and the upstream launcher is
 not copied into Portside. The repository does not mirror Valve's Steam

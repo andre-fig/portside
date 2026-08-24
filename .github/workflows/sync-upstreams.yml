@@ -28,6 +28,12 @@ jobs:
             echo "No upstream changes to propose."
             exit 0
           fi
+          license_changes="$(jq -r '[.repositories[] | select(.licenseChangeDetected == true) | .name] | join(", ")' upstream/lock.json)"
+          if [ -n "$license_changes" ]; then
+            license_review_note="License or notice changes detected for: $license_changes. Review the vendor diff, notices and licensing obligations before merging."
+          else
+            license_review_note="No license or notice changes were detected by the inventory checksum."
+          fi
           sync_branch="automation/upstream-sync-$(date -u +%Y%m%d%H%M%S)"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -39,4 +45,11 @@ jobs:
             --base main \
             --head "$sync_branch" \
             --title "Sync upstream source snapshots" \
-            --body "Automated source-only synchronization. Review commit provenance, licenses, exclusions, checksums and validation results before merging. This workflow never merges or publishes runtime artifacts."
+            --body "$(cat <<EOF
+          Automated source-only synchronization.
+
+          $license_review_note
+
+          Review commit provenance, licenses, exclusions, checksums and validation results before merging. This workflow never merges or publishes runtime artifacts.
+          EOF
+          )"

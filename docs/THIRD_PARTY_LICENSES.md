@@ -15,6 +15,6 @@ ship required notices with Portside.
 | Steam for Windows | Valve official distribution | Valve terms; not bundled by Portside |
 
 Run a source/license inventory for every new version before promotion. The
-sync workflow records a separate license/notice checksum and blocks replacement
-when it changes until it is reviewed. Do not mark an artifact production merely
-because its checksum is correct.
+sync workflow records a separate license/notice checksum and marks the update
+for review in the generated pull request when it changes. Do not merge that PR
+or mark an artifact production merely because its checksum is correct.

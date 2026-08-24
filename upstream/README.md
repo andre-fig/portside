@@ -42,5 +42,8 @@ checksum and updates `upstream/lock.json`. The GitHub workflow opens a pull
 request for changes; it never merges or publishes them automatically.
 
 The source snapshots retain their upstream licenses, copyright notices and
-build scripts. See `RUNTIME_LICENSES.md` and `THIRD_PARTY_NOTICES.md` before
-promoting any generated runtime artifact.
+build scripts. A license or notice checksum change is recorded as
+`licenseChangeDetected: true` in the generated lockfile and called out in the
+automated pull request; the snapshot is still staged automatically, but the PR
+must be reviewed before merge. See `RUNTIME_LICENSES.md` and
+`THIRD_PARTY_NOTICES.md` before promoting any generated runtime artifact.
