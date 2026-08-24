@@ -223,10 +223,12 @@ public struct NoopDiagnosticsService: DiagnosticsService {
 public final class EnvironmentStore: @unchecked Sendable {
     private let fileManager: FileManager
     private let stateURL: URL
+    private let discoversExistingInstallation: Bool
     public private(set) var didRecoverCorruptState = false
 
     public init(fileManager: FileManager = .default, stateURL: URL? = nil) {
         self.fileManager = fileManager
+        self.discoversExistingInstallation = stateURL == nil
         self.stateURL = stateURL ?? PortsidePaths.root.appendingPathComponent("environment.json")
     }
 
@@ -258,6 +260,11 @@ public final class EnvironmentStore: @unchecked Sendable {
         try? fileManager.moveItem(at: stateURL, to: backupURL)
 
         var recovered = EnvironmentState()
+        guard discoversExistingInstallation else {
+            try? save(recovered)
+            return recovered
+        }
+
         let wrapper = PortsidePaths.baselineWrapper
         let prefix = PortsidePaths.steamPrefix
         let steamExecutable = PortsideSteamFlow.steamExecutable(prefix: prefix)

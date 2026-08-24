@@ -25,7 +25,8 @@ final class PortsideUpdateCoordinator: NSObject {
     override init() {
         let feed = (Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let publicKey = (Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !PortsideAppUpdateConfiguration.isConfigured(feed: feed, publicKey: publicKey) {
+        let isInstallerBundle = PortsideInstallLocation.isInstallerBundle(Bundle.main.bundleURL)
+        if isInstallerBundle || !PortsideAppUpdateConfiguration.isConfigured(feed: feed, publicKey: publicKey) {
             delegate = nil
             controller = nil
         } else {
@@ -34,6 +35,11 @@ final class PortsideUpdateCoordinator: NSObject {
             controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: delegate, userDriverDelegate: nil)
         }
         super.init()
+        if isInstallerBundle {
+            logger.write("sparkle_update_check_skipped reason=installer_bundle")
+            finishInitialCheck(error: nil)
+            return
+        }
         delegate?.didFinishUpdateCycle = { [weak self] error in self?.finishInitialCheck(error: error) }
         // Sparkle schedules regular checks from Info.plist. This one launch-time
         // check is intentionally limited to the moment immediately after the

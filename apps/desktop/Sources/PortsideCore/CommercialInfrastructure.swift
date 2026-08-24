@@ -65,6 +65,19 @@ public enum PortsideAppUpdateConfiguration {
     }
 }
 
+/// Identifies the temporary locations macOS uses while an app is opened
+/// directly from a mounted installer or from a quarantined download.
+///
+/// Sparkle must not update an app bundle in either location. The app is still
+/// allowed to complete its first-time setup there; update checks resume when
+/// the user opens the installed copy.
+public enum PortsideInstallLocation {
+    public static func isInstallerBundle(_ bundleURL: URL) -> Bool {
+        let path = bundleURL.standardizedFileURL.path
+        return path.hasPrefix("/Volumes/") || path.contains("/AppTranslocation/")
+    }
+}
+
 public struct PortsideRuntimeComponent: Codable, Equatable, Sendable {
     public let id: String
     public let component: String

@@ -179,6 +179,13 @@ final class PortsideCoreTests: XCTestCase {
         XCTAssertTrue(PortsideAppUpdateConfiguration.isConfigured(feed: "https://updates.portside.test/v1/appcast.xml", publicKey: "public"))
     }
 
+    func testInstallerBundleLocationsDeferSparkleUpdates() {
+        XCTAssertTrue(PortsideInstallLocation.isInstallerBundle(URL(fileURLWithPath: "/Volumes/Portside/Portside.app")))
+        XCTAssertTrue(PortsideInstallLocation.isInstallerBundle(URL(fileURLWithPath: "/private/var/folders/xx/AppTranslocation/abc/d/Portside.app")))
+        XCTAssertFalse(PortsideInstallLocation.isInstallerBundle(URL(fileURLWithPath: "/Applications/Portside.app")))
+        XCTAssertFalse(PortsideInstallLocation.isInstallerBundle(URL(fileURLWithPath: "/Users/andre/Applications/Portside.app")))
+    }
+
     func testCompatibilityManifestStoresGunZAppIDWithoutAccountData() throws {
         let entry = GameCompatibilityEntry(appID: "3139440", executable: "GunZ.exe", architecture: "x86", graphicsAPI: "DirectX 9", preferredRenderer: .wineD3D)
         let manifest = GameCompatibilityManifest(entries: [entry])
