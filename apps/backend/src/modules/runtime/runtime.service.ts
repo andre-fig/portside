@@ -438,6 +438,10 @@ export class RuntimeService {
         "manifest release is not eligible for this channel",
       );
     }
+    // The manifest component version may identify the upstream engine build,
+    // while the registered artifact version identifies the Portside archive.
+    // The signed URL, component, checksum and size are the release binding;
+    // the filename is validated when the artifact is registered.
     if (
       components.some((component) => {
         if (!component || typeof component !== "object") return true;
@@ -446,7 +450,6 @@ export class RuntimeService {
         const artifact = release.artifacts.find(
           (registered) =>
             registered.component === candidate.component &&
-            registered.version === candidate.version &&
             registered.sha256.toLowerCase() ===
               String(candidate.sha256).toLowerCase() &&
             registered.fileName ===
