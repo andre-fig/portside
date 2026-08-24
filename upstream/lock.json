@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-19",
+  "generatedAt": "2026-08-24",
   "sourcePolicy": {
     "noGitSubmodulesInVendor": true,
     "noCompiledReleasesInVendor": true,
@@ -38,7 +38,9 @@
       "lastValidatedBuild": "not required for the current source build path",
       "sync": false,
       "role": "provenance-only; not copied into Portside",
-      "excludedPaths": ["entire repository; interface tool not proven necessary for runtime build"]
+      "excludedPaths": [
+        "entire repository; interface tool not proven necessary for runtime build"
+      ]
     },
     {
       "name": "Wrapper",
@@ -94,18 +96,21 @@
     {
       "name": "wine",
       "repository": "https://github.com/Sikarugir-App/wine",
-      "commit": "2df1ee28039cf84776eb1421ed90bd154cebb65f",
-      "commitDate": "2026-08-08T11:48:00Z",
+      "commit": "8da89f8493b21ebfbe344a54dbef0cde23c7ea59",
+      "commitDate": "2026-08-21T22:25:07+02:00",
       "license": "LGPL-2.1-or-later plus included component notices",
       "localPath": "vendor/wine",
       "submodules": [],
       "gitLFSUsed": false,
-      "snapshotChecksum": "81c4f83e51358f5da235c8113cf423b22d98a104b88f34d19ec8d0a69e2438fd",
-      "licenseSnapshotChecksum": "fe662fd027edfdccc95b261a79ea398c00e9610f6b9fdd7b88055a37dd5d85cdb",
+      "snapshotChecksum": "a6997edf5a80fca1e6507dde8f344c2c5f997182b50c9c1140d25be09195386e",
+      "licenseSnapshotChecksum": "fe662d027edfdccc95b261a79ea398c00e9610f6b9fdd7b88055a37dd5d85cdb",
       "licenseChangeDetected": false,
-      "lastValidatedBuild": "source snapshot imported; engine-equivalence build not yet validated",
+      "lastValidatedBuild": null,
       "sync": true,
-      "cloneOptions": ["--depth 1", "--filter=blob:none"],
+      "cloneOptions": [
+        "--depth 1",
+        "--filter=blob:none"
+      ],
       "excludedPaths": []
     },
     {
