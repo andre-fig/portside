@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-24",
+  "generatedAt": "2026-08-29",
   "sourcePolicy": {
     "noGitSubmodulesInVendor": true,
     "noCompiledReleasesInVendor": true,
@@ -116,13 +116,13 @@
     {
       "name": "winetricks",
       "repository": "https://github.com/Sikarugir-App/winetricks",
-      "commit": "5a59ea07513b24093bd90fad943ecf9543cf05bc",
-      "commitDate": "2026-08-07T08:36:44Z",
+      "commit": "f3890f670867b5ffbc3938726db45c0f7d16c8ba",
+      "commitDate": "2026-08-27T02:47:57-05:00",
       "license": "LGPL-2.1-or-later",
       "localPath": "vendor/winetricks",
       "submodules": [],
       "gitLFSUsed": false,
-      "snapshotChecksum": "b7c335e2d0b2188df69eb955f4e91a4ccb7af020611b94461bb6010e16e13e76",
+      "snapshotChecksum": "c5820793e003dd0efcdaa163efd77927c9390693405c9bf1a0a330a1e0563aba",
       "licenseSnapshotChecksum": "649e7c2989ab4fd10be6c23e4d90bbc19d9254a13454e1329b5e200226a1add2",
       "licenseChangeDetected": false,
       "lastValidatedBuild": null,
