@@ -297,9 +297,9 @@ bun run build
 ```
 
 O workflow `build-landing.yml` executa esses checks e guarda `.output` como
-artefato de CI. O deploy público ainda exige um provedor de hospedagem e uma
-configuração de ambiente; a origem do código já é o monorepo e não o antigo
-repositório separado.
+artefato de CI. O serviço `landing` do Railway usa esse workflow como gate e
+faz autodeploy somente quando arquivos de `apps/landing/**` mudam; a origem do
+código é o monorepo e não o antigo repositório separado.
 
 Variáveis de servidor esperadas pelo fluxo comercial:
 
@@ -318,7 +318,8 @@ verificado na Stripe e disponibilidade real do dispositivo/navegador.
 ## Workflows
 
 - `ci.yml`: política de fontes, testes Swift e checks do backend.
-- `build-landing.yml`: lint, build e artifact da landing.
+- `build-landing.yml`: lint, build, artifact e gate do deploy automático da
+  landing no Railway.
 - `build-desktop.yml`: bundle e DMG de validação não comercial após CI.
 - `build-runtime.yml`: build próprio do runtime no macOS fixado. Pushes na
   `main` e `workflow_dispatch` compilam, assinam e publicam automaticamente

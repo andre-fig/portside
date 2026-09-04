@@ -12,12 +12,22 @@ maintain these services in production:
    credentials come from Railway, not from the repository.
 4. Sync worker using `apps/backend/railway.worker.json`.
 5. Upstream sync Cron Job using `apps/backend/railway.cron.json`.
+6. Landing page using `apps/landing`.
 
-Set the service root for each application service to `apps/backend` and use
+Set the service root for each backend application service to `apps/backend` and use
 `Dockerfile` as the Dockerfile path. Set `DATABASE_URL` from the PostgreSQL
 service. The API runs `npx prisma migrate deploy` as its Railway pre-deploy
 command, inside the service network where the private PostgreSQL hostname is
 available.
+
+The landing service uses `/apps/landing` as its root directory, runs
+`bun install --frozen-lockfile && bun run build`, starts with
+`node .output/server/index.mjs` and exposes `/` as its healthcheck. Its Railway
+watch pattern is `/apps/landing/**`; the API, worker and cron use
+`/apps/backend/**`. This prevents a landing-only commit from rebuilding the
+backend services. Railway's GitHub source integration deploys the landing
+service from `main` after the `Build Landing (Railway deploy gate)` workflow
+passes.
 
 ```sh
 railway link --project <production-project-id> --environment production
@@ -86,7 +96,12 @@ message. A new key pair requires updating the Railway public key before the
 next signed manifest build.
 
 Production is connected to `andre-fig/portside` on the `main` branch. Railway
-deploys the three application services automatically after each push; the
-`Verify Railway` GitHub workflow waits for the public API healthcheck after CI.
+deploys the four application services automatically after each push, using
+service-specific watch patterns; a landing-only push deploys only the landing
+service. The `Build Landing (Railway deploy gate)` workflow validates the
+landing before Railway deploys it. The `Verify Railway` GitHub workflow waits
+for the public API healthcheck after CI.
 The production API is available at
 `https://api-production-6d06.up.railway.app`.
+The production landing is available at
+`https://landing-production-5f03.up.railway.app`.

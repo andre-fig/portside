@@ -1,4 +1,4 @@
-name: Build Landing
+name: Build Landing (Railway deploy gate)
 
 on:
   push:
@@ -33,6 +33,12 @@ jobs:
 
       - name: Install locked dependencies
         run: bun install --frozen-lockfile
+
+      - name: Lint landing page
+        run: bun run lint
+
+      - name: Typecheck landing page
+        run: bun run typecheck
 
       - name: Build landing page
         run: bun run build
