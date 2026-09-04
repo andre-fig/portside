@@ -48,4 +48,44 @@ describe("RuntimeService", () => {
     }
   });
 
+  it("repairs source snapshot links when a build registration is retried", async () => {
+    const update = vi.fn().mockResolvedValue({ id: "build-1" });
+    const prisma = {
+      sourceSnapshot: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: "snapshot-1", status: "verified" },
+          { id: "snapshot-2", status: "verified" },
+        ]),
+      },
+      runtimeBuild: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "build-1",
+          version: "0.1.17",
+          portsideCommit: "a".repeat(40),
+          status: "succeeded",
+        }),
+        update,
+      },
+    };
+    const service = new RuntimeService(prisma as never);
+
+    await service.registerBuild({
+      buildId: "build-1",
+      version: "0.1.17",
+      portsideCommit: "a".repeat(40),
+      status: "succeeded",
+      environment: { channel: "production" },
+      sourceSnapshotIds: ["snapshot-1", "snapshot-2"],
+    });
+
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "build-1" },
+      data: {
+        sourceSnapshots: {
+          connect: [{ id: "snapshot-1" }, { id: "snapshot-2" }],
+        },
+      },
+    });
+  });
+
 });

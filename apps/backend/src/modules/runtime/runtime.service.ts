@@ -572,7 +572,17 @@ export class RuntimeService {
           "build identity conflicts with the existing record",
         );
       }
-      return existingBuild;
+      // A previous registration may have created the build before the
+      // source-snapshot relation was persisted. Reconnect the verified
+      // snapshots so artifact registration remains safely retryable.
+      return prisma.runtimeBuild.update({
+        where: { id: existingBuild.id },
+        data: {
+          sourceSnapshots: {
+            connect: snapshots.map(({ id }) => ({ id })),
+          },
+        },
+      });
     }
     return prisma.runtimeBuild.create({
       data: {
