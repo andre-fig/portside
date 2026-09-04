@@ -82,7 +82,7 @@ describe("ArtifactService runtime downloads", () => {
 
   it("signs the currently promoted production app archive for latest downloads", async () => {
     vi.mocked(getSignedUrl).mockResolvedValueOnce(
-      "https://storage.example/app/production/Portside-1.0.0.zip?signature=redacted",
+      "https://storage.example/app/production/Portside-1.0.0.dmg?signature=redacted",
     );
     const findFirst = vi.fn().mockResolvedValue({
       url: "https://api.portside.test/app/production/Portside-1.0.0.zip",
@@ -112,7 +112,7 @@ describe("ArtifactService runtime downloads", () => {
     const command = vi.mocked(getSignedUrl).mock.calls.at(-1)?.[1] as { input: Record<string, string> };
     expect(command.input).toMatchObject({
       Bucket: "portside-artifacts",
-      Key: "app/production/Portside-1.0.0.zip",
+      Key: "app/production/Portside-1.0.0.dmg",
     });
   });
 });

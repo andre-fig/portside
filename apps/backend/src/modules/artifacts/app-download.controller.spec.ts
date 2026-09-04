@@ -20,7 +20,7 @@ describe("AppDownloadController", () => {
 
   it("redirects the latest production app to its signed URL", async () => {
     const signedLatestAppDownload = vi.fn().mockResolvedValue({
-      url: "https://private-storage.example/app/production/Portside-0.1.22.zip?signature=redacted",
+      url: "https://private-storage.example/app/production/Portside-0.1.22.dmg?signature=redacted",
       expiresIn: 300,
     });
     const response = { setHeader: vi.fn(), redirect: vi.fn() };

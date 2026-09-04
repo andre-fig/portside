@@ -82,8 +82,9 @@ the approved private bucket and keeps prior versions for rollback.
 The Railway API and private object storage are configured for production runtime,
 and the production runtime workflow produces signed evidence in that bucket.
 For a direct download of the currently promoted app release, use
-`https://<api-host>/app/production/latest`; Sparkle continues to use the
-versioned archive URLs from the appcast.
+`https://<api-host>/app/production/latest`; this route returns the current
+`.dmg`, while Sparkle continues to use the versioned `.zip` URLs from the
+appcast.
 This does not claim a customer release: Developer ID signature, notarization,
 real-Mac GUI acceptance and an end-to-end desktop download still require their
 external result to be produced and recorded. The current bucket is private;

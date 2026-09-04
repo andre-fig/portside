@@ -156,20 +156,23 @@ export class ArtifactService {
       throw new ServiceUnavailableException("app release is not available");
     }
 
-    let fileName: string | undefined;
+    let registeredFileName: string | undefined;
     try {
-      fileName = new URL(release.url).pathname.split("/").pop();
+      registeredFileName = new URL(release.url).pathname.split("/").pop();
     } catch {
       throw new ServiceUnavailableException(
         "app release archive is not available",
       );
     }
-    if (!fileName || !appReleaseFilePattern.test(fileName)) {
+    const match = registeredFileName
+      ? appReleaseFilePattern.exec(registeredFileName)
+      : undefined;
+    if (!match) {
       throw new ServiceUnavailableException(
         "app release archive is not available",
       );
     }
-    return this.signedAppDownload(channel, fileName);
+    return this.signedAppDownload(channel, `Portside-${match[1]}.dmg`);
   }
 
   async production(component: string, channel: Channel): Promise<unknown> {
