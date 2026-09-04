@@ -32,3 +32,4 @@ PortsideRuntime/
 
 # Local editor preferences; shared launch configurations remain versioned
 .vscode/settings.json
+.vscode/launch.json
