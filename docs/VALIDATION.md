@@ -95,7 +95,7 @@ screenshots or full user paths.
 | Wine engine from vendored source | local source build, archive and clean-layout validation | SIM |
 | Winetricks from vendored source | local archive and clean-layout validation | SIM |
 | Three artifacts with checksums/provenance/SBOM | local unsigned manifest validation | SIM |
-| Signed production manifest and both buckets | requires CI signing/storage secrets and backend registration | BLOQUEADO |
+| Signed production manifest and private bucket | requires CI signing/storage secrets and backend registration | BLOQUEADO |
 | Production manifest and rollback publication | requires protected backend registration/storage secrets | BLOQUEADO |
 | Clean prefix and official Valve Steam verb | script is ready; no acceptance run is claimed here | PENDENTE |
 | Login window, field interaction and Steam persistence | requires the operator on a real GUI session | BLOQUEADO |

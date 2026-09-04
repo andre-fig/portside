@@ -25,7 +25,6 @@ import type { SyncRequest } from "./dtos/sync-request.dto.js";
 @Injectable()
 export class SyncService {
   private readonly s3?: S3Client;
-  private readonly secondaryS3?: S3Client;
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: AppConfig,
@@ -39,23 +38,6 @@ export class SyncService {
         credentials: {
           accessKeyId: s3.accessKeyId,
           secretAccessKey: s3.secretAccessKey,
-        },
-      });
-    }
-    const secondary = config.secondaryS3;
-    if (
-      secondary.endpoint &&
-      secondary.bucket &&
-      secondary.accessKeyId &&
-      secondary.secretAccessKey
-    ) {
-      this.secondaryS3 = new S3Client({
-        endpoint: secondary.endpoint,
-        region: secondary.region,
-        forcePathStyle: secondary.forcePathStyle,
-        credentials: {
-          accessKeyId: secondary.accessKeyId,
-          secretAccessKey: secondary.secretAccessKey,
         },
       });
     }
@@ -176,35 +158,6 @@ export class SyncService {
           ContentLength: data.length,
         }),
       );
-      if (this.secondaryS3 && this.config.secondaryS3.bucket) {
-        try {
-          await this.secondaryS3.send(
-            new PutObjectCommand({
-              Bucket: this.config.secondaryS3.bucket,
-              Key: storageKey,
-              Body: data,
-              ContentLength: data.length,
-            }),
-          );
-        } catch (error) {
-          console.warn(
-            JSON.stringify({
-              level: "warn",
-              event: "secondary_backup_pending",
-              storageKey,
-              error: error instanceof Error ? error.name : "backup_failed",
-            }),
-          );
-        }
-      } else {
-        console.warn(
-          JSON.stringify({
-            level: "warn",
-            event: "secondary_backup_pending",
-            reason: "secondary_storage_not_configured",
-          }),
-        );
-      }
       const artifact = await this.prisma.artifact.upsert({
         where: {
           component_version_channel: {

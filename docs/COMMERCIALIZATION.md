@@ -64,7 +64,6 @@ credential.
 
 ```sh
 PORTSIDE_VERSION=1.0.0 PORTSIDE_PUBLIC_BUCKET=<approved-bucket> \
-PORTSIDE_SECONDARY_PUBLIC_BUCKET=<approved-secondary-bucket> \
 PORTSIDE_UPDATE_CHANNEL=production PORTSIDE_CONFIRM_PRODUCTION=YES ./scripts/publish_release.sh
 
 curl --fail --request POST \
@@ -78,13 +77,13 @@ For runtime assets, use the source/build/release endpoints documented in
 real Mac, then register the production release and publish its signed manifest
 with `POST /v1/admin/manifests/publish`. Production publication also requires
 `PORTSIDE_CONFIRM_PRODUCTION=YES`; the publishing script writes each object to
-both approved buckets and keeps prior versions for rollback.
+the approved private bucket and keeps prior versions for rollback.
 
-The Railway API and dual object storage are configured for production runtime,
-and the production runtime workflow produces signed evidence in both buckets.
+The Railway API and private object storage are configured for production runtime,
+and the production runtime workflow produces signed evidence in that bucket.
 This does not claim a customer release: Developer ID signature, notarization,
 real-Mac GUI acceptance and an end-to-end desktop download still require their
-external result to be produced and recorded. The current buckets are private;
+external result to be produced and recorded. The current bucket is private;
 the backend exposes the short-lived signed redirect used by production runtime
 manifests, but the API manifest still needs to be published and validated end
 to end before rollout.

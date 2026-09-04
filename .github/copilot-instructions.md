@@ -39,7 +39,7 @@ O runtime tem dois fluxos independentes:
 
 1. `Build Portside Engine` compila `vendor/wine` no macOS somente quando Wine,
    patches, toolchain ou o commit Wine do lockfile mudam. Publica nos dois
-   buckets privados um engine imutável com commit, snapshot checksum, SHA-256,
+   bucket privado um engine imutável com commit, snapshot checksum, SHA-256,
    tamanho, build ID e proveniência.
 2. `Build Portside Runtime` compila wrapper e winetricks, baixa o engine
    aprovado correspondente ao lockfile e verifica metadata, SHA-256, tamanho e

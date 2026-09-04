@@ -114,7 +114,7 @@ build_payload="$(jq -n \
     --argjson sourceSnapshotIds "$source_snapshot_ids" \
     --slurpfile provenance "$provenance" \
     --slurpfile sbom "$sbom" \
-    '{buildId:$buildId,version:$version,portsideCommit:$portsideCommit,workflowRunId:$workflowRunId,workflowURL:$workflowURL,status:"succeeded",environment:{runner:"macos-15",channel:"production",workflow:"Build Portside Runtime"},toolchain:{sourcePolicy:"vendor-only",runtimePublication:"dual-bucket"},provenance:$provenance[0],sbom:$sbom[0],testResult:{sourceBuild:"passed",manifest:"passed",dualBucketReplication:"passed",cleanInstall:"not_verified"},sourceSnapshotIds:$sourceSnapshotIds}')"
+    '{buildId:$buildId,version:$version,portsideCommit:$portsideCommit,workflowRunId:$workflowRunId,workflowURL:$workflowURL,status:"succeeded",environment:{runner:"macos-15",channel:"production",workflow:"Build Portside Runtime"},toolchain:{sourcePolicy:"vendor-only",runtimePublication:"single-bucket"},provenance:$provenance[0],sbom:$sbom[0],testResult:{sourceBuild:"passed",manifest:"passed",storagePublication:"passed",cleanInstall:"not_verified"},sourceSnapshotIds:$sourceSnapshotIds}')"
 api_post "/v1/admin/builds/register" "$build_payload" "$build_output"
 build_id="$(json_id "$build_output")"
 

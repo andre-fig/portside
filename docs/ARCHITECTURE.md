@@ -10,7 +10,7 @@ Portside.app (macOS)
 API Portside (NestJS/Railway) ───── PostgreSQL/Prisma
         │ URLs temporárias para objetos privados
         ▼
-Buckets Portside primário + réplica
+Bucket Portside privado
 
 Fontes versionados em vendor/ e upstream/
         │
@@ -117,7 +117,7 @@ sincronização abre uma PR; não publica automaticamente uma release.
 
 `Build Portside Engine` é acionado por mudança real no Wine, patches, toolchain
 ou commit Wine do lockfile. Em Ubuntu ele valida as entradas; em `macos-15`
-ele compila o Wine e publica nos dois buckets:
+ele compila o Wine e publica no bucket privado:
 
 ```text
 runtime/engines/validated/<engine-version>/
@@ -159,8 +159,8 @@ sbom.spdx.json
 ```
 
 O manifesto assinado contém versão, componente, URL da API, SHA-256, tamanho,
-fonte e renderer padrão. A publicação replica os objetos nos buckets primário
-e secundário. Versões anteriores permanecem disponíveis para rollback.
+fonte e renderer padrão. A publicação grava os objetos no bucket privado
+Portside. Versões anteriores permanecem disponíveis para rollback.
 
 ## App, runtime e atualização
 
@@ -215,7 +215,7 @@ para Wine, Swift, empacotamento, codesign e notarização.
 | upstream indisponível | Mantém snapshots existentes; sincronização falha sem apagar fontes |
 | engine não publicado | Montagem falha claramente, sem fallback externo |
 | checksum/manifesto inválido | Artefato é rejeitado e runtime ativo permanece intacto |
-| bucket primário indisponível | Publicação exige réplica; cliente usa a API e o estado local verificado |
+| bucket indisponível | Publicação falha claramente; cliente usa a API e o estado local verificado |
 | API offline | Cliente usa manifesto/runtime local válido |
 | Steam não cria janela | Instalação não é considerada sucesso; logs e diagnóstico registram o estágio |
 | update interrompido | Diretório temporário é descartado e rollback preserva a versão anterior |

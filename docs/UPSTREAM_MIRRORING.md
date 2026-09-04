@@ -36,7 +36,7 @@ PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX=https://api.example.invalid/v1/runtime/arti
 The command assembles the Portside wrapper/template, the native runtime host,
 the validated Wine engine selected from `upstream/lock.json`, and a winetricks
 source archive. The engine itself is produced independently by
-`scripts/build-runtime/build-engine.sh` and persisted in the Portside buckets.
+`scripts/build-runtime/build-engine.sh` and persisted in the private Portside bucket.
 The pinned Wrapper and Engines snapshots are retained as provenance only
 because they do not contain executable build source. The workflow never
 substitutes a downloaded upstream runtime when the source build fails.
@@ -48,8 +48,8 @@ production evidence; signing and upload are
 separate explicit steps.
 
 A missing external repository must not prevent a stable reinstall, repair,
-rollback or use of an already installed runtime. The private bucket and
-secondary replica are the production sources; upstream access is only for
-future source synchronization. A Portside artifact needs a successful source
+rollback or use of an already installed runtime. The private Portside bucket
+is the production source; upstream access is only for future source
+synchronization. A Portside artifact needs a successful source
 build, provenance, validation and explicit production registration before it
 can enter the production manifest.

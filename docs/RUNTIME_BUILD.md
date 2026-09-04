@@ -31,8 +31,7 @@ engine versionado como `wine-<WineVersion>-<commit curto>` e gera:
 - `engine-provenance.json`, com a política de fontes usada;
 - archive e checksum do engine.
 
-O workflow `Build Portside Engine` publica esses arquivos nos dois buckets
-privados em:
+O workflow `Build Portside Engine` publica esses arquivos no bucket privado em:
 
 ```text
 runtime/engines/validated/<engine-version>/
@@ -45,7 +44,7 @@ baixado, e quando o SHA-256 e o tamanho do archive conferem.
 
 ## Montagem do runtime
 
-Com um engine validado disponível nos buckets, o Mac monta wrapper e
+Com um engine validado disponível no bucket privado, o Mac monta wrapper e
 winetricks sem recompilar Wine:
 
 ```sh
@@ -85,7 +84,7 @@ de wrapper ou winetricks reutiliza o engine já validado. Execuções concorrent
 são canceladas por branch.
 
 Ambos os workflows usam o Environment GitHub `production` e as credenciais
-dos dois buckets. O build de engine não publica um manifesto de runtime nem a
+do bucket privado. O build de engine não publica um manifesto de runtime nem a
 Steam; o build de runtime é responsável pela publicação do manifesto assinado
 e dos archives de consumo.
 

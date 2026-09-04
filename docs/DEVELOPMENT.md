@@ -117,7 +117,7 @@ PORTSIDE_ENGINE_BUILD_DIR=build/engine \
 ```
 
 Esse comando gera o archive persistente, metadata, checksum e proveniência.
-Para publicação nos buckets, use o workflow `Build Portside Engine`; não use
+Para publicação no bucket privado, use o workflow `Build Portside Engine`; não use
 credenciais reais em uma máquina de desenvolvimento sem autorização explícita.
 
 ### Montar o runtime
@@ -195,7 +195,7 @@ uma validação exigir Mac, sessão gráfica, secret ou infraestrutura externa.
 | Workflow | Quando usar | Resultado |
 | --- | --- | --- |
 | `CI` | push/PR relevante | Política, Prisma e build do backend |
-| `Build Portside Engine` | Wine/toolchain/patches ou dispatch | Engine imutável nos buckets, metadata e evidência |
+| `Build Portside Engine` | Wine/toolchain/patches ou dispatch | Engine imutável no bucket privado, metadata e evidência |
 | `Build Portside Runtime` | wrapper/winetricks/montagem ou após engine | Runtime, manifesto assinado e publicação |
 | `Build Desktop Validation` | mudanças no desktop/empacotamento | App, ZIP e DMG unsigned para inspeção |
 | `Validate Clean Portside Runtime` | validação autorizada | Instalação limpa em Mac self-hosted e logs sanitizados |

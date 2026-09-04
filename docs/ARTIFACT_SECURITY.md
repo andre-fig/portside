@@ -24,9 +24,11 @@ Production clients use only the Portside API host and signed temporary object
 Upstream source URLs remain provenance and development-only source data, not a
 runtime dependency of a commercial installation.
 
-Replicate approved objects to a second S3-compatible location. If that backup
-is unavailable, keep the primary installation path working and create an
-audited `secondary_backup_pending` operational alert. Never silently replace a
-verified object with a changed download. A production release is promoted
-explicitly and rollback creates an auditable rollback record while retaining
-the previous object.
+Production uses one private S3-compatible object-storage bucket. A publication
+completes only after the approved object is uploaded successfully; previous
+immutable versions remain available for explicit rollback. If disaster
+recovery is required, it must be provided by a separately managed backup
+procedure rather than a second active Portside publication bucket. Never
+silently replace a verified object with a changed download. A production
+release is promoted explicitly and rollback creates an auditable rollback
+record while retaining the previous object.

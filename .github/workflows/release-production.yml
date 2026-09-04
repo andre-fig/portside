@@ -72,15 +72,10 @@ jobs:
       PORTSIDE_LICENSE_KEY_ID: ${{ secrets.PORTSIDE_LICENSE_KEY_ID }}
       PORTSIDE_ARTIFACT_HOSTS: ${{ secrets.PORTSIDE_ARTIFACT_HOSTS }}
       PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
-      PORTSIDE_SECONDARY_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_SECONDARY_PUBLIC_BUCKET }}
       PORTSIDE_S3_ACCESS_KEY_ID: ${{ secrets.PORTSIDE_S3_ACCESS_KEY_ID }}
       PORTSIDE_S3_SECRET_ACCESS_KEY: ${{ secrets.PORTSIDE_S3_SECRET_ACCESS_KEY }}
       PORTSIDE_S3_REGION: ${{ secrets.PORTSIDE_S3_REGION }}
       PORTSIDE_S3_ENDPOINT: ${{ secrets.PORTSIDE_S3_ENDPOINT }}
-      PORTSIDE_SECONDARY_S3_ACCESS_KEY_ID: ${{ secrets.PORTSIDE_SECONDARY_S3_ACCESS_KEY_ID }}
-      PORTSIDE_SECONDARY_S3_SECRET_ACCESS_KEY: ${{ secrets.PORTSIDE_SECONDARY_S3_SECRET_ACCESS_KEY }}
-      PORTSIDE_SECONDARY_S3_REGION: ${{ secrets.PORTSIDE_SECONDARY_S3_REGION }}
-      PORTSIDE_SECONDARY_S3_ENDPOINT: ${{ secrets.PORTSIDE_SECONDARY_S3_ENDPOINT }}
       PORTSIDE_PUBLIC_BASE_URL: ${{ secrets.PORTSIDE_PUBLIC_BASE_URL }}
       PORTSIDE_CODESIGN_IDENTITY: ${{ secrets.PORTSIDE_CODESIGN_IDENTITY }}
       PORTSIDE_NOTARY_KEY_ID: ${{ secrets.PORTSIDE_NOTARY_KEY_ID }}
@@ -374,7 +369,7 @@ jobs:
           printf '%s\n' "Portside ${PORTSIDE_VERSION}: performance, stability and compatibility improvements." > "$PORTSIDE_UPDATES_DIR/Portside-${PORTSIDE_VERSION}-notarized.md"
           ./scripts/generate_appcast.sh
 
-      - name: Publish production artifacts to both Portside buckets
+      - name: Publish production artifacts to Portside storage
         env:
           PORTSIDE_BUILD_DIR: ${{ runner.temp }}/portside-release
           PORTSIDE_RUNTIME_VERSION: ${{ steps.runtime-evidence.outputs.runtime_version }}

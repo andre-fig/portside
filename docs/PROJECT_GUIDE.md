@@ -113,7 +113,7 @@ também registra as revisões efetivamente instaladas no log da build.
 Steam não é empacotada no Portside. O runtime instala a Steam pelo verbo
 `steam` do winetricks durante a preparação do prefixo e a obtém diretamente
 da Valve. Não copie a Steam nativa do macOS nem publique o instalador da Steam
-nos buckets do Portside.
+no bucket privado do Portside.
 
 ## Catálogo de scripts
 
@@ -137,12 +137,11 @@ nos buckets do Portside.
 - `scripts/generate_manifest.sh`: assina o manifesto JSON de runtime com uma
   chave privada Ed25519 externa; só recebe entrada com `signature: null`.
 - `scripts/publish_release.sh`: publica ZIP, DMG, appcast, checksums,
-  runtime, proveniência e SBOM nos buckets primário e secundário. Produção
+  runtime, proveniência e SBOM no bucket privado Portside. Produção
   exige `PORTSIDE_CONFIRM_PRODUCTION=YES`; pode publicar somente os metadados
   do runtime quando os archives já estiverem no storage.
 - `scripts/publish_runtime.sh`: publica os três artefatos do runtime,
-  manifesto assinado, proveniência e SBOM diretamente no canal `production`;
-  cada objeto é replicado nos dois buckets em paralelo.
+  manifesto assinado, proveniência e SBOM diretamente no canal `production`.
 
 ### Build e validação do runtime
 
@@ -162,8 +161,8 @@ nos buckets do Portside.
 - `scripts/build-runtime/resolve-engine.sh`: calcula o identificador imutável
   e a storage key do engine a partir de `vendor/wine/VERSION` e
   `upstream/lock.json`.
-- `scripts/publish_engine.sh`: replica o engine validado e sua metadata nos
-  dois buckets de production.
+- `scripts/publish_engine.sh`: publica o engine validado e sua metadata no
+  bucket privado de production.
 - `scripts/build-runtime/build-winetricks.sh`: empacota o script e os verbos
   do snapshot local de winetricks.
 - `scripts/build-runtime/create-archive.sh`: cria arquivos tar.xz com IDs,
@@ -272,7 +271,7 @@ um app assinado, um ZIP notarizado e um DMG notarizado com ticket stapled no
    `portside-runtime-production-<versão>` continua retido para evidência e
    rollback, e é usado como fallback para builds antigas. Assim a release não
    baixa novamente os archives de aproximadamente 2,8 GB.
-6. `publish_release.sh` publica nos dois buckets em paralelo. Na promoção,
+6. `publish_release.sh` publica no bucket privado. Na promoção,
    O runtime já é publicado diretamente no prefixo production, sem uma etapa
    intermediária ou transferência extra pelo GitHub Actions. Versões anteriores
    ficam disponíveis para rollback.
@@ -340,21 +339,18 @@ Sparkle, chave privada do manifesto, configuração da Stripe, token admin do
 backend e credenciais dos buckets. Para o workflow automático de runtime, o
 Environment `production` deve conter `PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX`,
 `PORTSIDE_MANIFEST_SIGNING_KEY_ID`, `PORTSIDE_MANIFEST_SIGNING_KEY`,
-`PORTSIDE_PUBLIC_BUCKET`, `PORTSIDE_SECONDARY_PUBLIC_BUCKET`,
-`PORTSIDE_S3_ACCESS_KEY_ID`, `PORTSIDE_S3_SECRET_ACCESS_KEY`,
-`PORTSIDE_S3_REGION`, `PORTSIDE_S3_ENDPOINT`,
-`PORTSIDE_SECONDARY_S3_ACCESS_KEY_ID`,
-`PORTSIDE_SECONDARY_S3_SECRET_ACCESS_KEY`,
-`PORTSIDE_SECONDARY_S3_REGION` e `PORTSIDE_SECONDARY_S3_ENDPOINT`. Esses
-valores são cópias das credenciais dos dois buckets S3-compatible criados no
+`PORTSIDE_PUBLIC_BUCKET`, `PORTSIDE_S3_ACCESS_KEY_ID`,
+`PORTSIDE_S3_SECRET_ACCESS_KEY`, `PORTSIDE_S3_REGION` e
+`PORTSIDE_S3_ENDPOINT`. Esses valores são cópias das credenciais do bucket
+S3-compatible criado no
 Railway; o runner do GitHub não lê variáveis do Railway automaticamente.
 Os valores precisam ser recadastrados no Environment `production`, porque o
 GitHub não permite ler secrets criptografados para copiá-los automaticamente.
-A última build de runtime validada publicou nos dois buckets. Todos devem
+A última build de runtime validada publicou no bucket configurado. Todos devem
 ficar em GitHub Environments,
 Keychain ou secret manager. O Railway hospeda API/worker/cron e PostgreSQL; os
-arquivos de runtime e releases ficam em storage de objetos primário e
-secundário. Os buckets continuam privados. O manifesto deve apontar para
+arquivos de runtime e releases ficam no storage de objetos privado. O bucket
+continua privado. O manifesto deve apontar para
 `/v1/runtime/artifacts/production/<fileName>` na API; essa rota gera uma URL
 S3 temporária e responde com redirect. A API precisa ter o manifesto production
 publicado e a instalação limpa precisa ser validada.

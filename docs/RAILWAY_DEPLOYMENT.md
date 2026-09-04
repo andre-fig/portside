@@ -7,9 +7,8 @@ maintain these services in production:
 
 1. API using `apps/backend/railway.api.json`.
 2. PostgreSQL with automated backups and a tested restore procedure.
-3. Private S3-compatible Bucket/object storage, with a second bucket configured
-   for replication. The current Portside project has `portside-artifacts` and
-   `portside-artifacts-secondary`; their generated physical bucket names and
+3. Private S3-compatible Bucket/object storage. The current Portside project
+   uses `portside-artifacts`; its generated physical bucket name and
    credentials come from Railway, not from the repository.
 4. Sync worker using `apps/backend/railway.worker.json`.
 5. Upstream sync Cron Job using `apps/backend/railway.cron.json`.
@@ -37,8 +36,8 @@ The sync worker additionally needs a read-only `PORTSIDE_GITHUB_TOKEN`,
 records workflow/test state but cannot promote or publish a release.
 Keep release state and key rotation explicit in the production control plane;
 the repository does not assume a second Railway environment.
-Configure both primary and secondary S3-compatible credentials; a production
-deployment must never rely on Railway's ephemeral filesystem. Store the
+Configure the S3-compatible credentials for the single private bucket; a
+production deployment must never rely on Railway's ephemeral filesystem. Store the
 manifest signing private key only in the CI/administrative secret store and
 expose only `MANIFEST_SIGNING_PUBLIC_KEY` to the API.
 
@@ -64,26 +63,20 @@ contain a copy of the Railway bucket connection values. The mapping is:
 | `PORTSIDE_S3_SECRET_ACCESS_KEY` | primary bucket credential `secretAccessKey` |
 | `PORTSIDE_S3_REGION` | primary bucket credential `region` |
 | `PORTSIDE_S3_ENDPOINT` | primary bucket credential `endpoint` |
-| `PORTSIDE_SECONDARY_PUBLIC_BUCKET` | secondary bucket credential `bucketName` |
-| `PORTSIDE_SECONDARY_S3_ACCESS_KEY_ID` | secondary `accessKeyId` |
-| `PORTSIDE_SECONDARY_S3_SECRET_ACCESS_KEY` | secondary `secretAccessKey` |
-| `PORTSIDE_SECONDARY_S3_REGION` | secondary `region` |
-| `PORTSIDE_SECONDARY_S3_ENDPOINT` | secondary `endpoint` |
 
 `PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX` is the stable HTTPS API route used in
 the signed production runtime manifest:
 `https://<api-host>/v1/runtime/artifacts/production/`. The backend maps the
 filename to `runtime/production/<fileName>` and returns a short-lived signed
-redirect from the private primary bucket. The bucket remains the Railway
-S3-compatible service; GitHub secrets only grant the runner temporary
-publication access. The runtime workflow uses separate primary and secondary
-credentials and never writes to Railway's ephemeral service filesystem.
+redirect from the private bucket. The bucket remains the Railway S3-compatible
+service; GitHub secrets only grant the runner temporary publication access. The
+runtime workflow never writes to Railway's ephemeral service filesystem.
 
-The Railway buckets are intentionally private. The desktop must allow the API
+The Railway bucket is intentionally private. The desktop must allow the API
 host and the storage host used by the signed redirect; it still verifies the
 manifest signature, HTTPS host, size and SHA-256 after the redirect. The
-runtime workflow proves source build, manifest signature and dual-bucket
-replication. A client download is considered ready only after the API manifest
+runtime workflow proves source build, manifest signature and bucket publication.
+A client download is considered ready only after the API manifest
 is published for the channel and clean-install validation passes.
 
 The private `PORTSIDE_MANIFEST_SIGNING_KEY` exists only in GitHub Actions. Its

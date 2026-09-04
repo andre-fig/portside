@@ -12,7 +12,7 @@ Customer releases use `.github/workflows/release-production.yml`. The protected 
 - `PORTSIDE_LICENSE_PUBLIC_KEY`
 - `PORTSIDE_LICENSE_KEY_ID`
 - `PORTSIDE_PUBLIC_BASE_URL`
-- `PORTSIDE_PUBLIC_BUCKET` and `PORTSIDE_SECONDARY_PUBLIC_BUCKET`
+- `PORTSIDE_PUBLIC_BUCKET`
 - `PORTSIDE_CODESIGN_IDENTITY`
 - `PORTSIDE_CODESIGN_P12_BASE64` and `PORTSIDE_CODESIGN_P12_PASSWORD`
 - `PORTSIDE_CODESIGN_CERTIFICATE_PEM`
@@ -51,9 +51,9 @@ the GitHub `production` Environment. `PORTSIDE_NOTARY_P8` contains the
 multiline contents of the downloaded `.p8` private key; it is materialized only
 inside the ephemeral runner and removed after the job. The previous
 `PORTSIDE_NOTARY_P8_BASE64` secret remains a temporary fallback for older
-configurations. The Railway API and dual-bucket runtime storage are configured in
+configurations. The Railway API and private runtime storage are configured in
 the single production environment. The
-buckets remain private and the runtime manifest now uses the stable Portside
+bucket remains private and the runtime manifest now uses the stable Portside
 API `/v1/runtime/artifacts/production/<fileName>` route, which returns a
 short-lived signed storage redirect. The API manifest must still be published
 for production and a clean-install run must pass before an end-to-end customer

@@ -51,15 +51,6 @@ export class AppConfig {
     secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
     forcePathStyle: process.env.S3_FORCE_PATH_STYLE === "true",
   };
-  readonly secondaryS3 = {
-    endpoint: process.env.SECONDARY_S3_ENDPOINT,
-    region: process.env.SECONDARY_S3_REGION ?? "auto",
-    bucket: process.env.SECONDARY_S3_BUCKET,
-    accessKeyId: process.env.SECONDARY_S3_ACCESS_KEY_ID,
-    secretAccessKey: process.env.SECONDARY_S3_SECRET_ACCESS_KEY,
-    forcePathStyle: process.env.SECONDARY_S3_FORCE_PATH_STYLE === "true",
-  };
-
   adminToken(): string {
     return required("ADMIN_BEARER_TOKEN");
   }

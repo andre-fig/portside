@@ -34,9 +34,8 @@ não captura senha, cookie, token, Steam ID ou conteúdo de janela.
   documentação foi escrita.
 - A execução [`Build Portside Runtime`](https://github.com/andre-fig/portside/actions/runs/32325605325)
   terminou com sucesso em production: runtime `0.1.6`, build ID
-  `32325605325-1`, manifesto assinado e evidência replicada nos buckets
-  primário e secundário.
-- A API Railway respondia em `/health`; os buckets eram privados e o acesso
+  `32325605325-1`, manifesto assinado e evidência publicada no bucket privado.
+- A API Railway respondia em `/health`; o bucket era privado e o acesso
   anônimo direto ao objeto do manifesto retornava `403`.
 - A publicação de runtime não substitui a aceitação visual em um Mac
   self-hosted, a publicação do manifesto no backend, a notarização de uma
@@ -195,10 +194,10 @@ upstreams autorizados
 vendor/ + upstream/lock.json
         ↓ PR revisada e merge em main
 Build Portside Engine (somente quando Wine/toolchain muda)
-        ↓ engine imutável + metadata/checksum nos buckets Portside
+        ↓ engine imutável + metadata/checksum no bucket privado Portside
 Build Portside Runtime (wrapper/winetricks + engine aprovado)
         ↓ checksums, proveniência, SBOM e manifesto assinado
-Railway object storage: production primário + réplica
+Railway object storage: bucket privado de production
         ↓ validação limpa/GUI e promoção explícita
 API Portside → manifesto compatível
         ↓ assinatura, host allowlist, SHA-256 e tamanho
@@ -228,7 +227,7 @@ Não confunda uma atualização do app com uma atualização do runtime.
 | `ci.yml` / CI | push e PR para `main` | política de produção, Prisma e build do backend | corrigir/revisar e mergear |
 | `build-desktop.yml` | CI concluído com sucesso na `main` ou dispatch | ZIP, DMG e dSYM unsigned de validação | abrir/inspecionar localmente se necessário |
 | `build-landing.yml` | mudanças na landing, PR, push ou dispatch | `.output` e artifact de build | deploy público do provedor |
-| `build-engine.yml` | mudança real em Wine, patches, toolchain ou dispatch | engine Wine persistente, metadata, checksum e proveniência nos dois buckets | validar a build e a compatibilidade |
+| `build-engine.yml` | mudança real em Wine, patches, toolchain ou dispatch | engine Wine persistente, metadata, checksum e proveniência no bucket privado | validar a build e a compatibilidade |
 | `build-runtime.yml` | mudança real em wrapper/winetricks/montagem ou após engine aprovado | runtime próprio, manifesto assinado, evidência e publicação production | validar GUI e registrar |
 | `sync-upstreams.yml` | diariamente às 03:17 UTC ou dispatch | PR com novos snapshots/lock/checksums | revisar licença/diff e mergear |
 | `validate-clean-install.yml` | dispatch | instalação limpa e logs de aceitação em Mac self-hosted | sessão gráfica, login e janela real |
@@ -280,7 +279,7 @@ e geração de artifacts necessária no GitHub.
 `Build Portside Engine` começa com um preflight em Ubuntu. Somente quando há
 mudança real em `vendor/wine`, patches, toolchain ou no commit Wine do lockfile
 o job `macos-15` compila o engine, gera metadata/checksum/proveniência e publica
-uma versão imutável nos dois buckets. O cache por snapshot, arquitetura, flags
+uma versão imutável no bucket privado. O cache por snapshot, arquitetura, flags
 e toolchain acelera recompilações, mas o bucket é a fonte durável usada por
 montagens futuras.
 
@@ -356,7 +355,7 @@ correspondente. O estágio:
 6. notariza e faz staple no app/ZIP/DMG;
 7. valida o bundle;
 8. gera appcast assinado;
-9. publica production nos dois buckets.
+9. publica production no bucket privado.
 
 O job de publicação usa o Environment GitHub protegido `production`. A
 aprovação desse Environment continua sendo obrigatória; uma build verde não
@@ -364,7 +363,7 @@ publica produção sem essa proteção.
 
 ## 6. Railway e secrets
 
-O Railway tem API, worker, cron, PostgreSQL e dois buckets S3-compatible. A API
+O Railway tem API, worker, cron, PostgreSQL e um bucket S3-compatible. A API
 pública atualmente usada pelo workflow de health é:
 
 ```text
@@ -372,21 +371,21 @@ https://api-production-6d06.up.railway.app
 ```
 
 O filesystem dos serviços Railway é efêmero. Runtime, appcast, ZIP/DMG,
-manifestos, SBOM e backups precisam ficar no storage de objetos primário e na
-réplica. O backend e os workflows devem usar credenciais separadas para cada
-bucket.
+manifestos e SBOM precisam ficar no storage de objetos privado. Backups, se
+necessários, devem seguir um procedimento separado. O backend e os workflows
+usam as credenciais desse único bucket.
 
 O GitHub Environment `production` contém, sem expor valores no repositório, o
-prefixo de URL, key ID/chave do manifesto, nomes dos buckets e credenciais S3
-primária/secundária. A chave privada usada para assinar manifestos fica apenas
+prefixo de URL, key ID/chave do manifesto, nome do bucket e credenciais S3. A
+chave privada usada para assinar manifestos fica apenas
 no CI/secret manager; a API recebe a chave pública para verificação.
 
-### Acesso aos buckets privados
+### Acesso ao bucket privado
 
-Os buckets Railway continuam privados. Os manifestos novos devem apontar para
+O bucket Railway continua privado. Os manifestos novos devem apontar para
 `/v1/runtime/artifacts/production/<fileName>` na API Portside. O backend valida
 o canal e o nome do archive, cria uma URL S3 temporária para
-`runtime/production/<fileName>` no bucket primário e responde com redirect; as
+`runtime/production/<fileName>` no bucket privado e responde com redirect; as
 credenciais do bucket nunca chegam ao desktop.
 
 O desktop precisa ter na allowlist o host da API e o host de storage usado pelo
@@ -435,7 +434,7 @@ e `SIKARUGIR_AUTHORIZATION.md` antes de publicar.
 | `scripts/notarize_release.sh` | notarytool, staple e validação Apple |
 | `scripts/validate_release_bundle.sh` | validação final de plist/assinatura/DMG |
 | `scripts/generate_appcast.sh` | appcast Sparkle assinado |
-| `scripts/publish_release.sh` | publicação de app/runtime em dois buckets |
+| `scripts/publish_release.sh` | publicação de app/runtime no bucket privado |
 | `scripts/build-runtime/build.sh` | orquestra build e checks do runtime |
 | `scripts/build-runtime/build-wrapper.sh` | compila host e monta wrapper |
 | `scripts/build-runtime/build-wine-engine.sh` | compila Wine local de `vendor/wine` |
@@ -550,7 +549,7 @@ Para problemas de runtime, comece por:
 2. origem/commit/checksum em `upstream/lock.json`;
 3. toolchain e arquitetura registradas em `provenance.json`;
 4. assinatura do manifesto e SHA-256 dos três componentes;
-5. presença em ambos os buckets e canal correto;
+5. presença no bucket privado e canal correto;
 6. allowlist de hosts e acesso privado/público ao objeto;
 7. cache, diretório temporário e rollback no desktop;
 8. somente então processos da Steam e evidência visual.
