@@ -2,6 +2,10 @@ name: Release Portside
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
@@ -12,14 +16,71 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  changes:
+    name: Check app release changes
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    outputs:
+      should_release: ${{ steps.filter.outputs.should_release }}
+      target_sha: ${{ steps.target.outputs.sha }}
+      target_ref: ${{ steps.target.outputs.ref }}
+    steps:
+      - name: Resolve tested revision
+        id: target
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_SHA: ${{ github.sha }}
+          MANUAL_REF: ${{ github.ref }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        shell: bash
+        run: |
+          set -eu
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            printf 'sha=%s\n' "$MANUAL_SHA" >> "$GITHUB_OUTPUT"
+            printf 'ref=%s\n' "$MANUAL_REF" >> "$GITHUB_OUTPUT"
+          else
+            printf 'sha=%s\n' "$WORKFLOW_RUN_SHA" >> "$GITHUB_OUTPUT"
+            printf 'ref=refs/heads/%s\n' "$WORKFLOW_RUN_BRANCH" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check for app or packaging changes
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        shell: bash
+        run: |
+          set -eu
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            echo "Manual dispatch requested; running production release."
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          files="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/commits/${TARGET_SHA}" \
+            --jq '.files[].filename')"
+          if printf '%s\n' "$files" | grep -Eq \
+            '^(apps/desktop/|apps/runtime-host/|scripts/(package_app|create_dmg|build_release|sign_release|notarize_release|validate_release_bundle|generate_appcast|publish_release)\.sh$)'; then
+            echo "App or packaging files changed; running production release."
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No app or packaging files changed; skipping production release."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
   verify-ci:
     name: Verify CI for this commit
+    needs: changes
+    if: needs.changes.outputs.should_release == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Require the main branch
         env:
-          TARGET_REF: ${{ github.ref }}
+          TARGET_REF: ${{ needs.changes.outputs.target_ref }}
         run: |
           set -eu
           test "$TARGET_REF" = "refs/heads/main" || {
@@ -31,7 +92,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TARGET_SHA: ${{ github.sha }}
+          TARGET_SHA: ${{ needs.changes.outputs.target_sha }}
         run: |
           set -eu
           ci_run_id="$(gh api \
@@ -54,7 +115,8 @@ jobs:
 
   build-and-publish-production:
     name: Build, notarize and publish production release
-    needs: [verify-ci]
+    needs: [changes, verify-ci]
+    if: needs.changes.outputs.should_release == 'true'
     runs-on: macos-15
     timeout-minutes: 90
     environment: production
@@ -85,6 +147,8 @@ jobs:
     steps:
       - name: Check out tested sources
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.changes.outputs.target_sha }}
 
       - name: Restore Swift package build cache
         uses: actions/cache@v5

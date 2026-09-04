@@ -328,7 +328,9 @@ verificado na Stripe e disponibilidade real do dispositivo/navegador.
 - `validate-clean-install.yml`: baixa artefatos de uma execução selecionada e
   executa a aceitação manual de prefixo novo, Steam e GUI em um Mac self-hosted
   com sessão gráfica; exige manifesto assinado e não usa upstream como fallback.
-- `release-production.yml`: release production, notarização e registro no backend.
+- `release-production.yml`: release production automática após CI na `main` para
+  mudanças do app/empacotamento, além de dispatch manual, com notarização e
+  registro no backend.
 - `deploy-railway.yml`: verificação de health do backend já publicado no
   Railway; não usa o filesystem efêmero para artefatos.
 

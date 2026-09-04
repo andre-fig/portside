@@ -140,13 +140,15 @@ antes do push.
   e coleta logs sanitizados; exige revisão manual da janela/login.
 - `Verify Railway`: após CI na `main`, aguarda `GET /health` da API pública.
   É uma verificação de saúde, não uma validação de release de cliente.
-- `Release Portside`: execução manual. O job de validação testa, reutiliza o
-  último runtime validado, assina, notariza e publica; o job production só
-  aparece quando `promote=true` e usa Environment protegido.
+- `Release Portside`: após CI bem-sucedido na `main` e mudanças relevantes do
+  app/empacotamento, testa, reutiliza o último runtime validado, assina,
+  notariza e publica automaticamente; `workflow_dispatch` continua disponível
+  para reprocessamento e usa o Environment `production`.
 
-O workflow é uma automação, não uma autorização. A promoção para production,
-a aceitação visual e a configuração de secrets continuam sendo decisões
-explícitas.
+O workflow automatiza a publicação da release do app depois dos checks
+definidos. A aceitação visual do runtime e a configuração de secrets continuam
+sendo decisões explícitas; nenhuma dessas evidências pode ser inventada pelo
+workflow.
 
 ## Secrets e infraestrutura
 

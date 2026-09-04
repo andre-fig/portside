@@ -232,7 +232,7 @@ Não confunda uma atualização do app com uma atualização do runtime.
 | `sync-upstreams.yml` | diariamente às 03:17 UTC ou dispatch | PR com novos snapshots/lock/checksums | revisar licença/diff e mergear |
 | `validate-clean-install.yml` | dispatch | instalação limpa e logs de aceitação em Mac self-hosted | sessão gráfica, login e janela real |
 | `deploy-railway.yml` / Verify Railway | CI concluído na `main` | healthcheck da API | investigar se `/health` falhar |
-| `release-production.yml` | dispatch | release app/runtime production, assinatura/notarização e registro no backend | configurar secrets |
+| `release-production.yml` | CI bem-sucedido na `main` após mudança do app/empacotamento, ou dispatch | release app/runtime production, assinatura/notarização e registro no backend | configurar secrets |
 
 ### CI e desktop
 
@@ -338,16 +338,17 @@ necessário, resolve submódulos/LFS declarados, preserva notices, calcula
 checksums e compara o lockfile. Se houver alteração, abre uma branch e PR.
 Se o upstream falhar ou desaparecer, o script falha antes de substituir o
 snapshot existente. O merge da PR é a autorização para receber a mudança; ele
-não publica automaticamente uma release de usuário, embora mudanças em
+publica automaticamente uma release de usuário após CI, embora mudanças em
 `vendor/` possam disparar a build de runtime no canal de validação depois do
 merge.
 
 ### Release do app
 
-`release-production.yml` é manual e sempre publica em `production`. Ele seleciona o último runtime
-validado com sucesso, usa a
-versão do manifesto desse runtime para o app e escolhe o artifact
-correspondente. O estágio:
+`release-production.yml` publica em `production` após CI bem-sucedido na `main`
+quando há mudança no app ou empacotamento; `workflow_dispatch` continua
+disponível para reprocessar uma release. Ele seleciona o último runtime
+validado com sucesso, usa a versão do manifesto desse runtime para o app e
+escolhe o artifact correspondente. O estágio:
 
 1. testa Swift e backend;
 2. valida a política de fontes;
@@ -359,9 +360,10 @@ correspondente. O estágio:
 8. gera appcast assinado;
 9. publica production no bucket privado.
 
-O job de publicação usa o Environment GitHub protegido `production`. A
-aprovação desse Environment continua sendo obrigatória; uma build verde não
-publica produção sem essa proteção.
+O job de publicação usa o Environment GitHub `production` para os secrets de
+release. Se regras de aprovação forem configuradas nesse Environment, elas
+continuam bloqueando a publicação; sem essa regra, a release segue
+automaticamente após os checks bem-sucedidos.
 
 ## 6. Railway e secrets
 
