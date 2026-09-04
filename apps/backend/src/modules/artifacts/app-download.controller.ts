@@ -6,6 +6,17 @@ import { ArtifactService } from "./artifact.service.js";
 export class AppDownloadController {
   constructor(private readonly artifacts: ArtifactService) {}
 
+  @Get(":channel/latest")
+  async latest(
+    @Param("channel") channel: string,
+    @Res() response: Response,
+  ): Promise<void> {
+    const signed = await this.artifacts.signedLatestAppDownload(channel);
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.redirect(302, signed.url);
+  }
+
   @Get(":channel/:fileName")
   async redirect(
     @Param("channel") channel: string,

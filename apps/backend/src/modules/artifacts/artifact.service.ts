@@ -10,6 +10,9 @@ import { AppConfig } from "../../core/app-config.js";
 import { PrismaService } from "../../database/prisma.service.js";
 import { validateStorageKey } from "../../common/policy/source-policy.js";
 
+const appReleaseFilePattern =
+  /^Portside-([A-Za-z0-9][A-Za-z0-9._-]*)\.(zip|dmg)$/;
+
 @Injectable()
 export class ArtifactService {
   private readonly s3?: S3Client;
@@ -99,9 +102,7 @@ export class ArtifactService {
     if (channel !== Channel.production) {
       throw new BadRequestException("app channel must be production");
     }
-    const match = /^Portside-([A-Za-z0-9][A-Za-z0-9._-]*)\.(zip|dmg)$/.exec(
-      fileName,
-    );
+    const match = appReleaseFilePattern.exec(fileName);
     if (!match) {
       throw new BadRequestException("app release name is invalid");
     }
@@ -136,6 +137,39 @@ export class ArtifactService {
       { expiresIn },
     );
     return { url, expiresIn };
+  }
+
+  async signedLatestAppDownload(
+    channel: string,
+  ): Promise<{ url: string; expiresIn: number }> {
+    if (channel !== Channel.production) {
+      throw new BadRequestException("app channel must be production");
+    }
+    const release = await this.prisma.appRelease.findFirst({
+      where: {
+        channel: Channel.production,
+        status: "production",
+      },
+      orderBy: [{ promotedAt: "desc" }, { pubDate: "desc" }],
+    });
+    if (!release) {
+      throw new ServiceUnavailableException("app release is not available");
+    }
+
+    let fileName: string | undefined;
+    try {
+      fileName = new URL(release.url).pathname.split("/").pop();
+    } catch {
+      throw new ServiceUnavailableException(
+        "app release archive is not available",
+      );
+    }
+    if (!fileName || !appReleaseFilePattern.test(fileName)) {
+      throw new ServiceUnavailableException(
+        "app release archive is not available",
+      );
+    }
+    return this.signedAppDownload(channel, fileName);
   }
 
   async production(component: string, channel: Channel): Promise<unknown> {
