@@ -9,8 +9,6 @@ on:
       - "upstream/dependencies.json"
       - "upstream/patches/**"
       - "scripts/build-runtime/**"
-      - "scripts/publish_engine.sh"
-      - ".github/workflows/build-engine.yml"
   workflow_dispatch:
     inputs:
       force_rebuild:
