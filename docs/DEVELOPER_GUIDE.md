@@ -245,8 +245,10 @@ cada push.
 
 Depois de CI bem-sucedido em `main`, `Build Desktop Validation` compila o app
 testado, cria `Portside-validation.app.zip`, `Portside-validation.dmg`, dSYM e
-checksums por 14 dias. Esses arquivos são apenas para validação e podem gerar
-avisos do macOS.
+checksums por 14 dias. Os jobs macOS de validação e release reutilizam o cache
+versionado de dependências e compilação do Swift Package Manager quando o
+`Package.swift` e o `Package.resolved` não mudaram. Esses arquivos de validação
+são temporários e podem gerar avisos do macOS.
 
 ### ESLint e tipagem
 

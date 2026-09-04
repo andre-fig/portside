@@ -32,13 +32,19 @@ final class SteamProcessLauncher {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
         return try await withCheckedThrowingContinuation { continuation in
-            NSWorkspace.shared.openApplication(at: wrapper, configuration: configuration) { application, error in
+            // AppKit invokes this completion handler on a concurrent queue.
+            // Give it an explicitly nonisolated function type so Swift does
+            // not insert a MainActor precondition into Launch Services' own
+            // callback path. The suspended @MainActor task resumes on its
+            // actor after the continuation is completed.
+            let completionHandler: @Sendable (NSRunningApplication?, (any Error)?) -> Void = { application, error in
                 if let error {
                     continuation.resume(throwing: PortsideError.processLaunchFailed("Portside runtime could not be opened: \(error.localizedDescription)"))
                 } else {
                     continuation.resume(returning: application)
                 }
             }
+            NSWorkspace.shared.openApplication(at: wrapper, configuration: configuration, completionHandler: completionHandler)
         }
     }
 
