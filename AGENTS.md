@@ -1,186 +1,105 @@
-# Instruções para agentes e contribuidores
+# Working on Portside
 
-Estas regras valem para todo o repositório `portside`. Antes de alterar um
-subdiretório, procure por um `AGENTS.md` mais específico; arquivos dentro de
-`.build/` são checkouts gerados de dependências e não fazem parte do código do
-Portside.
+Portside is a native English-language macOS app that prepares a private local
+Wine wrapper and opens the official Windows Steam client. Steam comes from
+Valve through winetricks; Portside does not distribute Steam, games, saves or
+DRM/anti-cheat bypasses.
 
-## Antes de começar
+## Start here
 
-- Confirme a raiz do repositório com `git rev-parse --show-toplevel`.
-- Registre `git status --short --branch` e preserve mudanças locais que já
-  existirem. Não use `git reset --hard`, `git checkout --` ou comandos
-  destrutivos para “limpar” a árvore.
-- Não apague, substitua ou reutilize dados do usuário, prefixos, bibliotecas
-  Steam, runtimes instalados ou credenciais locais.
-- Leia [`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md) para o fluxo de
-  desenvolvimento e [`docs/PROJECT_GUIDE.md`](docs/PROJECT_GUIDE.md) para o
-  catálogo de scripts e runbooks.
-- Não faça commit, push, merge ou publicação externa sem solicitação explícita
-  nesta tarefa.
+1. Run `git rev-parse --show-toplevel` and `git status --short --branch`.
+   Preserve all existing changes; never reset or discard work to clean the tree.
+2. Read the nearest applicable `AGENTS.md`, the task documents below and
+   [STATUS](docs/STATUS.md). Check implementation before relying on documentation:
+   status is a dated snapshot, not a live service report.
+3. Use [the development guide](docs/DEVELOPER_GUIDE.md) for setup and
+   [the documentation index](docs/README.md) for specialized runbooks.
 
-## Limites do produto
+| Task area                      | Required reading                                                                                                 |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| macOS app and bootstrap        | [ARCHITECTURE](docs/ARCHITECTURE.md), [RUNTIME](docs/RUNTIME.md), [desktop instructions](apps/desktop/AGENTS.md) |
+| Wine, wrapper or winetricks    | [RUNTIME](docs/RUNTIME.md), [runtime build instructions](scripts/build-runtime/AGENTS.md)                        |
+| Runtime host                   | [RUNTIME](docs/RUNTIME.md), [host instructions](apps/runtime-host/AGENTS.md)                                     |
+| Sparkle or application updates | [RELEASE](docs/RELEASE.md), [BOOTSTRAP_VALIDATION](docs/BOOTSTRAP_VALIDATION.md)                                 |
+| Backend or manifests           | [ARCHITECTURE](docs/ARCHITECTURE.md), [RELEASE](docs/RELEASE.md), [backend instructions](apps/backend/AGENTS.md) |
+| Licensing or checkout          | [ARCHITECTURE](docs/ARCHITECTURE.md), [SECURITY](docs/SECURITY.md), [LICENSING](docs/LICENSING.md)               |
+| Landing                        | [landing instructions](apps/landing/AGENTS.md), [landing README](apps/landing/README.md)                         |
+| CI, signing or notarization    | [RELEASE](docs/RELEASE.md), [TESTING](docs/TESTING.md), [workflow instructions](.github/AGENTS.md)               |
+| Current progress or blockers   | [STATUS](docs/STATUS.md)                                                                                         |
+| Architectural changes          | [DECISIONS](docs/DECISIONS.md)                                                                                   |
 
-- O Portside é um app macOS nativo que prepara um wrapper privado e local para
-  abrir a Steam oficial. Não distribui a Steam, jogos, saves ou mecanismos de
-  bypass de DRM/anti-cheat.
-- A Steam é instalada pelo verbo `steam` do winetricks durante a preparação do
-  prefixo e continua sendo obtida diretamente da Valve. Nunca copie a sessão
-  Steam nativa do macOS para um prefixo Portside.
-- O runtime de produção deve vir de artefatos Portside, descritos por
-  manifesto assinado. Não adicione fallback silencioso para
-  `github.com/Sikarugir-App` ou `raw.githubusercontent.com/Sikarugir-App`.
-- Os snapshots em `vendor/` são fontes auditadas. Não edite manualmente um
-  snapshot para corrigir uma build; altere o processo de sincronização ou
-  mantenha um patch documentado em `upstream/patches/`.
-- Não declare que a Steam abriu ou que uma UI funciona apenas por existir
-  `steam.exe`, `steamwebhelper`, um processo ou um ícone no Dock. A aceitação
-  exige uma janela real renderizada e confirmação de interação em uma sessão
-  gráfica; veja [`docs/VALIDATION.md`](docs/VALIDATION.md).
+## Repository and sources of truth
 
-## Organização e estilo
+`apps/desktop` owns SwiftUI, core, agent and installer; `apps/runtime-host` owns
+the wrapper executable; `apps/backend` owns API/worker/cron and Prisma;
+`apps/landing` owns the public site and checkout. `runtime/wrapper-template`
+contains Portside runtime defaults. `scripts` and `.github/workflows` implement
+build/release operations. There is no root package manager or shared `packages/` tree.
 
-- Desktop: mantenha lógica reutilizável em `apps/desktop/Sources/PortsideCore`;
-  a camada SwiftUI em `Sources/Portside` deve orquestrar a interface, não
-  duplicar pipeline de runtime.
-- Backend: siga a organização NestJS existente em
-  `apps/backend/src/modules`. Use DTOs em `dtos/`, serviços em arquivos
-  próprios, controllers finos e testes unitários `*.spec.ts` ao lado do código
-  testado. Mudanças no banco exigem migration Prisma correspondente.
-- Landing: mantenha componentes e rotas dentro de `apps/landing`; não
-  reintroduza dependência de build no repositório antigo da landing.
-- Shell: use `set -eu` ou equivalente, valide entradas e caminhos, prefira
-  caminhos temporários estreitos e nunca imprima secrets, tokens, cookies,
-  chaves privadas ou conteúdo de conta.
-- Manifestos, checksums e proveniência são parte do contrato de segurança. Não
-  remova validações para fazer uma build passar.
+Code, tests, package lockfiles, Prisma migrations and actual scripts/workflows
+are implementation evidence. `upstream/lock.json` records source provenance;
+`upstream/dependencies.json` records intended build dependencies. Neither vendor
+READMEs nor generated artifacts define Portside behavior. Correct documentation
+when code and prose disagree.
 
-## Validação por área
+## Commands from the repository root
 
-Execute o conjunto mínimo relacionado à alteração:
+Install only what the task needs; see [TESTING](docs/TESTING.md) for prerequisites,
+coverage and manual checks. Dependency installation/builds create generated output.
 
 ```sh
-# desktop
+swift package resolve --package-path apps/desktop
+(cd apps/backend && npm ci)
+(cd apps/landing && bun install --frozen-lockfile)
+
 swift test --package-path apps/desktop
 swift build --package-path apps/desktop
-
-# backend
-cd apps/backend
-npm ci
-npm run prisma:validate
-npm run typecheck
-npm run lint
-npm test
-npm run build
-cd ../..
-
-# landing
-cd apps/landing
-bun install --frozen-lockfile
-bun run lint
-bun run typecheck
-bun run build
-cd ../..
-
-# política de produção e formatação
+swift test --package-path apps/runtime-host
+swift build --package-path apps/runtime-host
+(cd apps/backend && npm run prisma:validate && npm run typecheck && npm run lint && npm test && npm run build)
+(cd apps/landing && bun run lint && bun run typecheck && bun run build)
 ./scripts/validate-production-policy.sh
 git diff --check
 ```
 
-Para alterações no runtime, também execute no macOS com a toolchain de
-`upstream/dependencies.json`:
+Optional local hook setup: `./scripts/install-git-hooks.sh` changes Git hook
+configuration. Hooks are targeted checks, not the entire validation matrix.
+Runtime builds require the separate engine/assembly runbook in [RUNTIME](docs/RUNTIME.md).
 
-```sh
-PORTSIDE_RUNTIME_VERSION=0.1.0 \
-PORTSIDE_RUNTIME_CHANNEL=production \
-PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX=https://api.example.invalid/v1/runtime/artifacts/production/ \
-./scripts/build-runtime/build.sh
-```
+## Non-negotiable boundaries
 
-Uma build local gera evidência unsigned. Ela não prova assinatura, publicação,
-download pelo desktop ou funcionamento visual da Steam.
+- Preserve prefixes, Steam credentials, native Steam, games, saves, libraries,
+  installed runtimes and unrelated processes. Use new disposable fixtures for
+  destructive scenarios; never clean an everyday account to simulate first run.
+- Commercial runtime binaries must be produced by Portside and authenticated
+  through its manifest. Never restore compiled Sikarugir download fallbacks.
+  Valve Steam and Apple Rosetta remain legitimate external installation sources.
+- Do not hand-edit `vendor/` snapshots; use synchronization or a documented
+  Portside patch. Do not hand-edit generated `.build/`, `DerivedData/`,
+  `node_modules/`, `dist/`, `build/`, `artifacts/`, landing `.output/` or
+  `src/routeTree.gen.ts`. Preserve notices, checksums, provenance and SBOM.
+- Never put private keys, credentials, tokens, cookies, account data or personal
+  paths in bundles, Git, logs, fixtures or docs. Document variable/secret names
+  only. Use external secret stores; the app embeds public verification keys only.
+- Do not weaken signature, checksum, size, host, path, version or installation
+  checks to make a build pass. Keep shell arguments structured and logs sanitized.
+- Keep all Portside UI and new documentation in English. Existing landing
+  language inconsistencies are tracked in STATUS, not permission to repeat them.
+- Do not mix staging and production. Current code has production only; local
+  development builds are not a staging channel. Do not invent a staging runbook.
+- Agents must not automatically promote releases or publish manifests. Commit,
+  push, merge, deploy, release, external writes and promotion require an explicit
+  request authorizing that action. Existing workflow automation is described in
+  RELEASE; it is not authorization for an agent to trigger it.
 
-### Hooks locais
+## Minimum completion
 
-Depois de clonar, habilite os hooks versionados uma vez:
+Review the diff, preserve unrelated changes, run applicable checks and record
+commands/results and omissions. Never claim graphical Steam/game success from
+files, processes or Dock icons; real rendered windows and interaction are required.
+Name any dependency on a graphical session, certificate or external service.
 
-```sh
-./scripts/install-git-hooks.sh
-```
-
-O `pre-commit` executa somente verificações rápidas dos arquivos staged:
-diff whitespace, sintaxe shell, JSON e `actionlint` quando instalado. O
-`pre-push` identifica as áreas alteradas e executa lint, typecheck, testes e
-build locais correspondentes: Swift, backend, landing, política de produção e
-validações de scripts. O CI mantém somente validações de integração, política
-de produção e builds necessários para a infraestrutura do GitHub. Hooks podem
-ser ignorados em uma emergência, mas a rotina normal deve passar por eles
-antes do push.
-
-## Workflows e autoridade de cada um
-
-- `CI`: valida política de fontes, schema Prisma e build do backend em push/PR
-  para `main`.
-- `Build Desktop Validation`: depois de um CI bem-sucedido, cria app, ZIP,
-  DMG e dSYM de validação; não é release comercial e não é notarizado.
-- `Build Landing`: gera o build da landing em PR, push relevante ou execução
-  manual e armazena `.output` como artifact.
-- `Build Portside Engine`: em mudança real de Wine, patches, toolchain ou
-  commit Wine do lockfile, valida fontes em Ubuntu e compila o engine em
-  macOS. Publica o componente imutável, metadata, checksum e proveniência nos
-  dois buckets de `production`.
-- `Build Portside Runtime`: em mudanças de wrapper, host, winetricks ou
-  montagem, valida fontes em Ubuntu e monta o runtime em macOS usando o engine
-  persistente correspondente ao lockfile. Após um engine novo passar, ele é
-  acionado automaticamente. Não recompila Wine.
-- `Sync Upstreams`: roda diariamente às 03:17 UTC ou manualmente, atualiza
-  snapshots autorizados e abre PR. Nunca faz merge, promoção ou publicação.
-- `Validate Clean Portside Runtime`: execução manual em Mac self-hosted com
-  sessão gráfica real. Instala em área descartável, usa o artefato selecionado
-  e coleta logs sanitizados; exige revisão manual da janela/login.
-- `Verify Railway`: após CI na `main`, aguarda `GET /health` da API pública.
-  É uma verificação de saúde, não uma validação de release de cliente.
-- `Release Portside`: após CI bem-sucedido na `main` e mudanças relevantes do
-  app/empacotamento, testa, reutiliza o último runtime validado, assina,
-  notariza e publica automaticamente; `workflow_dispatch` continua disponível
-  para reprocessamento e usa o Environment `production`.
-
-O workflow automatiza a publicação da release do app depois dos checks
-definidos. A aceitação visual do runtime e a configuração de secrets continuam
-sendo decisões explícitas; nenhuma dessas evidências pode ser inventada pelo
-workflow.
-
-## Secrets e infraestrutura
-
-- Secrets ficam em GitHub Environments, Keychain ou secret manager. Nunca os
-  grave em `.env` versionado, `Info.plist`, logs, fixtures ou documentação.
-- O Railway hospeda API, worker, cron, PostgreSQL e os dois buckets S3
-  compatíveis. O runner GitHub precisa receber cópias das credenciais dos
-  buckets no Environment `production`; ele não lê variáveis do Railway sozinho.
-- A chave privada do manifesto permanece no CI/secret manager. O backend recebe
-  apenas a chave pública. O mesmo princípio vale para Sparkle, Developer ID,
-  notarização, Stripe e token administrativo.
-- Os buckets de runtime atualmente são privados. A publicação dual e a
-  assinatura já estão operacionais em production, mas o desktop ainda precisa de
-  uma rota Portside que entregue URL temporária assinada (ou de uma política
-  pública deliberadamente revisada) antes de um rollout para usuários.
-
-## Pull requests e releases
-
-Antes de abrir uma PR:
-
-1. confira `git diff` e `git diff --check`;
-2. confirme que não há `node_modules`, `.build`, `build`, DMG, chaves ou dados
-   de usuário no diff;
-3. rode os checks da área alterada e registre limitações reais;
-4. para upstream, confira commit completo, checksum, licença e notices no
-   `upstream/lock.json`;
-5. para runtime, confirme manifest, SHA-256, tamanho, proveniência, SBOM,
-   build ID, canal e resultado dos testes;
-6. para produção, preserve aceitação gráfica e rollback planejado; não há um
-   ambiente intermediário.
-
-Não faça afirmações de “notarizado”, “compatível” ou “UI funcional” sem o
-comando/evidência correspondente. Consulte
-[`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md) para o procedimento
-completo.
+Update relevant docs with code; update STATUS when a milestone changes and
+DECISIONS when architecture is adopted or superseded. Use `Verified`,
+`Implemented but not end-to-end validated`, `Planned`, `Blocked` or `Unknown`
+with evidence and scope. A green build proves only its checks.

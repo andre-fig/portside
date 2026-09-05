@@ -23,8 +23,9 @@ the deterministic checksum of the imported snapshot.
 ## Build inputs and recorded limitations
 
 The pinned Wrapper repository contains only `README.md` and
-`NewestVersion.txt`. The pinned Engines repository contains only
-`EngineList.txt`, `README.md` and `index.html`. Neither contains the source or
+`NewestVersion.txt`. The pinned Engines repository contains
+`EngineList.txt`, `README.md`, `index.html` and a static-site workflow. Neither
+snapshot contains the source or
 build recipe for `Template-1.0.11` or `WS12WineSikarugir10.0_6`.
 
 Portside does not use those metadata-only snapshots as executable build input.
@@ -36,7 +37,7 @@ external release.
 ## Synchronization rules
 
 Run `scripts/upstream/sync.sh` from the repository root. It downloads each
-authorized source into a temporary directory, resolves the pinned commit,
+authorized source into a temporary directory, resolves remote HEAD, compares it with the lock and records a changed commit,
 checks submodules and Git LFS, validates the source tree, computes a snapshot
 checksum and updates `upstream/lock.json`. The GitHub workflow opens a pull
 request for changes; it never merges or publishes them automatically.
@@ -45,5 +46,10 @@ The source snapshots retain their upstream licenses, copyright notices and
 build scripts. A license or notice checksum change is recorded as
 `licenseChangeDetected: true` in the generated lockfile and called out in the
 automated pull request; the snapshot is still staged automatically, but the PR
-must be reviewed before merge. See `RUNTIME_LICENSES.md` and
-`THIRD_PARTY_NOTICES.md` before promoting any generated runtime artifact.
+must be reviewed before merge. See [RUNTIME_LICENSES](../RUNTIME_LICENSES.md) and
+[THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md) before promoting any generated runtime artifact.
+
+Build and synchronization boundaries are in [RUNTIME](../docs/RUNTIME.md) and
+[UPSTREAM_MIRRORING](../docs/UPSTREAM_MIRRORING.md). Current revisions belong to
+the lock, not this descriptive inventory. No binary or external-service result
+is asserted here.

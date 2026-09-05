@@ -1,29 +1,37 @@
-# Privacy boundary
+# Privacy and data ownership
 
-Portside does not collect Steam passwords, cookies, tokens, Steam IDs, Apple
-IDs or a user's personal Steam library. The license service receives a license
-key only during activation, a random device public key and the minimum signed
-license claims. The private device key stays in the Mac Keychain with
-`ThisDeviceOnly`, non-synchronizable storage; Secure Enclave is attempted when
-available.
+User Wine prefixes, Steam account state, games, saves and libraries belong to
+the user. Runtime replacement or a license failure must not delete them.
+Portside must not copy a native Steam session or report passwords, cookies,
+tokens, Steam IDs, Apple IDs, window contents or screenshots.
 
-Diagnostics are allowlisted and sanitized. Logs never intentionally contain
-credentials or account identifiers. Backend audit events retain activation,
-deactivation, revocation and administrative artifact decisions for the
-documented retention window, after which personal records should be deleted or
-anonymized through the operator's retention job.
+## Implemented data paths
 
-The desktop sends setup failures and the successful Steam-window checkpoint to
-Sentry. Events contain the Portside version/build, setup stage, stable error
-code, macOS version, architecture, renderer and bounded readiness flags. The
-Sentry integration removes user, context and extra data before transmission;
-purchase keys, Steam credentials, cookies, tokens, Steam IDs, file contents
-and account identifiers are not sent. Event IDs and sanitized failure reasons
-are also written to the local Portside log so a failed upload can be diagnosed.
+- Desktop licensing stores a device private key and signed token in device-local,
+  non-synchronizing Keychain storage. The server receives a purchase key during
+  activation and the device public key/proof; these are commercial account data.
+- Backend Prisma models include customers, purchases, licenses, devices,
+  activations, challenges and audit records. HMAC lookup avoids a plaintext
+  purchase-key database column. Fulfillment writers are incomplete.
+- The compatibility scanner reads bounded files under managed roots. Profiles
+  and attempts can contain local executable paths; these raw files are not
+  automatically safe to share.
+- Main-app logging redacts selected sensitive patterns and rotates logs.
+  Sentry filters app-reported events and disables default PII; initialization
+  occurs before the install gate, including Debug. Delivery was not tested.
+- RuntimeHost has separate, narrower redaction and no log rotation.
+  Backend/landing raw error paths mean universal sanitized logging is not
+  an implemented guarantee.
 
-The 14-day offline grace period is configurable. If it expires, Portside asks
-for a connection without deleting games, the prefix or Steam data. A license
-failure must never be used as a reason to modify or corrupt the runtime.
+See source-linked controls and gaps in [SECURITY](SECURITY.md), the
+[license protocol](LICENSING.md), and [backend model](BACKEND.md).
+The signed offline deadline governs local license acceptance; it is not
+instant online revocation. Expiry must request revalidation without data deletion.
 
-Before commercial launch, publish the legal privacy notice, retention period,
-support/deletion process and applicable regional disclosures.
+## Unimplemented or unverified obligations
+
+A comprehensive retention/deletion schedule, corresponding automated jobs,
+public legal notice, support/deletion handling and service-side diagnostic
+retention require explicit operational/legal evidence. The current cron logs
+startup; it is not a data-retention job. Do not infer a retention window from an
+old policy paragraph. Review exports and raw logs before any authorized sharing.

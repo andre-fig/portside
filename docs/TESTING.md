@@ -1,136 +1,90 @@
-# Testes do Portside
+# Testing and evidence
 
-Este documento define o que deve ser validado em cada área. Testes automatizados
-confirmam comportamento de código; eles não substituem a aceitação gráfica da
-Steam em um Mac real.
+A check proves its observed behavior only. Use these operational states:
 
-## Princípios
+| State                                    | Meaning                                                                      |
+| ---------------------------------------- | ---------------------------------------------------------------------------- |
+| Verified                                 | A stated check/result was observed; include date/commit and scope            |
+| Implemented but not end-to-end validated | Code or automation exists, but the full operational path lacks evidence      |
+| Planned                                  | Requirement/design exists without complete implementation                    |
+| Blocked                                  | A concrete missing prerequisite or implementation gap prevents the milestone |
+| Unknown                                  | Available evidence cannot establish current state                            |
 
-- Teste a mudança no nível mais próximo possível do código alterado.
-- Prefira testes determinísticos, isolados e sem rede.
-- Use fixtures sanitizadas; nunca use senha, cookie, token, Steam ID, save ou
-  biblioteca Steam reais.
-- Não considere sucesso a existência de um processo ou arquivo sem verificar o
-  comportamento observável correspondente.
-- Teste explicitamente assinatura, checksum, tamanho, canal, host, path
-  traversal e rollback.
+[STATUS](STATUS.md) owns results from this audit. Historical results in
+[BOOTSTRAP_VALIDATION](BOOTSTRAP_VALIDATION.md) are not new executions.
 
-## Comandos por área
+## Automated check matrix
 
-### Desktop Swift
+Commands run from the repository root unless the row names another directory.
+Dependency installs and builds write generated output. Do not run them when the
+task forbids those writes; this documentation audit used read-only/static checks.
 
-```sh
-swift test --package-path apps/desktop
-swift build --package-path apps/desktop
-```
+| Component / command                                                                                                          | Type                                            | Environment / external dependencies                                                       | Validates                                                                                           | Limits / audit status                                                                                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `swift test --package-path apps/desktop`                                                                                     | XCTest, mocks and disposable fixtures           | macOS, Swift 6; resolved Sparkle/Sentry artifacts                                         | Core trust/download/installation/bootstrap, app updater adapters, leases and compatibility policies | Implemented but not end-to-end validated; not rerun. Real installed Sparkle probe is opt-in and may contact the feed                        |
+| `swift build --package-path apps/desktop`                                                                                    | Compilation                                     | Same; SwiftPM may download dependencies                                                   | Four desktop products compile                                                                       | Unknown current build result; not rerun; no signature/UI proof                                                                              |
+| `swift test --package-path apps/runtime-host`                                                                                | XCTest and compiled dummy-host process          | macOS, Swift 6; no package dependencies                                                   | Relocated wrapper resolution with dummy Wine/disposable home                                        | Implemented but not end-to-end validated; not rerun; no Steam                                                                               |
+| `swift build --package-path apps/runtime-host`                                                                               | Compilation                                     | macOS/Swift                                                                               | Host compiles                                                                                       | Unknown current build result; not rerun                                                                                                     |
+| `npm ci`, then `npm run prisma:validate`, `npm run typecheck`, `npm run lint`, `npm test`, `npm run build` in `apps/backend` | Schema, static checks, Vitest, TypeScript build | Node 22/npm; registry for install, DATABASE_URL schema configuration; specs mock services | DTO/controller/service contracts, source policy, license behavior, storage URL handling             | Implemented but not end-to-end validated; not rerun. Build prehook generates Prisma client; mocks do not exercise live PostgreSQL/S3/GitHub |
+| `bun install --frozen-lockfile`, then `bun run lint`, `bun run typecheck`, `bun run build` in `apps/landing`                 | Static checks and server/client build           | Bun per workflow; package registry for install                                            | TS/React and build integration                                                                      | Implemented but not end-to-end validated; not rerun. No landing unit-test script or Stripe fulfillment test exists                          |
+| `./scripts/validate-production-policy.sh`                                                                                    | Source policy                                   | Git checkout, sh, rg, source snapshots                                                    | Forbidden production URLs/names, vendor layout and compiled-archive exclusions                      | Verified in audit; does not build Wine or hash every snapshot                                                                               |
+| `./scripts/build-runtime/source-audit.sh`                                                                                    | Presence checks                                 | Local sources                                                                             | Required runtime build inputs exist                                                                 | Verified in audit; not an integrity/compilation test                                                                                        |
+| `./scripts/build-runtime/resolve-engine.sh`                                                                                  | Identity derivation                             | jq and local lock/VERSION                                                                 | Current engine name/key derivation                                                                  | Verified in audit; does not prove object exists in storage                                                                                  |
+| `./scripts/build-runtime/validate-manifest.sh docs/runtime-manifest.json` and backend fixture equivalent                     | Negative structural validation                  | jq/rg                                                                                     | Blocked empty fixtures are rejected                                                                 | Verified rejection in audit; no crypto verification and no runnable release manifest                                                        |
+| `sh -n` for each tracked shell script/hook                                                                                   | Parsing                                         | POSIX shell                                                                               | Shell grammar only                                                                                  | Verified: 35 files; does not execute script bodies                                                                                          |
+| `actionlint .github/workflows/*.yml`                                                                                         | Workflow lint                                   | Installed actionlint                                                                      | Workflow expression/schema/static checks                                                            | Verified in audit; no jobs/services executed                                                                                                |
+| `git diff --check`                                                                                                           | Diff whitespace                                 | Git                                                                                       | Changed tracked text whitespace                                                                     | Verified after editing; untracked docs also checked with formatter/link scanner                                                             |
 
-Os unitários ficam em `apps/desktop/Tests/PortsideCoreTests/`. Cubra, conforme a
-mudança, manifesto e assinatura, allowlist de host, SHA-256, tamanho, cache,
-backend offline, extração segura, ativação atômica, rollback, renderer,
-detecção de processos e sanitização de diagnósticos.
+Test ownership: [desktop tests](../apps/desktop/Tests),
+[host tests](../apps/runtime-host/Tests), [backend Vitest config](../apps/backend/vitest.config.ts)
+and adjacent `*.spec.ts` files. Pure policy tests do not prove their wiring into
+production: renderer fallback, remote profiles, runtime rollback and license
+fulfillment need separate integration evidence.
 
-### Backend NestJS
+## Artifact and manual acceptance matrix
 
-```sh
-cd apps/backend
-npm ci
-npm run prisma:validate
-npm run typecheck
-npm run lint
-npm test
-npm run build
-```
+Follow the linked runbook for required configuration; command names below are
+existing repository scripts, not fully configured release invocations.
+No publishing, Apple, GUI or storage step was executed during this audit.
 
-Specs ficam junto do código testado, em arquivos `*.spec.ts`. Use mocks para
-S3, GitHub, Sentry e serviços externos. Não faça testes unitários contra o
-Railway ou o banco de produção.
+| Component / command or procedure                                       | Type                                       | Environment / external dependencies                                                                                     | Required observation                                                                             | Current status / limitation                                                                                                                                 |
+| ---------------------------------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `./scripts/package_app.sh`                                             | Local bundle                               | macOS/Xcode, resolved dependencies; optional Sentry upload when configured                                              | Correct app/helper layout and metadata                                                           | Implemented but not end-to-end validated in this audit; default ad hoc signature is not commercial                                                          |
+| Engine build + runtime assembly in [RUNTIME](RUNTIME.md)               | Build/layout integration                   | macOS toolchain; Homebrew inputs for engine build; configured storage with the matching persistent engine for assembly  | Source-built Wine and three usable artifacts, source identity, SHA-256/size, SBOM/provenance     | Implemented but not end-to-end validated; no build executed                                                                                                 |
+| `./scripts/generate_manifest.sh` plus backend publish/desktop verifier | Signing/negative trust tests               | External Ed25519 key, approved public key, backend and desktop                                                          | Accepted authentic manifest; reject unsigned, altered, wrong-key/channel/host/min-version inputs | Implemented but not end-to-end validated; structural shell validator alone is insufficient                                                                  |
+| `./scripts/sign_release.sh`                                            | Code signing                               | Developer ID/Keychain and approved bundle                                                                               | Nested and outer codesign, Hardened Runtime entitlements, strict verification                    | Unknown current signing result; historical local report only                                                                                                |
+| `./scripts/notarize_release.sh`                                        | Apple submission/staple                    | Apple credentials/service, signed bundle                                                                                | Accepted submission, stapled app/DMG, final ZIP containing stapled app                           | Unknown current result; ZIP itself is not stapled                                                                                                           |
+| `./scripts/create_dmg.sh`, `./scripts/validate_release_bundle.sh`      | Packaging/mount validation                 | macOS disk-image tools and signed candidate                                                                             | Correct bundle and app-only DMG contents                                                         | Implemented but not end-to-end validated this audit                                                                                                         |
+| Publish/register scripts in [RELEASE](RELEASE.md)                      | External integration                       | GitHub/one S3 bucket/API/PostgreSQL and authorization                                                                   | Stored object hash/size, backend source/build/release/manifest/appcast binding                   | Unknown current state; shell upload success is not graphical acceptance                                                                                     |
+| [Bootstrap protocol](BOOTSTRAP_VALIDATION.md)                          | Manual app installation                    | Dedicated Mac account, signed/notarized app/DMG, permissions                                                            | Move gate, identity checks, replacement, reopen/eject, permission denial and no data loss        | Implemented but not end-to-end validated; historical partial evidence is scoped separately                                                                  |
+| Sparkle normal and critical update protocol                            | Manual updater                             | Two authorized signed builds, feed, macOS/Apple services                                                                | Download/install/relaunch/version receipt, timeout/offline/min-version behavior                  | Implemented but not end-to-end validated; needs authorized fixture feed and two builds. No staging product channel exists; live production state is Unknown |
+| `./scripts/validate-clean-install.sh`                                  | Operator-assisted runtime setup            | Newly allocated disposable root, authentic artifact, Apple silicon GUI, Valve/Apple, Accessibility/interactive Terminal | Prefix creation, updater exit, second Steam opening, rendered login and interaction              | Blocked by source-inferred nested prefix link in fixture assembly; script only checks nonempty signature, not crypto, and non-TTY exits before acceptance   |
+| [Steam graphical acceptance](VALIDATION.md)                            | Manual                                     | Real display/test account/Valve                                                                                         | Usable rendered window and mouse/keyboard input, persistence after updater                       | Unknown; file, PID, Dock icon and window metadata are insufficient                                                                                          |
+| GunZ control game; [Unturned fixture](UNturned_VALIDATION.md)          | Manual game play / code fixture separately | Authorized Steam account/download, actual game and GUI                                                                  | Install, launch, rendered usable scene and close; no anti-cheat bypass                           | Unknown playability; neither tests nor marketing establishes compatibility                                                                                  |
+| [Runtime/app rollback](ROLLBACK.md)                                    | Failure/recovery integration               | Disposable data, previous authenticated artifacts, backend/operator                                                     | Usable previous runtime/fixed app, prefix/library/credentials intact                             | Blocked from a reliable end-to-end claim by documented rollback implementation gaps                                                                         |
+| Prefix/game preservation across update, crash, repair and rollback     | Manual plus filesystem fixtures            | Disposable prefix/library with synthetic marker and saved state                                                         | Same user data after each scenario, with injected failures                                       | Implemented but not end-to-end validated; preservation evidence missing, see [RUNTIME](RUNTIME.md)                                                          |
 
-Cubra especialmente DTOs, guards, licenças, URLs assinadas, sincronização
-idempotente, manifesto inválido, artefato adulterado, backend offline,
-rollback, path traversal e symlink perigoso.
+## Hooks, CI and documentation checks
 
-### Landing
+[pre-commit](../scripts/hooks/pre-commit.sh) checks staged whitespace, shell/JSON
+and workflows when actionlint is available. [pre-push](../scripts/hooks/pre-push.sh)
+runs desktop tests, backend schema/typecheck/lint/tests/build, landing lint/typecheck
+and targeted script/policy checks. It does not run every matrix entry: runtime-host
+tests and landing/desktop builds need explicit execution.
 
-```sh
-cd apps/landing
-bun install --frozen-lockfile
-bun run lint
-bun run typecheck
-bun run build
-```
+Current [CI](../.github/workflows/ci.yml) gates production policy and backend schema/build.
+Swift tests, backend unit tests and the whole matrix are not GitHub release gates.
+[RELEASE](RELEASE.md) describes exact workflow order.
 
-Valide manualmente as rotas públicas, checkout, estados de sucesso/erro,
-termos, privacidade, responsividade e ausência de segredos no bundle.
+No repository-wide Markdown linter/link checker is configured. Landing declares
+Prettier. A read-only `node apps/landing/node_modules/prettier/bin/prettier.cjs --check`
+with an explicit Markdown file list can check docs when already installed; do not
+use `bun run format` for a docs audit because it writes across the landing tree.
+This audit additionally checked local links/anchors, inline source references,
+package-script names, forbidden paths and possible secrets without a network call.
 
-### Shell, manifests e workflows
-
-```sh
-git diff --check
-./scripts/validate-production-policy.sh
-for script in scripts/build-runtime/*.sh scripts/upstream/*.sh scripts/generate_manifest.sh scripts/publish_runtime.sh scripts/publish_engine.sh; do sh -n "$script"; done
-actionlint .github/workflows/*.yml
-```
-
-Para scripts que modificam arquivos, use diretórios temporários estreitos e
-confirme que snapshots e dados originais permanecem intactos.
-
-## Testes do runtime
-
-O runtime é testado em camadas:
-
-1. `source-audit.sh` confirma fontes, notices e layout;
-2. `resolve-engine.sh` relaciona versão Wine, commit e storage key;
-3. `Build Portside Engine` compila e publica engine, metadata e checksum;
-4. `fetch-engine.sh` verifica commit, snapshot checksum, SHA-256, tamanho,
-   tarball, path traversal e diretório raiz;
-5. `validate-clean-layout.sh` verifica wrapper, engine, winetricks e o verbo
-   `steam`;
-6. `validate-manifest.sh` verifica canal, componentes, URLs Portside,
-   tamanho, SHA-256 e assinatura;
-7. `validate-clean-install.yml` executa a instalação em Mac self-hosted;
-8. uma pessoa confirma a janela real e a interação com a Steam.
-
-Uma mudança somente no wrapper ou winetricks deve reutilizar um engine
-aprovado. Uma mudança em Wine ou toolchain deve executar primeiro o workflow de
-engine e só depois montar o runtime.
-
-## Aceitação gráfica da Steam
-
-Em uma sessão gráfica real e com dados de teste, confirme:
-
-- janela real da Steam visível e renderizada;
-- tela de login visível e interativa;
-- `steamwebhelper` funcionando;
-- atualização inicial concluída e segunda abertura limpa;
-- ausência de loop ao fechar a Steam;
-- comportamento correto após reinício e, quando aplicável, offline.
-
-Se a automação não puder interagir com a GUI, registre o runtime, Mac, versão,
-estágio e logs sanitizados e marque a aceitação como manual pendente. Nunca
-declare UI funcional apenas por logs de processo.
-
-## Testes negativos e segurança
-
-Considere manifesto alterado, assinatura ausente, chave errada, checksum ou
-tamanho divergente, URL fora da API Portside, canal não permitido, archive com
-caminho absoluto ou `..`, symlink perigoso, download interrompido, API/buckets
-offline, engine ausente ou com commit diferente do lockfile e processos de
-outra instalação.
-
-Logs não podem conter senha, token, cookie, Steam ID, dados de conta ou
-conteúdo de janela.
-
-## CI e evidências
-
-O `pre-commit` executa checks rápidos; o `pre-push` executa os checks da área
-alterada. O GitHub Actions mantém validações que dependem de runners, secrets,
-macOS, sessão gráfica ou publicação.
-
-```sh
-gh run list --limit 20
-gh run watch <RUN_ID> --interval 20 --exit-status
-```
-
-Ao concluir, registre comandos, resultado, commit, workflow/run ID, plataforma,
-artefatos/checksums, validações manuais e limitações. Nunca anexe dados
-sensíveis.
+When testing future changes, include negative signature/hash/size/host/path inputs,
+offline and interrupted operations, app replacement identity/version checks, runtime
+handoff races and unrelated process/data preservation. Record actual results and
+missing GUI/certificate/service prerequisites in STATUS instead of promoting
+implementation coverage into operational success.

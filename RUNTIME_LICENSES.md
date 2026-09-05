@@ -1,32 +1,23 @@
-# Runtime licenses and source procedure
+# Runtime licenses and corresponding sources
 
-Portside does not place runtime binaries in its application bundle. The
-source snapshots used for Portside builds live under `vendor/` and are
-recorded in `upstream/lock.json`. A future runtime installation will download
-only Portside-produced, signed artifacts from the Portside manifest and store
-them under the user’s Portside directory.
+Source snapshots for Portside builds live under `vendor/`, with exact identities
+in [upstream/lock.json](upstream/lock.json). Runtime binaries are separate from
+the desktop app; [RUNTIME](docs/RUNTIME.md) describes the build and authenticated
+download path. Source metadata does not prove installed artifacts or approval.
 
-The selected engine contains Wine and other upstream libraries. Their notices
-must be preserved with the installed wrapper and surfaced in the diagnostic
-export without credentials or account data. The primary source repositories,
-exact clone commits, snapshot checksums and exclusions are listed in
-`upstream/lock.json`.
+For each intended distribution:
 
-For a source audit:
+1. Validate snapshot layout with [validate_snapshot.sh](scripts/upstream/validate_snapshot.sh)
+   and compare the [snapshot digest](scripts/upstream/snapshot_checksum.sh) with the lock.
+2. Produce artifacts from the approved sources and retain build provenance,
+   component checksums, SBOM and corresponding sources/notices.
+3. Inspect the actual artifact's transitive libraries and obligations. A
+   three-package SBOM does not prove complete transitive-license coverage.
+4. Preserve [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md), the
+   [source license inventory](docs/THIRD_PARTY_LICENSES.md) and
+   [authorization record](SIKARUGIR_AUTHORIZATION.md).
 
-1. Validate the checked-in snapshots with `scripts/upstream/validate_snapshot.sh`.
-2. Build only from `vendor/` and record the source commits in provenance.
-3. Inspect the generated artifact’s notices and licenses before promotion.
-4. Keep the public Portside source, this notice, upstream notices and the
-   authorization record together.
-
-The Portside wrapper template and native host are source-controlled in
-`runtime/wrapper-template` and `apps/runtime-host`. The engine recipe builds
-from `vendor/wine`; it must stop when a required native dependency is missing
-and must never substitute a prebuilt third-party engine silently. Current
-build validation status is recorded in `docs/RUNTIME_BUILD.md` and in the
-generated provenance evidence.
-
-No Portside change claims affiliation with Apple or Valve. Upstream provenance
-and license obligations remain documented separately from the Portside product
-interface.
+The wrapper/template and host are Portside source. Wine is built from the
+tracked snapshot; missing inputs must fail rather than silently substitute a
+third-party binary. Steam and Rosetta remain Valve/Apple distributions and are
+not mirrored by Portside. Current build/release evidence is in [STATUS](docs/STATUS.md).

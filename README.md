@@ -1,111 +1,46 @@
 # Portside
 
-**Your Steam library, now on Mac.**
+Portside is a native SwiftUI macOS app that prepares a private Wine runtime
+wrapper and opens the official Windows Steam client. It targets macOS 13+ on
+Apple silicon. Steam is obtained from Valve through winetricks; games, account
+sessions and DRM/anti-cheat bypasses are not distributed by Portside.
 
-Portside is a native SwiftUI macOS app that prepares one private, user-local
-runtime wrapper and opens the official Windows Steam client. It preserves the
-Portside identity, Sentry boundary, sanitized diagnostics and rotating logs.
-It does not distribute games, copy a native Steam session, bypass DRM or
-anti-cheat, or expose build tools to the end user.
+Start with [AGENTS.md](AGENTS.md) for working rules and
+[docs/README.md](docs/README.md) for the documentation map. The
+[audit snapshot](docs/STATUS.md) distinguishes local evidence, implementation,
+pending validation and external state that was not checked.
 
-## Build and test
+## Development
 
-~~~sh
+```sh
 swift test --package-path apps/desktop
 swift build --package-path apps/desktop
 ./scripts/package_app.sh
-open build/Portside.app
-~~~
-
-The `Build Desktop` GitHub Actions workflow runs after a successful `CI` run
-on `main` (or manually) and publishes the unsigned validation build as
-`Portside.app.zip`, `Portside.dmg`, its checksum file and debug symbols. A
-Wine/source change first runs `Build Portside Engine`, which publishes an
-immutable engine with metadata and checksums. `Build Portside Runtime` then
-assembles wrapper and winetricks around that approved engine, signs and
-publishes the production runtime. Wrapper-only changes do not recompile Wine.
-Commercial releases reuse the last successful validated runtime instead of
-rebuilding it.
-
-## Monorepo layout
-
-The repository keeps the two deployable products isolated:
-
-```text
-apps/desktop/        Native macOS client, Swift Package and tests
-apps/backend/        NestJS API, Prisma schema, worker and sync job
-apps/landing/        Landing page, purchase flow and public commercial pages
-apps/runtime-host/   Native host used by the Portside runtime wrapper
-runtime/             Portside-owned wrapper template and runtime defaults
-vendor/              Audited upstream source snapshots, without nested Git
-upstream/            Source locks, dependency locks, licenses and patches
-docs/                Product, security, validation and operating documentation
-scripts/             Build, validation, release and publication automation
 ```
 
-The complete folder map, script catalog, artifact origins, DMG procedure and
-release/update runbooks are in [`docs/PROJECT_GUIDE.md`](docs/PROJECT_GUIDE.md).
-New contributors should start with [`AGENTS.md`](AGENTS.md) and the
-[`developer guide`](docs/DEVELOPER_GUIDE.md).
-The landing page can be run independently from `apps/landing/`; its CI build
-is defined in `.github/workflows/build-landing.yml`.
+The packaging command creates a development bundle with ad hoc signing by
+default. It does not establish commercial signing, notarization or working Steam.
+See [setup](docs/DEVELOPER_GUIDE.md), [test matrix](docs/TESTING.md) and
+[release runbook](docs/RELEASE.md) before other build/release steps.
 
-After the first setup, Portside stays ready and opens Steam only when you
-choose `Open Steam`; closing Steam does not launch it again.
+## System map
 
-The package targets macOS 13+ on Apple silicon. Rosetta 2 is detected and
-installed only when missing through Apple’s official softwareupdate mechanism.
-Portside-produced runtime assets are downloaded from the signed Portside
-manifest to the Portside Application Support directory and never embedded in
-Portside.app. Upstream source snapshots are versioned under `vendor/`; they are
-not a production download fallback.
+| Area                                        | Responsibility                                                              |
+| ------------------------------------------- | --------------------------------------------------------------------------- |
+| [Desktop](apps/desktop/AGENTS.md)           | SwiftUI app, reusable core, background agent and app installer              |
+| [Runtime host](apps/runtime-host/AGENTS.md) | Native executable inside the private wrapper                                |
+| [Backend](docs/BACKEND.md)                  | API, licenses, manifest/appcast delivery, artifact records, worker and cron |
+| [Landing](apps/landing/README.md)           | Public site and Stripe checkout; fulfillment remains incomplete             |
+| [Runtime](docs/RUNTIME.md)                  | Portside wrapper, source-built Wine engine and vendored winetricks          |
+| [Upstream](docs/UPSTREAM_MIRRORING.md)      | Source snapshots, locks, notices and synchronization                        |
 
-## Portside runtime baseline
+Sparkle updates `Portside.app`; a separately signed runtime manifest selects
+wrapper/engine/winetricks artifacts. Commercial bootstrap first requires
+`/Applications/Portside.app`, then completes app-update preflight before license
+and runtime work. See [architecture](docs/ARCHITECTURE.md) and
+[security](docs/SECURITY.md) for the actual trust and data boundaries.
 
-The first wrapper is isolated as `PortsideBaseline.app` and is produced by
-Portside from the checked-in template and native runtime host:
-
-~~~text
-Wrapper: Portside template + PortsideRuntimeHost
-Engine: Portside Wine build from vendor/wine
-Renderer: WineD3D
-D3DMetal/DXMT/DXVK: disabled
-MSYNC/ESYNC: enabled
-WINEDEBUG: -plugplay,+loaddll
-Program: /Program Files (x86)/Steam/steam.exe
-Steam install: vendored winetricks steam verb
-~~~
-
-The first install waits for the winetricks process and Steam updater to finish.
-A second clean wrapper opening then waits for a real on-screen window. A
-process, Dock icon or steamwebhelper without a window is not considered UI
-success. The wrapper, engine and winetricks archives are downloaded only from
-the signed Portside runtime manifest.
-
-Managed state is separated into Runtime, Wrappers, Prefixes, SteamLibrary,
-Cache, Logs, Diagnostics, Profiles and Manifests. Steam games remain outside
-versioned wrapper assets; Portside never copies a whole steamapps tree during
-runtime changes.
-
-## Compatibility
-
-GameCompatibilityService stores a versioned manifest indexed by Steam App ID
-and executable. It detects PE architecture and common graphics APIs and
-orders the supported renderer fallbacks described in ARCHITECTURE.md. Unknown
-games use a bounded, observable fallback sequence and record only a
-functional result. No anti-cheat bypass is attempted.
-
-See docs/runtime-manifest.json, docs/VALIDATION.md, THIRD_PARTY_NOTICES.md and
-SIKARUGIR_AUTHORIZATION.md.
-
-## Commercial infrastructure
-
-The commercial control plane is scaffolded separately in `apps/backend/`. It uses
-NestJS, PostgreSQL/Prisma, private object storage, signed runtime manifests,
-Sparkle 2 app updates and one-Mac license activation. Start with
-`docs/COMMERCIALIZATION.md`, `docs/BACKEND.md` and
-`docs/RAILWAY_DEPLOYMENT.md`. The Railway API and dual object storage are
-configured for production runtime artifacts. The private runtime buckets are
-accessed through the API's short-lived signed redirect; publishing the API
-manifest, customer-facing Developer ID signing, notarization and clean-install
-validation still require protected credentials and approval.
+Current workflows use one production channel and one artifact bucket. Workflow
+configuration is not evidence that GitHub, Railway, Apple, Stripe or storage are
+currently operational. See [decisions](docs/DECISIONS.md) before changing these
+boundaries and [licensing](LICENSING.md) for source/distribution obligations.

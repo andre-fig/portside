@@ -1,20 +1,27 @@
-# Key rotation
+# Signing-key rotation
 
-Keep separate key pairs and IDs for Sparkle app updates, runtime manifests and
-license tokens. The app embeds public keys only. Private keys belong in the
-CI/Railway secret store or the macOS Keychain used by Sparkle tooling.
+Separate Sparkle, runtime-manifest and license-token signing keys. The app
+contains public verification material; private keys belong to CI/Keychain or
+the backend secret store for license signing. See [SECURITY](SECURITY.md) and
+[RELEASE](RELEASE.md) for exact configuration names.
 
-Rotation procedure:
+## Current implementation and limits
 
-1. Generate a new pair in the approved offline/CI key system.
-2. Assign a new `keyId` and publish the new public key in a release that still
-   accepts the previous key.
-3. Sign a new appcast/manifest/token with the new key and verify it in the
-   production publication checks.
-4. Promote only after old and new clients have been tested.
-5. Keep the old public key for the documented overlap window, then revoke it
-   from the backend and CI workflow.
-6. Record the event in `AuditEvent` without recording private material.
+The normal desktop configuration injects one runtime public key, one Sparkle
+public key and one license public key/key ID. A suggested overlap window in
+older documentation did not establish a deployed multi-key rotation mechanism.
+Do not assume old and new clients can accept both keys without implementation
+and interoperability tests. External key inventory/revocation is Unknown.
 
-Never pass Sparkle's private key as a command-line argument or commit it. Do
-not reuse a license-signing key for manifests or app updates.
+## Planned operator procedure
+
+For an authorized rotation, first design and test how the old client trusts
+the transition: ship compatible public verification material, validate old/new
+client and token/manifest/archive combinations, and retain a usable recovery
+path. Only then change the private signer and retire old verification material
+after an explicitly defined overlap period. Record public key IDs, accepted
+client versions, dates and sanitized results; never record private material.
+
+Do not reuse one key across purposes or pass Sparkle private material on the
+command line. No general rotation CLI, enforced overlap window or automated
+AuditEvent integration for key rotation is implemented by this runbook.

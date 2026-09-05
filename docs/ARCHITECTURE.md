@@ -1,225 +1,221 @@
-# Arquitetura do Portside
+# Portside architecture
 
-Este documento descreve a arquitetura operacional atual do monorepo. O
-Portside é dividido em três produtos implantáveis e um pipeline de runtime:
+Portside is a native macOS launcher that prepares a private Windows Steam
+environment using a Portside-built Wine runtime. Valve supplies Steam and games;
+Portside does not redistribute them or bypass DRM or anti-cheat. The desktop
+targets Apple silicon and macOS 13+, with English application UI.
 
-```text
-Portside.app (macOS)
-        │ manifesto assinado, downloads e ativação
-        ▼
-API Portside (NestJS/Railway) ───── PostgreSQL/Prisma
-        │ URLs temporárias para objetos privados
-        ▼
-Bucket Portside privado
+This document describes code at the [audit snapshot](STATUS.md), not proof of a
+deployed service, a working game, or a completed customer installation. Read
+[RUNTIME.md](RUNTIME.md), [RELEASE.md](RELEASE.md), and [SECURITY.md](SECURITY.md)
+for their contracts; source code takes precedence when it changes.
 
-Fontes versionados em vendor/ e upstream/
-        │
-        ├── Build Portside Engine ──► engine Wine imutável
-        │                              (bucket privado)
-        └── Build Portside Runtime ─► wrapper + engine aprovado + winetricks
-                                       + manifesto assinado
+## Components and ownership
+
+| Component             | Responsibility and source entry point                                                                                                                                                                                                                                                          |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Portside.app`        | SwiftUI setup, installation gate, license activation, app preflight, runtime preparation and Steam handoff. [`PortsideApp.swift`](../apps/desktop/Sources/Portside/PortsideApp.swift) owns orchestration.                                                                                      |
+| `PortsideCore`        | Shared installation, trust, downloads, state, process ownership, compatibility and bootstrap logic. No Sparkle or Sentry package dependency; see [`Package.swift`](../apps/desktop/Package.swift).                                                                                             |
+| `PortsideInstaller`   | Auxiliary executable in the main app's `Contents/MacOS`; safely copies the commercial app to `/Applications/Portside.app`, revalidates replacement identity, retains the old app and optionally ejects the original DMG. [`main.swift`](../apps/desktop/Sources/PortsideInstaller/main.swift). |
+| `PortsideAgent`       | Embedded background app under `Contents/Helpers/PortsideAgent.app`. One mode observes managed Steam/game processes; another prepares runtime downloads. It is not the Wine launcher. [`main.swift`](../apps/desktop/Sources/PortsideAgent/main.swift).                                         |
+| `PortsideRuntimeHost` | Separate Swift package and native executable inside the downloaded wrapper. Resolves its bundle, starts Wine/wineboot or winetricks through `Process`, and records sanitized output. [`main.swift`](../apps/runtime-host/Sources/PortsideRuntimeHost/main.swift).                              |
+| Wrapper               | Mutable `PortsideBaseline.app` assembled from the [Portside template](../runtime/wrapper-template/Contents/Info.plist), host, engine and winetricks, with a link to the persistent prefix. Separate from `Portside.app`.                                                                       |
+| Wine engine           | Portside compilation of pinned Wine source, executing Windows programs; its build and inventory are in [RUNTIME.md](RUNTIME.md).                                                                                                                                                               |
+| winetricks            | Pinned source script packaged as a runtime component; the `steam` verb obtains Steam from Valve during setup. It is not an app updater.                                                                                                                                                        |
+| Backend               | NestJS HTTP control plane, Prisma/PostgreSQL records, license device challenges, manifests, artifact redirects and release administration. [`main.ts`](../apps/backend/src/main.ts), [`app.module.ts`](../apps/backend/src/app.module.ts).                                                     |
+| Worker / cron         | Separate backend processes: workflow reconciliation in [`worker.ts`](../apps/backend/src/worker.ts); cron entry in [`cron.ts`](../apps/backend/src/cron.ts), whose current job is a log-only placeholder.                                                                                      |
+| Landing               | TanStack Start/React website and server-side Stripe checkout creation. [`__root.tsx`](../apps/landing/src/routes/__root.tsx), [`checkout.functions.ts`](../apps/landing/src/lib/checkout.functions.ts). Its visible Portuguese copy is a gap against the English product policy.               |
+| Sparkle               | Swift dependency updating the signed application through appcast enclosures. Integration: [`PortsideUpdateCoordinator.swift`](../apps/desktop/Sources/Portside/PortsideUpdateCoordinator.swift).                                                                                               |
+| Artifact storage      | A configured S3-compatible bucket for engine/runtime/app objects. Download clients receive temporary signed URLs, never bucket credentials. See [`AppConfig`](../apps/backend/src/core/app-config.ts). Actual bucket access was not verified during this audit.                                |
+
+There is no separate top-level `packages/` workspace. `apps/desktop` contains
+four Swift products (including the core library); `apps/runtime-host` is an
+independent Swift package. Backend dependencies are fixed by npm's lockfile;
+landing dependencies by Bun's lockfile; Swift dependencies by
+[`Package.resolved`](../apps/desktop/Package.resolved).
+
+Other top-level areas have distinct roles: `scripts/` builds and validates;
+`.github/workflows/` orchestrates CI/publication; `runtime/` owns the wrapper
+template; `upstream/` owns locks, audited licenses and the patch policy (no
+checked-in patch set exists at this audit base);
+`vendor/` contains source snapshots, not authoritative Portside documentation or
+prebuilt release payloads. [PROJECT_GUIDE.md](PROJECT_GUIDE.md) routes scripts.
+
+```mermaid
+flowchart LR
+  Sources[Portside sources + pinned upstreams] --> Build[Engine / runtime build]
+  Build --> Store[Artifact storage]
+  Desktop[Portside.app] --> API[Backend API]
+  API --> DB[(PostgreSQL)]
+  API --> Store
+  Store --> Desktop
+  Desktop --> Wrapper[Wrapper / RuntimeHost]
+  Wrapper --> Wine[Wine + persistent prefix]
+  Wine --> Steam[Valve Steam]
+  Valve[Valve downloads] --> Steam
+  Landing[Landing checkout] --> Stripe[Stripe]
 ```
 
-## Fronteiras do sistema
+The Stripe branch currently has no implemented payment-webhook-to-license
+issuance connection. The diagram is a dependency map, not deployment evidence.
 
-| Área | Responsabilidade | Não deve fazer |
-| --- | --- | --- |
-| `apps/desktop` | Interface macOS, licença, atualização, instalação, rollback e diagnóstico | Compilar runtime, acessar buckets diretamente ou copiar a Steam nativa |
-| `apps/backend` | Licenças, manifestos, artefatos, builds, releases, promoção e URLs assinadas | Confiar somente em checksum ou armazenar binários em filesystem efêmero |
-| `apps/landing` | Página de venda, checkout, suporte e termos comerciais | Executar lógica de runtime ou depender do repositório antigo da landing |
-| `apps/runtime-host` | Host nativo colocado dentro do wrapper | Ser um aplicativo de usuário independente |
-| `vendor/` + `upstream/` | Fontes, lockfiles, licenças, notices e patches auditados | Conter caches, `.git` aninhado ou archives compilados |
-| GitHub Actions | Validação, compilação, publicação e notarização | Expor secrets ou fazer promoção implícita sem proteção |
+## First installation and bootstrap
 
-O runtime não fica embutido no `Portside.app`. O aplicativo baixa somente
-componentes descritos pelo manifesto assinado e os instala em diretórios de
-Application Support controlados pelo Portside.
+1. `PortsideModel.startAutomatically()` inspects location. A commercial bundle
+   must be writable, resolve exactly to `/Applications/Portside.app`, and be
+   outside a DMG or App Translocation. Debug and explicitly packaged
+   `development` builds are exempt. A move request uses
+   [`ApplicationInstallation.swift`](../apps/desktop/Sources/PortsideCore/ApplicationInstallation.swift)
+   and [`ApplicationInstallationTransaction.swift`](../apps/desktop/Sources/PortsideCore/ApplicationInstallationTransaction.swift),
+   then reopens the installed copy before the original instance exits.
+2. Commercial bootstrap authenticates and quiesces older runtime-only updater
+   agents, then takes a shared process lease. It initializes Sparkle and awaits
+   an immediate appcast probe before license/state/runtime work. The
+   [`bootstrap state machine`](../apps/desktop/Sources/PortsideCore/PortsideBootstrap.swift)
+   is in memory; only the updater relaunch receipt persists. Sentry initializes
+   earlier, during app construction; the location gate is not a blanket ban on
+   diagnostic activity.
+3. After the app preflight permits continuation, load environment state and
+   validate/activate the license in a configured non-Debug build. Initial setup
+   checks Apple silicon and at least 12 GB available space. The macOS 13 floor
+   comes from package/bundle deployment metadata; `SystemRequirements.validate`
+   itself does not compare OS versions.
+4. Probe Rosetta by running an x86_64 system program; if absent, invoke Apple's
+   `softwareupdate --install-rosetta --agree-to-license`. Rosetta comes from
+   Apple, not the runtime bucket. See
+   [`RosettaManager`](../apps/desktop/Sources/PortsideCore/RuntimePipeline.swift).
+5. Fetch and authenticate a runtime manifest, download wrapper/engine/winetricks,
+   verify sizes and SHA-256, assemble a wrapper, and create or reuse the separate
+   prefix. [`PortsideRuntimePipeline.swift`](../apps/desktop/Sources/PortsideCore/PortsideRuntimePipeline.swift)
+   owns this path. Recovery limits are in [RUNTIME.md](RUNTIME.md); an existing
+   directory is not proof of a verified customer installation.
+6. If `steam.exe` is absent, invoke the wrapper's host with `--winetricks steam`.
+   Stop only processes attributed to this wrapper/prefix after setup, then open
+   the wrapper through LaunchServices for a clean second launch.
+7. The readiness monitor requires a window-sized on-screen entry and a webhelper
+   process before the app marks setup complete. It reports
+   `visibleButUnverified`, not confirmed interaction. Launch the compatibility
+   agent and runtime updater, then hide and terminate `Portside.app`. Real rendered
+   login/game interaction is a separate [manual acceptance](VALIDATION.md).
 
-## Desktop macOS
+## Subsequent openings and process lifetime
 
-`apps/desktop` é um Swift Package com três produtos principais:
+Every new process repeats the location and awaited app-update gates. A completed
+installation validates the wrapper's layout and fetches signed runtime policy,
+including when the wrapper already exists. If managed Steam is stopped, it
+prepares and applies a pending runtime update. If Steam is running, runtime
+application is deferred. Missing `steam.exe` sends the user through repair.
 
-- `Portside`: interface SwiftUI e ciclo de vida do aplicativo;
-- `PortsideAgent`: processo auxiliar usado pelo wrapper;
-- `PortsideCore`: caminhos, licenças, downloads, manifesto, verificação,
-  rollback, compatibilidade, Steam flow e diagnósticos.
+A ready existing installation shows **Open Steam**; clicking it launches the
+wrapper, waits for window/webhelper evidence, starts helpers and exits the main
+app. LaunchServices owns the wrapper launch independently; closing the launcher
+does not intentionally terminate Wine/Steam. This process model is implemented,
+but persistence of a real rendered Steam session remains an acceptance test.
 
-O fluxo de instalação/atualização é:
+[`PortsideAgent`](../apps/desktop/Sources/PortsideCore/PortsideAgent.swift) scans
+managed libraries approximately every 30 seconds and exits when managed Steam
+processes disappear. `--runtime-updater` instead runs
+[`PortsideRuntimeUpdateWorker`](../apps/desktop/Sources/PortsideCore/PortsideRuntimeUpdateWorker.swift),
+which prepares downloads every 15 minutes and does not apply them or exit with
+Steam. Neither mode is registered as a launchd service in this source path.
+The worker's singleton lock and the
+[foreground/background lease](../apps/desktop/Sources/PortsideCore/PortsideRuntimeActivityLease.swift)
+have different purposes. An unused daily-check helper is not the active cadence.
 
-```text
-manifesto da API
-  → assinatura/host/versão compatíveis
-  → download por URL temporária Portside
-  → SHA-256 + tamanho
-  → extração segura em diretório temporário
-  → validação do layout
-  → ativação atômica
-  → wrapper/prefixo anterior preservado para rollback
-```
+## Licensing and commercial data flow
 
-O desktop continua funcionando offline com o runtime local verificado. Uma
-atualização inválida, incompleta ou incompatível nunca substitui uma versão
-funcional. O rollback cobre wrapper, engine e winetricks; não cobre
-`SteamLibrary`, saves, prefixos de usuário ou dados da conta.
+The [landing checkout server function](../apps/landing/src/lib/checkout.functions.ts)
+creates a Stripe Checkout session. The return page is not proof of payment:
+[`order.functions.ts`](../apps/landing/src/lib/order.functions.ts) always returns
+`pending`; webhook validation, order persistence, automatic license issuance and
+email delivery are not connected. See [LICENSING.md](LICENSING.md),
+[BACKEND.md](BACKEND.md) and
+[COMMERCIALIZATION.md](COMMERCIALIZATION.md).
 
-O fluxo da Steam usa um prefixo novo e o verbo oficial `steam` do winetricks.
-Não copia a sessão nativa do macOS, não distribui o instalador da Steam e não
-captura senha, cookie, token, Steam ID ou conteúdo de janela.
+For a pre-existing active license record, the
+[backend service](../apps/backend/src/modules/licenses/license.service.ts)
+looks up the purchase key using HMAC, binds a P-256 device public key, and issues
+an Ed25519-signed token. The
+[desktop license client](../apps/desktop/Sources/PortsideCore/PortsideBackendClient.swift)
+verifies the configured server key, token device ID and offline deadline before
+persisting it in Keychain. The private device key uses Secure Enclave when
+available, otherwise a non-synchronizing device-local Keychain key.
 
-### Baseline do wrapper
+Within the signed offline deadline the desktop accepts the cached token without
+contacting the API. Afterwards it requests a challenge, signs with the device
+key, and verifies/persists the refreshed token. Failure returns to activation
+UI; it does not erase user data. Backend deactivation/revocation exists; the
+current desktop root view exposes activation only. License gating is local
+bootstrap behavior: public appcast, manifest and artifact routes do not require
+a license entitlement. Security and concurrency limits are in
+[SECURITY.md](SECURITY.md).
 
-```text
-Wrapper: PortsideBaseline.app
-Renderer: WineD3D
-D3DMetal: desabilitado
-DXMT: desabilitado
-DXVK: desabilitado
-MSYNC/ESYNC: habilitados conforme manifesto
-```
+## Two update systems
 
-A existência de `steam.exe`, `steamwebhelper` ou um ícone no Dock não prova
-sucesso. A aceitação exige uma janela real da Steam renderizada e interação
-confirmada em uma sessão gráfica.
+Sparkle replaces `Portside.app`; the runtime manifest governs
+wrapper/engine/winetricks. Their public keys, artifacts and failure boundaries
+are separate even though release scripts coordinate app/runtime metadata.
 
-## Backend e control plane
+The app preflight's information probe has a 20-second deadline. A known critical
+update or failed expected-version relaunch keeps Steam blocked. Ordinary offline
+lookup can permit the existing app; an installation session has a separate
+10-minute deadline that blocks on timeout. Sparkle's standard UI and automatic
+update preferences govern installation. A relaunch receipt checks
+`CFBundleVersion` before runtime work. A separately signed runtime
+`minimumPortsideVersion` is cached and remains mandatory offline. See
+[UPDATE_ARCHITECTURE.md](UPDATE_ARCHITECTURE.md).
 
-`apps/backend` é uma API NestJS organizada em módulos. `core` carrega
-configuração, `common` concentra guards/sanitização/políticas, `database`
-integra Prisma e `modules` separa health, licenças, artefatos, runtime, admin
-e sincronização.
+The backend currently exposes a production-only channel. Older staging and
+manual-promotion descriptions are not evidence that such an environment exists.
+Current publication triggers and their conflict with the agent policy against
+automatic promotion are explicit in [RELEASE.md](RELEASE.md) and
+[DECISIONS.md](DECISIONS.md). Agents must not publish or promote implicitly.
 
-O backend diferencia explicitamente:
+## Local persistence and data ownership
 
-```text
-source snapshot → build → artifact → release → channel → promotion/rollback
-```
+All paths below are relative to the user's Application Support `Portside/`
+directory, as defined by [`PortsidePaths`](../apps/desktop/Sources/PortsideCore/PortsideCore.swift).
+They are runtime locations, not repository files.
 
-Um arquivo com checksum correto não entra em `production` sem fonte registrada,
-build bem-sucedida, validação, release e promoção compatíveis. O worker
-reconcilia execuções autorizadas do GitHub Actions; ele registra estado e
-proveniência, mas não substitui a proteção do Environment nem aprova uma
-release sozinho.
+| Location                                | Owner / lifecycle                                                                                                                                                                            |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `environment.json`                      | Launcher state and local paths; atomic JSON writes. Corrupt state is retained as a `.corrupt-<UUID>.bak` and recovered from layout where possible.                                           |
+| `Wrappers/PortsideBaseline.app`         | Replaceable wrapper with engine and winetricks; separate from the signed main application.                                                                                                   |
+| `Prefixes/PortsideBaseline`             | Persistent Wine registry, Windows user files and Steam installation/account state. Wrapper `Contents/SharedSupport/prefix` links here. Never delete for repair, license failure or rollback. |
+| `SteamLibrary`                          | Additional managed scan root; created by Portside, but no setup code automatically redirects Steam's game installation here. Games may remain within the prefix's Steam `steamapps`.         |
+| `Runtime/Pending`, `Runtime/rollback-*` | Prepared downloads and retained wrappers. These are not a backup of games/saves; rollback is not fully transactional.                                                                        |
+| `Manifests`                             | Authenticated cached runtime JSON and ETag. Preserve signed minimum-version behavior.                                                                                                        |
+| `Cache/Downloads`, `Cache/XDG`          | Re-creatable runtime downloads and tool cache. Cache cleanup must never broaden into prefix/library removal.                                                                                 |
+| `Profiles`                              | Locally derived or explicitly validated game/renderer configuration.                                                                                                                         |
+| `Logs`, `Diagnostics`                   | Technical logs/reports; may contain local metadata and require review before sharing.                                                                                                        |
+| `app-update-relaunch.json`, lock files  | Expected app build across relaunch and process coordination; not persisted bootstrap progress.                                                                                               |
+| Keychain                                | License token and device private key; outside the Application Support tree.                                                                                                                  |
 
-As rotas de download do desktop apontam para a API Portside. A API valida que
-o nome pertence ao canal e ao artefato aprovado, gera uma URL S3 temporária e
-faz redirect. O desktop não recebe credenciais dos buckets.
+The user owns games, saves, Steam credentials and prefix contents. Valve manages
+the Steam account/session. Backend owns license/device/challenge and release
+records; storage owns published binary objects. Portside code must not copy a
+native macOS Steam session, migrate another user's prefix, or inspect account
+files to determine compatibility.
 
-## Pipeline do runtime
+## Compatibility boundaries and implementation gaps
 
-### 1. Fontes
+[`CompatibilityEngine.swift`](../apps/desktop/Sources/PortsideCore/CompatibilityEngine.swift)
+parses bounded Valve metadata and PE evidence within managed roots; it does not
+execute binaries to classify imports. The default profile provider has no remote
+adapter. A protocol for backend-validated profiles does not constitute a deployed
+profile service.
 
-`vendor/wine`, `vendor/winetricks`, `runtime/wrapper-template` e
-`apps/runtime-host` são fontes locais. `upstream/lock.json` registra commits,
-licenças, checksums de snapshots e estado de validação. O processo de
-sincronização abre uma PR; não publica automaticamente uma release.
+[`RendererCompatibility.swift`](../apps/desktop/Sources/PortsideCore/RendererCompatibility.swift)
+contains inventory, per-executable Wine registry configuration and fallback
+policy, but still resolves `Contents/SharedSupport/wine`; the current host and
+installer use `Contents/SharedSupport/engine`. The agent does not orchestrate the
+tested automatic post-failure fallback policy. Treat this integration as
+**Implemented but not end-to-end validated**, not current renderer support.
+Agent-recorded game observations always leave visual state unverified.
 
-### 2. Engine persistente
-
-`Build Portside Engine` é acionado por mudança real no Wine, patches, toolchain
-ou commit Wine do lockfile. Em Ubuntu ele valida as entradas; em `macos-15`
-ele compila o Wine e publica no bucket privado:
-
-```text
-runtime/engines/validated/<engine-version>/
-  PortsideWineEngine-<engine-version>.tar.xz
-  PortsideWineEngine-<engine-version>.sha256
-  engine-metadata.json
-```
-
-`engine-metadata.json` relaciona engine, commit fonte, snapshot checksum,
-checksum do archive, tamanho, build ID e toolchain. O prefixo é armazenamento
-interno de componentes validados, não um canal de atualização de usuário.
-
-### 3. Montagem do runtime
-
-`Build Portside Runtime` é acionado por mudanças no wrapper, host, winetricks
-ou scripts de montagem. `fetch-engine.sh` calcula o engine esperado pelo
-lockfile, baixa sua metadata do bucket privado e verifica:
-
-- commit e snapshot checksum do Wine;
-- storage key e nome do arquivo;
-- SHA-256 e tamanho do archive;
-- integridade do tarball e ausência de path traversal;
-- diretório raiz esperado após a extração.
-
-Somente depois disso o pipeline monta o wrapper, reempacota o engine com o
-nome da versão do runtime e empacota winetricks. O engine não é recompilado
-nessa etapa.
-
-Os artefatos finais são:
-
-```text
-PortsideWrapper-<runtime>.tar.xz
-PortsideWineEngine-<runtime>.tar.xz
-PortsideWinetricks-<runtime>.tar.xz
-runtime-manifest.json
-engine-input.json
-provenance.json
-sbom.spdx.json
-```
-
-O manifesto assinado contém versão, componente, URL da API, SHA-256, tamanho,
-fonte e renderer padrão. A publicação grava os objetos no bucket privado
-Portside. Versões anteriores permanecem disponíveis para rollback.
-
-## App, runtime e atualização
-
-São dois ciclos independentes:
-
-```text
-Sparkle appcast assinado ──► atualização do Portside.app
-Manifesto runtime assinado ─► atualização do wrapper/engine/winetricks
-```
-
-Uma release do app reutiliza o último runtime validado; `release-production`
-não recompila Wine. O app só publica depois de assinatura Developer ID,
-notarização, stapling, validação do bundle e registro da release no backend.
-
-## Workflows
-
-| Workflow | Runner principal | Função |
-| --- | --- | --- |
-| `ci.yml` | Ubuntu | Política de fontes, Prisma e build do backend |
-| `build-engine.yml` | Ubuntu + macOS | Engine Wine persistente e metadata |
-| `build-runtime.yml` | Ubuntu + macOS | Montagem, manifesto e publicação do runtime |
-| `build-desktop.yml` | Ubuntu + macOS condicional | Build unsigned de validação do app |
-| `build-landing.yml` | Ubuntu | Build da landing |
-| `sync-upstreams.yml` | Ubuntu | PR de sincronização de fontes |
-| `validate-clean-install.yml` | Mac self-hosted | Instalação limpa e validação gráfica |
-| `release-production.yml` | macOS | Assinatura, notarização e publicação comercial |
-| `deploy-railway.yml` | Ubuntu | Verificação da API Railway |
-
-Os workflows de engine e runtime usam `concurrency` para cancelar trabalho
-antigo do mesmo branch. O preflight barato roda em Ubuntu; macOS fica reservado
-para Wine, Swift, empacotamento, codesign e notarização.
-
-## Segurança, privacidade e observabilidade
-
-- Buckets são privados; acesso externo passa pela API e por URLs temporárias.
-- Chaves privadas, certificados, tokens e credenciais ficam em secrets ou
-  Keychain, nunca no Git.
-- Archives são extraídos somente após validação de caminhos e estrutura.
-- Sentry recebe contexto sanitizado: versão do app/runtime/engine, estágio,
-  arquitetura, renderer, códigos de erro e estados operacionais. Não recebe
-  senha, cookie, token, Steam ID, conteúdo de janela ou dados de conta.
-- Processos gerenciados só são encerrados quando seus argumentos apontam para
-  o wrapper/prefixo do Portside; Steam nativa e outros wrappers não são
-  afetados.
-- O runtime baseline não solicita microfone e não possui caminho de captura de
-  áudio; qualquer recurso futuro de voz exige decisão e permissão explícitas.
-
-## Falhas e recuperação
-
-| Falha | Comportamento |
-| --- | --- |
-| upstream indisponível | Mantém snapshots existentes; sincronização falha sem apagar fontes |
-| engine não publicado | Montagem falha claramente, sem fallback externo |
-| checksum/manifesto inválido | Artefato é rejeitado e runtime ativo permanece intacto |
-| bucket indisponível | Publicação falha claramente; cliente usa a API e o estado local verificado |
-| API offline | Cliente usa manifesto/runtime local válido |
-| Steam não cria janela | Instalação não é considerada sucesso; logs e diagnóstico registram o estágio |
-| update interrompido | Diretório temporário é descartado e rollback preserva a versão anterior |
-
-Para procedimentos operacionais, consulte [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md),
-[`RUNTIME_BUILD.md`](RUNTIME_BUILD.md), [`AUTOMATIC_UPDATES.md`](AUTOMATIC_UPDATES.md),
-[`VALIDATION.md`](VALIDATION.md) e [`ROLLBACK.md`](ROLLBACK.md).
+Approved dependency roles are explicit: Wine/winetricks from locked sources,
+Steam from Valve, Rosetta from Apple, Sparkle/Sentry from SwiftPM, Stripe for
+checkout, PostgreSQL and S3-compatible storage behind the backend, and GitHub
+Actions/Apple signing services for release. Source upstream URLs are provenance;
+they must not become commercial binary-download fallbacks. See
+[upstream rules](UPSTREAM_MIRRORING.md) and [security](SECURITY.md).

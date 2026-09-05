@@ -1,55 +1,37 @@
-# Authorized upstream mirroring
+# Authorized upstream synchronization
 
-The canonical inventory is `upstream/lock.json`; `UPSTREAM_VERSIONS.json` is a
-compatibility pointer. The `vendor/` tree contains source snapshots without
-nested Git repositories. Each record preserves the exact commit, commit date,
-license statement, submodule/LFS state, exclusions and deterministic snapshot
-checksum.
+[upstream/lock.json](../upstream/lock.json) owns source repository, full commit,
+license/checksum, exclusions and submodule/LFS metadata.
+[UPSTREAM_VERSIONS.json](../UPSTREAM_VERSIONS.json) is only a compatibility pointer.
+Snapshots are source/provenance input, not Portside runtime documentation.
 
-`.github/workflows/sync-upstreams.yml` runs daily or manually. It invokes
-`scripts/upstream/sync.sh`, which stages a shallow clone in a temporary
-directory, resolves the remote commit, checks submodules/LFS, validates the
-source tree, preserves notices and opens a pull request. The workflow never
-merges or publishes automatically. If a license or notice checksum changes,
-the new snapshot is included in the PR and its lock entry is marked with
-`licenseChangeDetected: true`; review that diff before merging. If an upstream
-disappears, the workflow fails before replacing the existing snapshot.
+[Sync Upstreams](../.github/workflows/sync-upstreams.yml) runs daily at 03:17 UTC
+or by dispatch and maintains a review PR. It invokes
+[sync.sh](../scripts/upstream/sync.sh), which clones authorized sources into a
+temporary area, stages changed snapshots, validates their layout, computes
+source/license checksums and then replaces managed snapshots and the lock.
+License changes are flagged, not automatically legally approved.
 
-The Creator application remains provenance-only and the upstream launcher is
-not copied into Portside. The repository does not mirror Valve's Steam
-installer.
+A source-download/staging failure occurs before the replacement loop.
+The final multi-directory moves are not a filesystem transaction; inspect
+partial changes on a move failure. The workflow can commit/push its branch
+and manage obsolete PRs, but does not merge or publish runtime releases.
+Running sync is a source mutation with network access, not a documentation audit.
 
-The original authorization record is `SIKARUGIR_AUTHORIZATION.md`; attach the
-authoritative signed authorization document during legal review and update
-that record before commercial distribution. `upstream/licenses/` is only an
-inventory pointer: exact notices remain beside their source in each
-`vendor/` snapshot.
+The Wine and winetricks snapshots are executable build inputs; metadata-only
+Wrapper/Engines snapshots and Creator provenance do not establish the source
+for old compiled releases. Do not label those releases as Portside builds.
+See [upstream README](../upstream/README.md) and [RUNTIME](RUNTIME.md).
 
-Rebuild the Portside runtime from the repository sources with:
+For local integrity checks, use
+[validate_snapshot.sh](../scripts/upstream/validate_snapshot.sh),
+[snapshot_checksum.sh](../scripts/upstream/snapshot_checksum.sh) and
+[license_inventory_checksum.sh](../scripts/upstream/license_inventory_checksum.sh).
+The audit compared six source digests successfully; see [STATUS](STATUS.md).
+Legal review remains separate under [RUNTIME_LICENSES](../RUNTIME_LICENSES.md)
+and [SIKARUGIR_AUTHORIZATION](../SIKARUGIR_AUTHORIZATION.md).
 
-```sh
-PORTSIDE_RUNTIME_VERSION=0.1.0 \
-PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX=https://api.example.invalid/v1/runtime/artifacts/production/ \
-./scripts/build-runtime/build.sh
-```
-
-The command assembles the Portside wrapper/template, the native runtime host,
-the validated Wine engine selected from `upstream/lock.json`, and a winetricks
-source archive. The engine itself is produced independently by
-`scripts/build-runtime/build-engine.sh` and persisted in the private Portside bucket.
-The pinned Wrapper and Engines snapshots are retained as provenance only
-because they do not contain executable build source. The workflow never
-substitutes a downloaded upstream runtime when the source build fails.
-
-The exact host dependencies are recorded in `upstream/dependencies.json`.
-`docs/RUNTIME_BUILD.md` records the current validation result, architecture,
-toolchain and any missing dependency. A successful build creates unsigned
-production evidence; signing and upload are
-separate explicit steps.
-
-A missing external repository must not prevent a stable reinstall, repair,
-rollback or use of an already installed runtime. The private Portside bucket
-is the production source; upstream access is only for future source
-synchronization. A Portside artifact needs a successful source
-build, provenance, validation and explicit production registration before it
-can enter the production manifest.
+Source changes do not authorize promotion. Engine/assembly workflow behavior
+and the actual production-only publication boundary are in [RELEASE](RELEASE.md).
+Installed-runtime recovery should use approved Portside artifacts, not live
+upstream binary downloads.

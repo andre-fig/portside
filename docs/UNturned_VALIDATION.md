@@ -1,16 +1,16 @@
-# Unturned Validation
+# Unturned validation fixture
 
-Unturned is the general engine validation case for App ID `304930`; it is not a special compatibility exception and does not receive a hard-coded renderer rule.
+App ID `304930` is a general compatibility fixture, not a hard-coded game
+exception. [PortsideCoreTests.swift](../apps/desktop/Tests/PortsideCoreTests/PortsideCoreTests.swift)
+contains synthetic Valve manifest/library correlation, Unity/D3D11 PE evidence,
+renderer configuration isolation/rollback and anti-cheat/outcome tests.
 
-The automated coverage validates:
+Those tests establish code behavior only when executed; they were not rerun
+during this documentation audit. Renderer candidates include DXMT/DXVK/WineD3D,
+but [current renderer limitations](RENDERERS.md) still apply.
 
-- App ID and `libraryfolders.vdf`/`appmanifest_304930.acf` correlation;
-- bounded PE evidence for Unity and D3D11;
-- launcher and BattlEye evidence as separate profile signals;
-- renderer candidates DXMT, DXVK and WineD3D;
-- per-executable configuration and rollback without touching a save file;
-- process results including graphics failure, anti-cheat unsupported and visual state unverified.
-
-No BattlEye change or bypass is permitted. The official no-BattlEye launch option, if supplied by Steam/the game, remains an explicit user choice and is not invented by Portside.
-
-This code-level validation does not claim that Unturned renders successfully. A real acceptance run must use the managed `PortsideBaseline.app`, then manually confirm the game window and usable rendered scene. Process existence, `steamwebhelper`, a Dock icon, a launcher window or a log line are insufficient.
+No BattlEye bypass or game modification is permitted. An official alternative
+launch mode, if actually supplied by the game, remains an explicit user choice.
+Real acceptance needs the exact Portside runtime, a rendered game window and
+a usable scene under [VALIDATION](VALIDATION.md). Processes, a Dock icon,
+Steam/launcher windows or fixture success cannot establish playability.

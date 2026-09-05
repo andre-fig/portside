@@ -1,18 +1,32 @@
-# Renderer Management
+# Renderer management
 
-The supported renderer enum is limited to components Portside can verify:
+The [renderer implementation](../apps/desktop/Sources/PortsideCore/RendererCompatibility.swift)
+represents WineD3D, DXMT, DXVK, VKD3D, native Vulkan and native OpenGL.
+D3DMetal/GPTK is excluded as a selection option. Candidate enums do not imply
+packaged or working capabilities; the [Portside baseline](RUNTIME.md) selects
+WineD3D with alternate flags disabled.
 
-- WineD3D
-- DXMT
-- DXVK
-- VKD3D
-- native Vulkan
-- native OpenGL
+`RuntimeComponentInventory` detects paths, versions and representative checksums.
+`RendererManager.verify` checks the captured profile's availability; it does
+not rehash the payload at every application. `install` only delegates to that
+availability check. Current inventory/registry paths expect
+`Contents/SharedSupport/wine`, unlike the installed `SharedSupport/engine`.
 
-D3DMetal/GPTK is not a Portside renderer option. If its payload is present inside an upstream wrapper, the inventory records that fact and the disabled wrapper setting, but the compatibility engine will not select or enable it.
+The manager persists configuration by App ID/executable and can write Wine
+AppDefaults and restore stored configuration snapshots when invoked.
+Tests disable registry writes; the current registry writer does not remove all
+previous named overrides on rollback, so stored-state restoration does not prove
+restored Wine registry behavior.
+It does not download renderers, replace prefix-wide DLLs, modify game files
+or copy saves. Per-executable fixture tests are not proof of isolation in every
+shared prefix or game process.
 
-`RuntimeComponentInventory` records filesystem path, detected version, representative checksum and availability. `RendererManager` verifies those records before configuration, emits per-executable Wine AppDefaults, persists a snapshot, and can roll back the snapshot. The manager never replaces a prefix-wide DLL, modifies original game files, or copies user save/cloud data.
+`CompatibilityFallbackPolicy` allows one retry after graphics initialization
+or shader failure, only offline, without anti-cheat evidence or a risk flag.
+The helper can restore configuration before trying another candidate, but no
+production post-failure retry orchestration invokes it end to end.
 
-The first automatic fallback is deliberately narrow: only a clear graphics initialization or shader compilation failure, only once, only offline, and only without anti-cheat evidence or a risk flag. The previous AppDefaults snapshot is restored before the next renderer is applied. Stable, non-graphics, anti-cheat and online cases do not trigger an automatic fallback.
-
-Current active-wrapper result: WineD3D, DXMT, DXVK and MoltenVKCX are detected; VKD3D is unavailable. The baseline still starts with WineD3D and all alternative renderer flags disabled.
+Use [GAME_PROFILES](GAME_PROFILES.md) for candidate ordering,
+[COMPATIBILITY_LIMITATIONS](COMPATIBILITY_LIMITATIONS.md) for interpretation and
+[TESTING](TESTING.md) for required code/manual checks. Do not carry historical
+machine-specific renderer inventories into new release claims.

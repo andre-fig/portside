@@ -1,34 +1,10 @@
-# Artifact security
+# Artifact security entry point
 
-Every artifact record contains component, version, channel, source snapshot,
-Portside build, origin metadata, license, filename, size, SHA-256, optional
-signature, private storage key, provenance/SBOM, status and
-verification/promotion timestamps. Source snapshots, runtime builds, releases,
-promotions and rollbacks are separate records in Prisma. The artifact
-lifecycle is:
+The implemented trust model and its limits are in [SECURITY](SECURITY.md).
+[BACKEND](BACKEND.md) describes artifact/source/build/release records and
+administrative validation; [RELEASE](RELEASE.md) describes storage and publication.
 
-```text
-discovered -> downloading -> quarantined -> verified -> testing -> approved -> production
-                                                                            \-> rejected/deprecated
-```
-
-Production synchronization accepts only HTTPS URLs on the configured allowlist,
-does not follow an unapproved redirect, enforces a maximum download size,
-hashes before extraction and uses idempotency keys. Production artifacts must
-reference a verified source snapshot and successful Portside build and must be
-served from the Portside artifact-host allowlist. Steam's Windows installer
-remains a Valve official download performed by the approved `steam` verb;
-Portside does not mirror it.
-
-Production clients use only the Portside API host and signed temporary object
-Upstream source URLs remain provenance and development-only source data, not a
-runtime dependency of a commercial installation.
-
-Production uses one private S3-compatible object-storage bucket. A publication
-completes only after the approved object is uploaded successfully; previous
-immutable versions remain available for explicit rollback. If disaster
-recovery is required, it must be provided by a separately managed backup
-procedure rather than a second active Portside publication bucket. Never
-silently replace a verified object with a changed download. A production
-release is promoted explicitly and rollback creates an auditable rollback
-record while retaining the previous object.
+This compatibility path replaces duplicated guarantees. In particular, a
+structural manifest check is not signature verification, an administrative
+production status is not GUI acceptance, and a versioned storage key is not
+enforced immutability. Current operational evidence is in [STATUS](STATUS.md).

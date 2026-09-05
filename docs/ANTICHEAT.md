@@ -1,7 +1,16 @@
-# Anti-cheat Handling
+# Anti-cheat boundary
 
-The engine recognizes Easy Anti-Cheat, BattlEye, GameGuard, nProtect and other provider evidence from PE imports, bounded strings and process observations. Profiles record provider, possible kernel-driver requirement, Wine support status, native macOS availability, Portside status and evidence paths.
+[PEImportScanner and profile builder](../apps/desktop/Sources/PortsideCore/CompatibilityEngine.swift)
+recognize provider evidence such as Easy Anti-Cheat, BattlEye, GameGuard and
+nProtect from bounded file inspection. Profiles record provider, possible
+kernel-driver requirement and support status; default Wine support is
+`unknown`, not an externally verified compatibility database.
 
-Anti-cheat handling is informational and conservative. Portside may identify an official bootstrap or repair path and record whether a provider is known to support the selected Wine environment. It never bypasses anti-cheat, changes a game binary, fakes a driver, injects code or disables a provider.
+Anti-cheat evidence blocks the [automatic fallback policy](RENDERERS.md).
+Portside must not patch game binaries, fake drivers, inject bypasses or disable
+a provider to manufacture compatibility. An official game-supplied alternative
+launch mode requires explicit user choice; Portside must not invent one.
 
-Anti-cheat evidence disables automatic renderer fallback. The user must be told when a game requires provider support that cannot be verified. An observed BattlEye launcher is not visual proof that the game is playable.
+Provider or launcher detection is not proof of a playable game. See
+[UNturned_VALIDATION](UNturned_VALIDATION.md) for code fixtures and
+[VALIDATION](VALIDATION.md) for separate rendered-scene acceptance.

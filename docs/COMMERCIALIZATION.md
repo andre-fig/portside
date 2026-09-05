@@ -1,93 +1,27 @@
-# Commercialization readiness
+# Commercial readiness
 
-Portside keeps the validated Wine/Steam pipeline intact and adds a separate
-commercial control plane. The app bundle contains Portside code only. Runtime
-components are selected by a signed manifest and downloaded from Portside-owned
-HTTPS storage using short-lived URLs.
+Commercial readiness is an acceptance requirement, not a property inferred
+from compiled code. [STATUS](STATUS.md) records current evidence. The runtime
+and license protocol exist; payment fulfillment is incomplete and external
+signing/storage/payment/deployment status was not checked during the audit.
 
-There is one Railway operational environment and one customer release channel:
+Before a customer availability claim, obtain evidence for:
 
-- `development`: local Debug builds may use the pinned official sources for
-  validation. No production license bypass is compiled into Release.
-- `production`: the only release channel in the Railway project, database,
-  buckets and API. GitHub Actions uses its protected `production` Environment
-  for secrets and approvals.
+1. Source/distribution obligations in [LICENSING](../LICENSING.md), including
+   exact runtime/component notices and corresponding sources.
+2. A specific source-built runtime: signed manifest, matching hashes/sizes,
+   provenance/SBOM and actual clean Steam/game acceptance.
+3. The final app and DMG: Developer ID, Hardened Runtime, accepted notarization,
+   staple, bundle validation and installation into Applications.
+4. Actual manifest discovery, complete private-storage redirects, appcast
+   archive signatures, Sparkle update/relaunch and recovery/data preservation.
+5. Stripe payment confirmation, idempotent fulfillment, delivered license,
+   activation/offline/revocation behavior, email and privacy/support operations.
+6. Registered backend source/build/release records bound to the actual artifacts.
 
-The repository does not contain Railway IDs, passwords, signing keys, a
-Developer ID identity, a Sparkle private key or a license-signing private key.
-Those values belong in Railway/CI secret stores and the macOS Keychain.
-
-Commercial release gates:
-
-1. Legal review of Portside, Wine, winetricks, runtime and trademark terms.
-2. Artifact provenance, source notices and checksums complete.
-3. macOS validation of the real Steam window with the approved runtime.
-4. Developer ID signing, Hardened Runtime, notarization and stapling.
-5. Sparkle EdDSA appcast and runtime-manifest signatures verified.
-6. Production activation/update/rollback tests pass.
-7. Authenticated registration of the release in the production API.
-
-Local/CI command sequence (the variables are intentionally not supplied here):
-
-```sh
-PORTSIDE_VERSION=1.0.0 \
-PORTSIDE_API_BASE_URL=https://api.<your-domain> \
-PORTSIDE_UPDATE_FEED_URL=https://api.<your-domain>/v1/appcast.xml \
-PORTSIDE_ARTIFACT_HOSTS=downloads.<your-domain> \
-PORTSIDE_SPARKLE_PUBLIC_KEY="$SPARKLE_PUBLIC_KEY" \
-PORTSIDE_RUNTIME_MANIFEST_PUBLIC_KEY="$MANIFEST_PUBLIC_KEY" \
-PORTSIDE_LICENSE_PUBLIC_KEY="$LICENSE_PUBLIC_KEY" \
-PORTSIDE_LICENSE_KEY_ID=license-2026-01 \
-./scripts/build_release.sh
-
-PORTSIDE_VERSION=1.0.0 \
-PORTSIDE_CODESIGN_IDENTITY='Developer ID Application: <team>' \
-PORTSIDE_RUNTIME_MANIFEST_INPUT=/secure/unsigned-runtime-manifest.json \
-PORTSIDE_MANIFEST_SIGNING_KEY_FILE=/secure/manifest-signing-key.pem \
-./scripts/sign_release.sh
-
-PORTSIDE_VERSION=1.0.0 \
-PORTSIDE_NOTARY_KEY_ID=<APP_STORE_CONNECT_KEY_ID> \
-PORTSIDE_NOTARY_ISSUER_ID=<APP_STORE_CONNECT_ISSUER_ID> \
-PORTSIDE_NOTARY_KEY_PATH=/secure/AuthKey_<APP_STORE_CONNECT_KEY_ID>.p8 \
-./scripts/notarize_release.sh
-
-SPARKLE_BIN="$PWD/.build/artifacts/sparkle/Sparkle/bin" \
-PORTSIDE_UPDATES_DIR="$PWD/build/releases/updates" \
-./scripts/generate_appcast.sh
-```
-
-Publish only after production validation. The authenticated release workflow
-registers the signed release directly in the production API and can roll back
-to a signed previous version; the application never carries the admin
-credential.
-
-```sh
-PORTSIDE_VERSION=1.0.0 PORTSIDE_PUBLIC_BUCKET=<approved-bucket> \
-PORTSIDE_UPDATE_CHANNEL=production PORTSIDE_CONFIRM_PRODUCTION=YES ./scripts/publish_release.sh
-
-curl --fail --request POST \
-  --header "Authorization: Bearer $PORTSIDE_ADMIN_BEARER_TOKEN" \
-  --header 'Content-Type: application/json' \
-  --data '{}' "$PORTSIDE_API_BASE_URL/v1/admin/app-releases/register"
-```
-
-For runtime assets, use the source/build/release endpoints documented in
-`docs/BACKEND.md`. Register only a successful Portside build, validate it on a
-real Mac, then register the production release and publish its signed manifest
-with `POST /v1/admin/manifests/publish`. Production publication also requires
-`PORTSIDE_CONFIRM_PRODUCTION=YES`; the publishing script writes each object to
-the approved private bucket and keeps prior versions for rollback.
-
-The Railway API and private object storage are configured for production runtime,
-and the production runtime workflow produces signed evidence in that bucket.
-For a direct download of the currently promoted app release, use
-`https://<api-host>/app/production/latest`; this route returns the current
-`.dmg`, while Sparkle continues to use the versioned `.zip` URLs from the
-appcast.
-This does not claim a customer release: Developer ID signature, notarization,
-real-Mac GUI acceptance and an end-to-end desktop download still require their
-external result to be produced and recorded. The current bucket is private;
-the backend exposes the short-lived signed redirect used by production runtime
-manifests, but the API manifest still needs to be published and validated end
-to end before rollout.
+Use [RELEASE](RELEASE.md) for the real script sequence and configuration names;
+[TESTING](TESTING.md) and [VALIDATION](VALIDATION.md) define acceptance.
+The current production-only automatic workflow does not enforce all these
+requirements. Do not invent a staging promotion or treat a workflow run as
+authority to publish independently. The main app includes Sparkle/Sentry
+dependencies; Wine/Steam remain outside its bundle.

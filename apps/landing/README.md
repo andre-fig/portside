@@ -1,296 +1,102 @@
-# Portside landing page
+# Portside landing
 
-Esta aplicação faz parte do monorepo Portside e é a fonte oficial da landing
-page e da página de compra. Ela foi importada do repositório
-`andre-fig/portside-games-on-mac` no commit `3cb34d47f85016b87152b41f2ce040a4c723d91b`.
-O repositório externo não é usado pelo build ou pelo deploy do Portside.
+This directory is the monorepo source for the public site and checkout entry.
+It uses React 19, TanStack Start/Router, Vite, Tailwind and Nitro's Node server
+preset. Dependencies and commands are defined by [package.json](package.json),
+[bun.lock](bun.lock), and [vite.config.ts](vite.config.ts). The former separate
+landing repository is not a build dependency.
 
-## Desenvolvimento local
+Start with [local agent rules](AGENTS.md), the [route map](src/routes/README.md),
+[architecture](../../docs/ARCHITECTURE.md), and the
+[commercial flow](../../docs/LICENSING.md). Current audit results and external
+unknowns are in [STATUS](../../docs/STATUS.md).
 
-```bash
+## Local development
+
+Run from `apps/landing`:
+
+```sh
 bun install --frozen-lockfile
 bun run dev
 ```
 
-Validações disponíveis:
+For ordinary code changes:
 
-```bash
+```sh
 bun run lint
+bun run typecheck
 bun run build
 ```
 
-As variáveis de pagamento são somente de servidor. Não crie `.env` versionado;
-configure segredos no ambiente de deploy. Os nomes esperados estão descritos
-em `docs/PROJECT_GUIDE.md`.
-
----
-
-# Product brief: Mac Gaming Unleashed
-
-Desenvolvimento Portside e implemente sua landing page comercial completa. A logo oficial será fornecida em anexo: utilize-a no cabeçalho, favicon, página de pagamento e demais pontos adequados, sem redesenhá-la nem substituí-la.
-
-Produto
-
-Portside é um aplicativo para Macs com Apple Silicon que prepara automaticamente um ambiente de compatibilidade, abre a versão Windows da Steam e permite instalar e executar jogos Windows da biblioteca do usuário. Toda a complexidade de Wine, engines, renderers e configurações deve permanecer escondida.
-
-A comunicação deve transmitir:
-
-instalar, abrir a Steam e jogar;
-
-acesso a mais jogos da biblioteca Steam no Mac;
-
-configuração automática;
-
-experiência simples e integrada ao macOS;
-
-compatibilidade variável conforme o jogo;
-
-independência da Valve e da Apple.
-
-Não afirme que todos os jogos funcionam. Explique de maneira discreta que alguns títulos, especialmente os dependentes de determinados sistemas anticheat, drivers ou launchers, podem não ser compatíveis.
-
-Design
-
-Crie um visual extremamente clean, premium e minimalista, inspirado na qualidade visual do site da Apple:
-
-muito espaço em branco;
-
-hierarquia tipográfica forte;
-
-títulos grandes e objetivos;
-
-animações suaves e discretas;
-
-cartões com cantos arredondados;
-
-sombras leves;
-
-navegação simples;
-
-excelente aparência em Mac, iPhone e iPad;
-
-fundo predominantemente branco;
-
-cinzas neutros, preto suave e tons de azul semelhantes aos usados em interfaces da Apple;
-
-utilize também as cores da logo do Portside para manter identidade própria.
-
-Use a fonte nativa do sistema com uma stack como:
-
-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display",
-             "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
-
-
-Não distribua arquivos proprietários de fontes da Apple. Use as fontes instaladas no sistema e fallbacks adequados.
-
-O resultado pode ser inspirado na clareza da Apple, mas não deve copiar páginas, componentes, ilustrações ou identidade visual da Apple.
-
-Estrutura da landing page
-
-Implemente:
-
-Cabeçalho com logo, nome Portside, “Como funciona”, “Compatibilidade”, “Preço”, “FAQ” e botão “Comprar”.
-
-Hero com mensagem semelhante a:
-
-Mais jogos da sua Steam. Agora no Mac.
-
-O Portside prepara tudo automaticamente para você abrir a Steam do Windows, instalar seus jogos e começar a jogar no seu Mac com Apple Silicon.
-
-
-Botões:
-
-“Comprar Portside”
-
-“Veja como funciona”
-
-Demonstração visual simples do fluxo:
-
-abra o Portside;
-
-entre na Steam;
-
-instale e jogue.
-
-Seção destacando:
-
-configuração automática;
-
-integração amigável com o macOS;
-
-atualização do ambiente de compatibilidade;
-
-perfis automáticos por jogo;
-
-reparação e diagnóstico simplificados.
-
-Seção transparente sobre compatibilidade.
-
-Card de preço, cujo valor deve vir de configuração/backend, sem ficar duplicado ou rigidamente gravado no frontend.
-
-FAQ.
-
-Rodapé com termos, privacidade, suporte e o aviso:
-
-Portside é um produto independente e não é afiliado, patrocinado ou endossado pela Valve Corporation ou pela Apple Inc. Steam é uma marca da Valve Corporation.
-
-
-Pagamento
-
-Ao clicar em “Comprar Portside”, direcione o usuário para uma página de pagamento pertencente ao mesmo site e com o mesmo design.
-
-Use Stripe para oferecer:
-
-pagamento com cartão de crédito;
-
-Apple Pay quando disponível;
-
-fallback automático para cartão quando o navegador ou dispositivo não suportar Apple Pay.
-
-Use Stripe Checkout ou Stripe Payment Element conforme for mais adequado à arquitetura existente. Não implemente processamento próprio de cartão e nunca envie dados completos do cartão ao backend do Portside.
-
-O preço e o priceId devem ser configuráveis por ambiente. Utilize modo de teste enquanto não existirem credenciais de produção.
-
-Para Apple Pay:
-
-utilize a integração oficial do Stripe;
-
-documente a verificação do domínio;
-
-exija HTTPS em produção;
-
-mostre o botão somente quando estiver realmente disponível;
-
-não confunda Apple Pay com compra pela App Store ou “Iniciar sessão com a Apple”.
-
-Entrega após a compra
-
-O pagamento só pode ser considerado confirmado após validação segura pelo webhook do Stripe. Não libere o produto apenas porque o navegador foi redirecionado para uma página de sucesso.
-
-Após a confirmação:
-
-crie o pedido no backend;
-
-gere uma licença criptograficamente aleatória;
-
-vincule a licença à compra e ao e-mail informado;
-
-disponibilize uma página segura de confirmação;
-
-envie também um e-mail com o link de download e a licença.
-
-A página de confirmação deve apresentar:
-
-“Pagamento confirmado”;
-
-botão “Baixar Portside”;
-
-chave de licença;
-
-botão “Copiar chave”;
-
-botão “Baixar chave”;
-
-instrução curta para instalação;
-
-opção para reenviar as informações por e-mail.
-
-O botão “Baixar chave” deve gerar um arquivo como:
-
-portside-license.txt
-
-
-ou um formato próprio seguro, contendo apenas a licença e instruções mínimas. Não inclua dados de pagamento.
-
-O link do aplicativo deve utilizar URL temporária ou assinada gerada pelo backend. A chave nunca deve aparecer em parâmetros de URL, logs, analytics ou mensagens de erro.
-
-Implemente idempotência para impedir que webhooks repetidos gerem múltiplas compras ou licenças.
-
-Arquitetura
-
-Antes de alterar o projeto:
-
-inspecione o repositório atual;
-
-preserve o aplicativo macOS, o backend e as funcionalidades existentes;
-
-reutilize a arquitetura e o padrão visual já existentes quando aplicável;
-
-se ainda não existir frontend web, crie uma aplicação TypeScript moderna e adequada para SEO;
-
-mantenha frontend, pagamento, licenciamento e distribuição desacoplados.
-
-Prepare variáveis de ambiente para:
-
-STRIPE_SECRET_KEY
-STRIPE_PUBLISHABLE_KEY
-STRIPE_WEBHOOK_SECRET
-STRIPE_PRICE_ID
-PORTSIDE_DOWNLOAD_BASE_URL
-EMAIL_PROVIDER_API_KEY
-APP_BASE_URL
-
-
-Nenhuma chave secreta pode ser enviada ao navegador ou incluída no repositório.
-
-Segurança e privacidade
-
-Valide a assinatura do webhook do Stripe.
-
-Utilize IDs de pedidos não previsíveis.
-
-Proteja a página de entrega com sessão ou token temporário.
-
-Implemente limitação de requisições nos endpoints sensíveis.
-
-Não armazene dados completos de cartão.
-
-Não registre licença completa em logs.
-
-Não coloque binários diretamente no repositório.
-
-Não libere o download antes da confirmação do pagamento.
-
-Não declare que pagamentos reais ou Apple Pay funcionam sem validação efetiva.
-
-Qualidade
-
-A página deve ser:
-
-responsiva;
-
-acessível por teclado e leitores de tela;
-
-rápida;
-
-otimizada para SEO e compartilhamento;
-
-compatível com Safari, Chrome e Firefox;
-
-visualmente consistente em telas Retina;
-
-sem dependências visuais desnecessariamente pesadas.
-
-Adicione testes para:
-
-criação do checkout;
-
-confirmação pelo webhook;
-
-rejeição de webhook inválido;
-
-idempotência;
-
-geração da licença;
-
-página de sucesso sem pagamento;
-
-liberação após pagamento confirmado;
-
-download da licença;
-
-fallback quando Apple Pay não estiver disponível;
-
-ausência de segredos no bundle frontend.
-
-Ao finalizar, execute build, testes e lint. Informe os arquivos criados ou alterados, comandos para execução, variáveis necessárias e quais partes ainda dependem de credenciais, domínio verificado, serviço de e-mail ou artefato real do Portside.
+There is no package `test` command. The
+[landing workflow](../../.github/workflows/build-landing.yml) pins Bun 1.2.21,
+installs the lockfile, runs lint/typecheck/build, and uploads `.output`. A build
+proves compilation, not browser behavior, a working payment, or deployment.
+[Railway notes](../../docs/RAILWAY_DEPLOYMENT.md) distinguish source-controlled
+settings from unknown external configuration.
+
+## Code responsibilities
+
+| Location                                                                                 | Responsibility                                                |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| [`src/router.tsx`](src/router.tsx), [`src/routes/__root.tsx`](src/routes/__root.tsx)     | Router and shared app shell/query/error handling              |
+| [`src/routes`](src/routes)                                                               | Public file-based pages and route metadata                    |
+| [`src/components/site`](src/components/site)                                             | Header, footer, supplied logo                                 |
+| [`src/components/ui`](src/components/ui)                                                 | Reusable UI components                                        |
+| [`src/lib/pricing.functions.ts`](src/lib/pricing.functions.ts)                           | Server-side display pricing                                   |
+| [`src/lib/checkout.functions.ts`](src/lib/checkout.functions.ts)                         | Validated email input and server-side Stripe Checkout request |
+| [`src/lib/order.functions.ts`](src/lib/order.functions.ts)                               | Current always-pending order-status placeholder               |
+| [`src/server.ts`](src/server.ts), [`src/lib/error-capture.ts`](src/lib/error-capture.ts) | SSR failure recovery and error expansion                      |
+| [`public`](public)                                                                       | Static assets; no application/runtime archives                |
+
+`src/routeTree.gen.ts`, `.output/`, caches and dependency directories are generated.
+Do not edit them manually or import Next.js/Remix route conventions. The shared
+Vite configuration already supplies its plugins; duplicating them is unsafe.
+
+## Commercial and UI limits
+
+Checkout reads server-only Stripe/pricing environment names documented in
+[LICENSING](../../docs/LICENSING.md). Missing credentials return an unconfigured
+response. Do not put secrets in `VITE_*`, source, URLs, analytics, or browser
+bundles. Raw Stripe error response logging and expanded SSR errors are existing
+privacy risks that need separate code changes.
+
+Checkout session creation is **Implemented but not end-to-end validated**.
+Payment fulfillment is **Blocked** by the missing webhook/order/issuance/email
+integration: order status always returns pending. The confirmed screen is
+unreachable, and its resend control only shows a toast. Real Stripe payments,
+Apple Pay and domain setup are **Unknown**. Display pricing does not query the
+configured Stripe Price, so it can differ from Checkout.
+
+English is the required product language. The root HTML declares `lang="en"`,
+but existing route and checkout copy is largely Portuguese, including public
+route slugs. That discrepancy is preserved as an implementation gap in this
+documentation-only audit; future copy work must use English and explicitly
+consider existing public URLs.
+
+## Historical brief and preserved intent
+
+The landing was imported in commit `ac5f4ea` on 2026-08-19. The former README
+recorded source commit `3cb34d47f85016b87152b41f2ce040a4c723d91b` and contained
+a product request rather than a statement of implemented behavior. The complete
+brief remains in Git history. This audit consolidates its durable requirements:
+
+- Preserve the supplied Portside logo, a clear responsive layout, accessible
+  navigation, SEO metadata, and system fonts. Do not bundle proprietary fonts
+  or copy Apple identity.
+- Explain automatic setup and variable game compatibility; do not promise all
+  games or anti-cheat systems work or imply Apple/Valve endorsement.
+- Keep display/checkout pricing controlled by the server and send card data to
+  Stripe. Validate HTTPS/domain/payment-method availability before an Apple Pay claim.
+- Confirm purchases only through verified provider events; use idempotent
+  persistence, unpredictable authenticated delivery references, issued licenses,
+  temporary download URLs, and real email/resend behavior.
+- Keep license copy/download and installation instructions behind confirmed
+  fulfillment. Never expose full licenses in URLs, logs or analytics.
+- Validate responsive/keyboard/screen-reader behavior and Safari/Chrome/Firefox;
+  add appropriate commerce tests when implementing the missing path. The brief's
+  webhook, replay, unpaid-success, delivery, email, and secret-exposure tests
+  are requirements, not currently passing tests.
+
+These requirements are **Planned** where the current code does not implement
+them. Their prior presence in a README was not release evidence.

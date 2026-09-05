@@ -1,21 +1,29 @@
-# Routes
+# Public routes
 
-TanStack Start uses **file-based routing**. Every `.tsx` file in this directory
-defines a route. Do **not** create `src/pages/`, `src/routes/_app/index.tsx`, or
-`app/layout.tsx` — those are Next.js / Remix conventions. The only root layout
-is `src/routes/__root.tsx`.
+TanStack Start uses file-based routing here. The current routes are:
 
-## Conventions
+| File                                 | URL            | Responsibility                                                       |
+| ------------------------------------ | -------------- | -------------------------------------------------------------------- |
+| [`__root.tsx`](__root.tsx)           | Shared shell   | HTML document, query provider, metadata and error/not-found handling |
+| [`index.tsx`](index.tsx)             | `/`            | Product overview, compatibility/pricing sections and purchase entry  |
+| [`comprar.tsx`](comprar.tsx)         | `/comprar`     | Email form and Stripe Checkout session request                       |
+| [`sucesso.tsx`](sucesso.tsx)         | `/sucesso`     | Polls `session_id` order status; never proof of payment by itself    |
+| [`suporte.tsx`](suporte.tsx)         | `/suporte`     | Public support information                                           |
+| [`termos.tsx`](termos.tsx)           | `/termos`      | Public terms text                                                    |
+| [`privacidade.tsx`](privacidade.tsx) | `/privacidade` | Public privacy text                                                  |
 
-| File                     | URL                                                     |
-| ------------------------ | ------------------------------------------------------- |
-| `index.tsx`              | `/`                                                     |
-| `about.tsx`              | `/about`                                                |
-| `users/index.tsx`        | `/users`                                                |
-| `users/$id.tsx`          | `/users/:id` (dynamic — bare `$`, no curly braces)      |
-| `posts/{-$category}.tsx` | `/posts/:category?` (optional segment)                  |
-| `files/$.tsx`            | `/files/*` (splat — read via `_splat` param, never `*`) |
-| `_layout.tsx`            | layout route (renders children via `<Outlet />`)        |
-| `__root.tsx`             | app shell — wraps every page; preserve `<Outlet />`     |
+Keep the shared `<Outlet />` in the root layout. Do not substitute Next.js or
+other frameworks' routing conventions for this TanStack route tree. `src/routeTree.gen.ts` is generated and must not be edited
+manually. See [the component overview](../../README.md) and
+[local agent rules](../../AGENTS.md).
 
-`routeTree.gen.ts` is auto-generated. Don't edit it by hand.
+The older guide listed generic example routes that do not exist in this
+repository; the table above replaces them with the actual route map. Route
+names remain unchanged by this audit. Existing visible copy is largely
+Portuguese despite the required English product language and `lang="en"`;
+translation/routing changes require an explicit implementation change.
+
+[`order.functions.ts`](../lib/order.functions.ts) currently always returns
+`pending`; the success screen's confirmed/download/license branch is
+unreachable and its email-resend control is only a toast. See
+[licensing and fulfillment](../../../../docs/LICENSING.md) before altering that flow.

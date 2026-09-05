@@ -1,24 +1,28 @@
-# Rollback runbook
+# Recovery and rollback checklist
 
-For a Portside.app update, stop promotion, keep the previous signed/notarized
-archive and publish its appcast item through the authorized release workflow.
-Sparkle must see an incrementing app version; emergency rollback should be a
-new fixed build rather than an unsigned downgrade.
+Current rollback is **Blocked** from a reliable end-to-end claim by the gaps in
+[RELEASE](RELEASE.md) and [RUNTIME](RUNTIME.md). This is an operator checklist,
+not a promise that republishing an older version restores installed clients.
 
-For a runtime release, select the last proven production release and call the
-authenticated release rollback endpoint. The target must already have a
-published production manifest:
+Before an explicitly authorized recovery:
 
-```sh
-curl --fail --request POST \
-  --header "Authorization: Bearer $PORTSIDE_ADMIN_BEARER_TOKEN" \
-  --header 'Content-Type: application/json' \
-  --data '{"targetReleaseId":"<previous-release-id>","reason":"validated rollback"}' \
-  "$PORTSIDE_API_BASE_URL/v1/admin/releases/<current-release-id>/rollback"
-```
+1. Identify the current app/runtime manifest, source/build IDs, known usable
+   target and exact signed artifacts. Retain both candidate and previous evidence.
+2. Check the backend target's eligibility, client signed downgrade/minimum-app
+   requirements and storage URL accessibility. Normal runtime publication
+   supersedes the previous manifest, conflicting with rollback's published-target
+   precondition; an old signature does not create new downgrade authorization.
+3. For app recovery, use a signed/notarized fixed build with a version Sparkle
+   accepts. Older appcast entries alone do not establish automatic downgrade;
+   superseded enclosure download eligibility also needs validation.
+4. For local runtime recovery, inspect staging/rollback selection and prefix
+   state before replacement. Current rename-based helper has no crash journal
+   and sorts UUID rollback directories lexicographically.
+5. In a disposable account, inject failure and confirm the retained prefix,
+   Steam installation, library, saves and license state remain intact. Then
+   manually confirm rendered Steam interaction and the control game.
 
-The backend supersedes the current manifest and republishes the signed target
-manifest without deleting the current prefix or Steam data. The client stages
-the previous component atomically and validates its hash. If validation fails,
-leave the current runtime active and mark the artifact rejected. Record the
-event in the audit log and verify a clean Steam launch on a real Mac.
+Administrative route and request fields are documented in [RELEASE](RELEASE.md)
+and [BACKEND](BACKEND.md). Do not invoke them merely to test this documentation.
+Never delete user prefixes, credentials, SteamLibrary or games during recovery.
+Record actual outcome and missing validation in [STATUS](STATUS.md).

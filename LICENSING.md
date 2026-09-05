@@ -1,36 +1,33 @@
-# Licensing and authorization
+# Source licensing and authorization
 
-## Portside
+Portside-owned source is tracked in this repository; no root distribution
+license grant is present at the audit base. The project owner must establish
+the applicable distribution terms before making a commercial rights claim.
 
-Portside-owned code remains in this public repository. Its final distribution
-license must be chosen by the project owner before a commercial release.
+## Runtime sources
 
-## Sikarugir and included components
+Portside produces its own runtime artifacts from the wrapper/host source and
+locked Wine/winetricks snapshots. It does not download precompiled Sikarugir
+releases as a commercial fallback. Exact repositories, revisions and recorded
+licenses are in [upstream/lock.json](upstream/lock.json); the compatibility
+[UPSTREAM_VERSIONS](UPSTREAM_VERSIONS.json) file points there.
 
-Portside downloads official Sikarugir artifacts at runtime instead of
-embedding Creator, Configure, Launcher or an engine in Portside.app. The
-selected Wine sources are LGPL-2.1-or-later; the complete obligations for
-Wine, winetricks and bundled libraries must be reviewed from the installed
-artifact notices before redistribution.
+Preserve notices and corresponding-source obligations for every redistributed
+component and transitive library. [RUNTIME_LICENSES](RUNTIME_LICENSES.md) and
+[the third-party inventory](docs/THIRD_PARTY_LICENSES.md) define review inputs;
+they do not establish legal approval of a particular release.
 
-The exact artifact provenance is recorded in UPSTREAM_VERSIONS.json, and the
-user-visible authorization statement is kept separately in
-SIKARUGIR_AUTHORIZATION.md. That statement records the information supplied in
-the project request; it does not invent a contract, grant, trademark
-permission or license text that was not provided.
+[SIKARUGIR_AUTHORIZATION](SIKARUGIR_AUTHORIZATION.md) preserves the project-supplied
+authorization statement, including the public-source condition. It does not
+supply a signed contract or expand trademark/license rights.
 
-## Steam and games
+## Steam and commercial entitlement
 
-Portside does not include Steam or games and is not affiliated with or
-endorsed by Valve Corporation. Steam is installed by the official Sikarugir
-winetricks verb inside the user’s isolated wrapper. Portside never requests,
-copies or reports account credentials, cookies, tokens or Steam IDs.
+Steam is obtained from Valve through the vendored winetricks verb, outside
+Portside distribution. No games or native Steam account sessions are bundled.
+Portside does not claim affiliation or endorsement by Valve or Apple.
 
-## Release gate
-
-Before redistribution, obtain legal review for the selected Sikarugir
-artifacts, source notices, update mechanism, code signing, Valve terms,
-macOS privacy disclosures and the final Portside license.
-
-The commercial licensing checklist is maintained in docs/LICENSING.md and
-must be completed separately for each production runtime promotion.
+[docs/LICENSING](docs/LICENSING.md) describes commercial purchase/activation and
+missing fulfillment. Commercial entitlement and source-distribution licensing
+are separate topics. Required license/notices review is not proof that either
+checkout or a customer release currently works.

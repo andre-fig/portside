@@ -1,107 +1,111 @@
-# Railway deployment runbook
+# Railway deployment contract
 
-The Portside deployment uses the existing Railway `production` environment.
-There is one Railway production environment and one product release channel.
-Create or
-maintain these services in production:
+This is the repository's deployment configuration and validation runbook, not
+an inventory of live services. Railway project membership, variables, domains,
+watch patterns, GitHub integration, backups, bucket policy and deployed revision
+are **Unknown**: no external service was queried during this audit. Historical
+operational statements in the previous version are retained in Git history;
+[STATUS](STATUS.md) is the current dated snapshot.
 
-1. API using `apps/backend/railway.api.json`.
-2. PostgreSQL with automated backups and a tested restore procedure.
-3. Private S3-compatible Bucket/object storage. The current Portside project
-   uses `portside-artifacts`; its generated physical bucket name and
-   credentials come from Railway, not from the repository.
-4. Sync worker using `apps/backend/railway.worker.json`.
-5. Upstream sync Cron Job using `apps/backend/railway.cron.json`.
-6. Landing page using `apps/landing`.
+## Source-controlled service configuration
 
-Set the service root for each backend application service to `apps/backend` and use
-`Dockerfile` as the Dockerfile path. Set `DATABASE_URL` from the PostgreSQL
-service. The API runs `npx prisma migrate deploy` as its Railway pre-deploy
-command, inside the service network where the private PostgreSQL hostname is
-available.
+| Component      | Repository evidence                                                                                               | Configured behavior                                                                         |
+| -------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| API            | [`railway.api.json`](../apps/backend/railway.api.json)                                                            | Dockerfile build; `node dist/main.js`; `/health`; `npx prisma migrate deploy` before deploy |
+| Worker         | [`railway.worker.json`](../apps/backend/railway.worker.json)                                                      | Same image; `node dist/worker.js`; stale-record/GitHub reconciliation                       |
+| Cron           | [`railway.cron.json`](../apps/backend/railway.cron.json)                                                          | `node dist/cron.js`; schedule `17 */6 * * *`; implementation currently logs once            |
+| PostgreSQL     | [`schema.prisma`](../apps/backend/prisma/schema.prisma) and [migrations](../apps/backend/prisma/migrations)       | Required persistence; live provisioning/backups are not represented by these files          |
+| Object storage | [`AppConfig`](../apps/backend/src/core/app-config.ts)                                                             | One private S3-compatible connection; no secondary failover                                 |
+| Landing        | [`vite.config.ts`](../apps/landing/vite.config.ts), [`build-landing.yml`](../.github/workflows/build-landing.yml) | Nitro Node SSR bundle in `.output`; Bun install/lint/typecheck/build in CI                  |
 
-The landing service uses `/apps/landing` as its root directory, runs
-`bun install --frozen-lockfile && bun run build`, starts with
-`node .output/server/index.mjs` and exposes `/` as its healthcheck. Its Railway
-watch pattern is `/apps/landing/**`; the API, worker and cron use
-`/apps/backend/**`. This prevents a landing-only commit from rebuilding the
-backend services. Railway's GitHub source integration deploys the landing
-service from `main` after the `Build Landing (Railway deploy gate)` workflow
-passes.
+Backend service roots must make the backend Dockerfile's relative `COPY` paths
+resolve against `apps/backend`. The [Dockerfile](../apps/backend/Dockerfile)
+uses Node 22 Debian stages, installs locked npm dependencies, generates Prisma,
+compiles TypeScript, copies runtime output/manifests, and runs as the `node`
+user. It does not use the service filesystem as persistent artifact storage.
+The API's migration pre-deploy command needs an authorized database and a usable
+Prisma CLI; the production image omits dev dependencies, where the Prisma CLI
+is declared. CLI availability and migration execution need deployment evidence.
 
-```sh
-railway link --project <production-project-id> --environment production
-railway up --service api
-railway up --service sync-worker
-railway up --service upstream-cron
-```
+The landing Node start entry is `.output/server/index.mjs`, as recorded by the
+existing deployment runbook and selected Nitro preset. There is no checked-in
+landing Railway configuration defining service roots, watch patterns or a
+start command. The prior runbook described `apps/landing` as root, its
+install/build commands, `/` healthcheck and deployment from `main` gated by
+`Build Landing (Railway deploy gate)`. Treat those as intended setup to verify,
+not current Railway facts.
 
-Do not paste IDs or tokens into the repository. Required variables are listed
-in `apps/backend/.env.example`: database URL, public API URL, S3 endpoint/bucket
-credentials, allowlists, HMAC secret, license signing key pair and IDs,
-manifest public key, Sparkle public key, offline grace period and size limits.
-The sync worker additionally needs a read-only `PORTSIDE_GITHUB_TOKEN`,
-`PORTSIDE_GITHUB_REPOSITORY=andre-fig/portside` and
-`PORTSIDE_RUNTIME_WORKFLOW=build-runtime.yml` to reconcile workflow runs. It
-records workflow/test state but cannot promote or publish a release.
-Keep release state and key rotation explicit in the production control plane;
-the repository does not assume a second Railway environment.
-Configure the S3-compatible credentials for the single private bucket; a
-production deployment must never rely on Railway's ephemeral filesystem. Store the
-manifest signing private key only in the CI/administrative secret store and
-expose only `MANIFEST_SIGNING_PUBLIC_KEY` to the API.
+## Configuration ownership
 
-Before adding a public custom domain, verify `/health`, `/ready`, TLS, signed
-artifact URLs, appcast content type and manifest signature. The API should
-return a temporary object-storage URL rather than proxying large files.
+Only variable/secret names belong in documentation. Source behavior is defined
+by [`app-config.ts`](../apps/backend/src/core/app-config.ts),
+[`runtime.service.ts`](../apps/backend/src/modules/runtime/runtime.service.ts),
+[`sync.worker.ts`](../apps/backend/src/jobs/sync.worker.ts), and the
+[example environment](../apps/backend/.env.example); never copy actual values.
 
-Runtime publication is production-only. The authenticated release sequence is
-source snapshot, successful build, validation, signed manifest publication and
-backend registration. Do not point a production manifest at an upstream source
-URL; runtime files must already be built into Portside object storage.
+| Purpose                       | Names                                                                                                                                                                  |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| API/database                  | `NODE_ENV`, `PORT`, `DATABASE_URL`, `PUBLIC_BASE_URL`                                                                                                                  |
+| Administrative authentication | `ADMIN_BEARER_TOKEN`                                                                                                                                                   |
+| Storage                       | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`                                                             |
+| Artifact policy               | `ALLOWED_SOURCE_HOSTS`, `PORTSIDE_ARTIFACT_HOSTS`, `PORTSIDE_APP_HOSTS`, `MAX_DOWNLOAD_BYTES`, `PORTSIDE_RUNTIME_SIGNED_URL_TTL_SECONDS`, `UPSTREAM_SIGNING_KEYS_JSON` |
+| Runtime verification          | `MANIFEST_SIGNING_PUBLIC_KEY`, optional `MANIFEST_SIGNING_KEY_ID`                                                                                                      |
+| App feed/service host         | `PORTSIDE_APPCAST_URL`, optional provider-supplied `RAILWAY_PUBLIC_DOMAIN`                                                                                             |
+| License service               | `LICENSE_HMAC_SECRET`, `LICENSE_SIGNING_PRIVATE_KEY_PEM`, `LICENSE_SIGNING_PUBLIC_KEY_PEM`, `LICENSE_SIGNING_KEY_ID`, `OFFLINE_GRACE_DAYS`                             |
+| Worker                        | `PORTSIDE_GITHUB_TOKEN`, `PORTSIDE_GITHUB_REPOSITORY`, `PORTSIDE_RUNTIME_WORKFLOW`, `SYNC_WORKER_POLL_MS`, `SYNC_WORKER_TIMEOUT_MS`                                    |
 
-## Runtime build secrets from Railway
+`ALLOWED_SOURCE_HOSTS` must be nonempty at production startup, but the artifact
+ingest path uses `PORTSIDE_ARTIFACT_HOSTS`. `OFFLINE_GRACE_DAYS` is loaded but
+actual license deadlines use each database row. `SPARKLE_PUBLIC_KEY` and
+`LOG_LEVEL` appear in the example environment without a current backend reader.
+Do not describe them as implemented backend verification/logging controls.
+Landing Stripe/pricing variables are listed in [LICENSING](LICENSING.md).
 
-`Build Portside Runtime` executes on GitHub's macOS runner, so it cannot read
-Railway variables automatically. The GitHub Environment named `production` must
-contain a copy of the Railway bucket connection values. The mapping is:
+GitHub macOS runners do not inherit Railway variables. The runtime/release
+publisher uses a separately configured GitHub `production` Environment:
 
-| GitHub Actions secret | Railway source |
-| --- | --- |
-| `PORTSIDE_PUBLIC_BUCKET` | primary bucket credential `bucketName` |
-| `PORTSIDE_S3_ACCESS_KEY_ID` | primary bucket credential `accessKeyId` |
-| `PORTSIDE_S3_SECRET_ACCESS_KEY` | primary bucket credential `secretAccessKey` |
-| `PORTSIDE_S3_REGION` | primary bucket credential `region` |
-| `PORTSIDE_S3_ENDPOINT` | primary bucket credential `endpoint` |
+| Publisher name                  | Equivalent backend connection name |
+| ------------------------------- | ---------------------------------- |
+| `PORTSIDE_PUBLIC_BUCKET`        | `S3_BUCKET`                        |
+| `PORTSIDE_S3_ACCESS_KEY_ID`     | `S3_ACCESS_KEY_ID`                 |
+| `PORTSIDE_S3_SECRET_ACCESS_KEY` | `S3_SECRET_ACCESS_KEY`             |
+| `PORTSIDE_S3_REGION`            | `S3_REGION`                        |
+| `PORTSIDE_S3_ENDPOINT`          | `S3_ENDPOINT`                      |
 
-`PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX` is the stable HTTPS API route used in
-the signed production runtime manifest:
-`https://<api-host>/v1/runtime/artifacts/production/`. The backend maps the
-filename to `runtime/production/<fileName>` and returns a short-lived signed
-redirect from the private bucket. The bucket remains the Railway S3-compatible
-service; GitHub secrets only grant the runner temporary publication access. The
-runtime workflow never writes to Railway's ephemeral service filesystem.
+The name `PORTSIDE_PUBLIC_BUCKET` does not establish a public bucket policy.
+`PORTSIDE_MANIFEST_SIGNING_KEY` remains in CI/administrative secret storage;
+the backend receives the corresponding public key only. License token signing
+is separate and requires its private key on the backend. See [RELEASE](RELEASE.md)
+for the complete signing/publishing variable contract.
 
-The Railway bucket is intentionally private. The desktop must allow the API
-host and the storage host used by the signed redirect; it still verifies the
-manifest signature, HTTPS host, size and SHA-256 after the redirect. The
-runtime workflow proves source build, manifest signature and bucket publication.
-A client download is considered ready only after the API manifest
-is published for the channel and clean-install validation passes.
+## Validation runbook and release boundaries
 
-The private `PORTSIDE_MANIFEST_SIGNING_KEY` exists only in GitHub Actions. Its
-matching public key is `MANIFEST_SIGNING_PUBLIC_KEY` in the Railway API. Do
-not put either private signing key or bucket secret in Git, logs, or a chat
-message. A new key pair requires updating the Railway public key before the
-next signed manifest build.
+1. Use the local backend checks in [BACKEND](BACKEND.md) and landing checks in
+   its [README](../apps/landing/README.md). Do not run migrations against an
+   unspecified database. The current application accepts production only;
+   legacy staging rows do not constitute a separate environment.
+2. For an explicitly authorized deployment, review the actual Railway service
+   root, Dockerfile/config selection, branch, watch patterns, start command,
+   database target and secret ownership. The old runbook used Railway CLI
+   `link`/`up`, but repository inspection cannot validate installed CLI behavior
+   or the target account; no deploy command is executed by this audit.
+3. Validate `/health` for liveness and `/ready` for database access. Confirm the
+   deployed revision separately: `/health` exposes no revision. Validate TLS,
+   manifest signature, appcast content type, and complete signed artifact
+   downloads against expected size/SHA-256. Avoid logging presigned query strings.
+4. The stable runtime route is `/v1/runtime/artifacts/production/<fileName>`;
+   it signs a redirect to `runtime/production/<fileName>`. Desktop policy must
+   permit both API and storage redirect hosts. The app routes use
+   `/app/production/<fileName>` and `/app/production/latest` (DMG).
+5. Runtime publication also needs registered source snapshots, successful build,
+   artifact/release records and signed manifest publication. An uploaded archive
+   or responding healthcheck does not complete desktop discovery, Sparkle,
+   notarization, or graphical clean-install acceptance.
 
-Production is connected to `andre-fig/portside` on the `main` branch. Railway
-deploys the four application services automatically after each push, using
-service-specific watch patterns; a landing-only push deploys only the landing
-service. The `Build Landing (Railway deploy gate)` workflow validates the
-landing before Railway deploys it. The `Verify Railway` GitHub workflow waits
-for the public API healthcheck after CI.
-The production API is available at
-`https://api-production-6d06.up.railway.app`.
-The production landing is available at
-`https://landing-production-5f03.up.railway.app`.
+[`Verify Railway`](../.github/workflows/deploy-railway.yml) follows successful
+CI for relevant backend/deploy changes and polls a configured public `/health`
+URL. It does not deploy, check `/ready`, validate the exact served revision,
+prove backups, or inspect Stripe/storage. The landing workflow produces a build
+artifact; its title alone does not prove a Railway gate is configured. Actual
+publication behavior and manual authorization boundaries are in
+[RELEASE](RELEASE.md); rollback precondition gaps are in [BACKEND](BACKEND.md).

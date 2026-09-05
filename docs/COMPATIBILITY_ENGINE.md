@@ -1,31 +1,34 @@
-# Portside Compatibility Engine
+# Compatibility engine
 
-The compatibility engine is a read-mostly, per-game layer over the Portside
-Steam runtime. It does not replace the bootstrap, copy a native macOS Steam
-session, or change the Portside baseline wrapper configuration.
+The compatibility layer inspects managed game files and records per-executable
+profiles. It does not replace bootstrap, migrate native Steam data or establish
+game playability. Main sources are [CompatibilityEngine.swift](../apps/desktop/Sources/PortsideCore/CompatibilityEngine.swift),
+[RendererCompatibility.swift](../apps/desktop/Sources/PortsideCore/RendererCompatibility.swift)
+and [PortsideAgent.swift](../apps/desktop/Sources/PortsideCore/PortsideAgent.swift).
 
-## Flow
+## Implemented path and boundaries
 
-1. `SteamLibraryScanner` finds only libraries below Portside-managed roots and safely parses Valve KeyValues.
-2. Completed manifests are correlated with a game directory and bounded executable scan.
-3. `PEImportScanner` reads PE headers and import tables without executing a file. Engine, launcher and anti-cheat strings are evidence only.
-4. `CompatibilityProfileProvider` resolves profiles in this order: validated backend profile, locally validated profile, PE analysis, conservative default.
-5. `RendererManager` verifies an already installed Portside runtime component and applies Wine AppDefaults for one executable. It does not replace DLLs globally or edit game files.
-6. `GameLaunchMonitor` records technical process outcomes. A graphical window or a stable process is never treated as visual success without confirmation.
-7. `PortsideAgent` performs low-frequency scans and stops as soon as the managed Steam process tree is gone.
+1. `SteamLibraryScanner` parses Valve KeyValues within managed roots, correlates
+   installed manifests and performs a bounded executable scan.
+2. `PEImportScanner` reads headers/imports/strings without executing games.
+   API, engine, launcher and anti-cheat matches are evidence, not compatibility proof.
+3. `CompatibilityProfileProvider` can prioritize an injected backend-validated
+   profile, then locally validated/user-confirmed data, PE analysis and default.
+   The normal Agent has no remote provider, and the backend has no profile endpoint.
+4. Renderer configuration records per-executable preferences/AppDefaults when
+   invoked; restoring its stored snapshot does not prove complete registry recovery. It does not install missing renderer payloads or modify
+   game binaries.
+5. The Agent samples managed processes and stores technical outcomes. Automatic
+   post-failure fallback policy exists, but no production retry orchestration is wired.
 
-The agent uses direct `Process` specifications when it must invoke Wine or existing system probes. It does not use a shell, shell strings, account data, screen capture or input injection.
+Inventory/registry code still uses `SharedSupport/wine` while current runtime
+installation uses `SharedSupport/engine`; see [RENDERERS](RENDERERS.md).
+Do not claim the intended profile path works end to end from unit fixtures.
 
-## Managed data
+The compatibility Agent exits with its managed Steam tree. Its separate
+runtime-update-worker mode has another lifetime described in [ARCHITECTURE](ARCHITECTURE.md).
+`PortsideAgent --capture-diagnostics` is an implemented diagnostic mode, not a
+read-only repository audit command: it reads installed state and writes an export.
 
-Profiles and lightweight attempts are stored below Portside's application-support root. They contain App IDs, executable paths, renderer choices and technical signals. Credentials, cookies, tokens, Steam IDs and personal account files are excluded and logs pass through the existing sanitizer.
-
-## Current baseline inventory
-
-The intended baseline is the Portside-produced wrapper with WineD3D,
-`D3DMETAL=0`, `DXMT=0`, `DXVK=0`, MSYNC and ESYNC enabled. The inventory is
-populated only after the generated wrapper and engine pass the clean-layout and
-real-display validation steps; source metadata alone is not treated as a
-working runtime.
-
-`PortsideAgent --capture-diagnostics` writes a sanitized JSON snapshot under Portside Diagnostics with the wrapper options, environment, renderer inventory, component checksums, prefix structure, managed process sequence, Steam launch path/arguments and bounded installation/readiness/compatibility logs.
+Profiles/attempts may contain executable paths. Logs and exports have different
+sanitization boundaries; review [SECURITY](SECURITY.md) before sharing.
