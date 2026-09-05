@@ -28,10 +28,10 @@ bun run typecheck
 bun run build
 ```
 
-There is no package `test` command. The
-[landing workflow](../../.github/workflows/build-landing.yml) pins Bun 1.2.21,
-installs the lockfile, runs lint/typecheck/build, and uploads `.output`. A build
-proves compilation, not browser behavior, a working payment, or deployment.
+There is no package `test` command. The local pre-push hook installs the locked
+dependencies and runs lint/typecheck/build. Railway deploys the service from
+the connected `main` branch. A build proves compilation, not browser behavior,
+a working payment, or deployment.
 [Railway notes](../../docs/RAILWAY_DEPLOYMENT.md) distinguish source-controlled
 settings from unknown external configuration.
 

@@ -16,7 +16,7 @@ operational statements in the previous version are retained in Git history;
 | Cron           | [`railway.cron.json`](../apps/backend/railway.cron.json)                                                          | `node dist/cron.js`; schedule `17 */6 * * *`; implementation currently logs once            |
 | PostgreSQL     | [`schema.prisma`](../apps/backend/prisma/schema.prisma) and [migrations](../apps/backend/prisma/migrations)       | Required persistence; live provisioning/backups are not represented by these files          |
 | Object storage | [`AppConfig`](../apps/backend/src/core/app-config.ts)                                                             | One private S3-compatible connection; no secondary failover                                 |
-| Landing        | [`vite.config.ts`](../apps/landing/vite.config.ts), [`build-landing.yml`](../.github/workflows/build-landing.yml) | Nitro Node SSR bundle in `.output`; Bun install/lint/typecheck/build in CI                  |
+| Landing        | [`vite.config.ts`](../apps/landing/vite.config.ts)                                                               | Nitro Node SSR bundle in `.output`; local pre-push runs Bun install/lint/typecheck/build   |
 
 The API, Worker and Cron are separate Railway services connected directly to
 the repository. Each service must select its matching configuration file above
@@ -31,12 +31,9 @@ Prisma CLI; the production image omits dev dependencies, where the Prisma CLI
 is declared. CLI availability and migration execution need deployment evidence.
 
 The landing Node start entry is `.output/server/index.mjs`, as recorded by the
-existing deployment runbook and selected Nitro preset. There is no checked-in
-landing Railway configuration defining service roots, watch patterns or a
-start command. The prior runbook described `apps/landing` as root, its
-install/build commands, `/` healthcheck and deployment from `main` gated by
-`Build Landing (Railway deploy gate)`. Treat those as intended setup to verify,
-not current Railway facts.
+existing deployment runbook and selected Nitro preset. The Railway connector
+owns the landing service root, watch patterns, start command, healthcheck and
+deployment from `main`; those provider settings are external to this repository.
 
 ## Configuration ownership
 
@@ -105,10 +102,9 @@ for the complete signing/publishing variable contract.
    or responding healthcheck does not complete desktop discovery, Sparkle,
    notarization, or graphical clean-install acceptance.
 
-Deployment is performed by the Railway connector for the three backend
-services. The API healthcheck is available at `/health`; the connector deploy
-does not by itself validate the exact served revision, prove backups, or inspect
-Stripe/storage. The landing workflow produces a build artifact; its title alone
-does not prove a Railway deployment is configured. Actual publication behavior
-and manual authorization boundaries are in [RELEASE](RELEASE.md); rollback
-precondition gaps are in [BACKEND](BACKEND.md).
+Deployment is performed by the Railway connector for the API, Worker, Cron and
+Landing services. The API healthcheck is available at `/health`; the connector
+deploy does not by itself validate the exact served revision, prove backups, or
+inspect Stripe/storage. Actual publication behavior and manual authorization
+boundaries are in [RELEASE](RELEASE.md); rollback precondition gaps are in
+[BACKEND](BACKEND.md).

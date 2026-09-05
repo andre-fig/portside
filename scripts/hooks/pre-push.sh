@@ -97,9 +97,11 @@ if has_path '^apps/landing/'; then
         if command -v bun >/dev/null 2>&1; then
             bun run lint
             bun run typecheck
+            bun run build
         else
             npm run lint
             npm run typecheck
+            npm run build
         fi
     )
 fi

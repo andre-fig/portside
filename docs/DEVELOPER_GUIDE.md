@@ -10,7 +10,7 @@ boundaries; [PROJECT_GUIDE](PROJECT_GUIDE.md) maps scripts and configuration.
 | ------------------------ | -------------------------------------------------------------------------------------------------------- |
 | Desktop and runtime host | macOS 13+, Swift tools 6.0 packages; supported runtime target is Apple silicon                           |
 | Backend                  | Node 22 in Docker/CI, npm with committed package-lock                                                    |
-| Landing                  | Bun 1.2.21 in build workflow, committed bun.lock                                                         |
+| Landing                  | Bun 1.2.21 in local pre-push and Railway build, committed bun.lock                                      |
 | Wine                     | macOS/Xcode, Homebrew dependencies described by upstream/dependencies.json; record actual build versions |
 | Source/policy checks     | POSIX shell, Git, ripgrep, jq; actionlint for workflows                                                  |
 

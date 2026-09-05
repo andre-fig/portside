@@ -68,8 +68,9 @@ No publishing, Apple, GUI or storage step was executed during this audit.
 
 [pre-commit](../scripts/hooks/pre-commit.sh) checks staged whitespace, shell/JSON
 and workflows when actionlint is available. [pre-push](../scripts/hooks/pre-push.sh)
-runs desktop tests, backend schema/typecheck/lint/tests/build, landing lint/typecheck
-and targeted script/policy checks. It does not run every matrix entry: runtime-host
+runs desktop tests, backend schema/typecheck/lint/tests/build, landing
+lint/typecheck/build and targeted script/policy checks. It does not run every matrix
+entry: runtime-host
 tests and landing/desktop builds need explicit execution.
 
 Current [CI](../.github/workflows/ci.yml) gates production policy and backend schema/build.
