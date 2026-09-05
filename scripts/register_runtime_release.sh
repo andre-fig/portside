@@ -78,17 +78,17 @@ register_source_snapshot() {
 }
 
 wine_repository="$(jq -er '.repositories[] | select(.name == "wine") | .repository' "$LOCK_FILE")"
-wine_commit="$(jq -er '.repositories[] | select(.name == "wine") | .commit' "$LOCK_FILE")"
-wine_date="$(jq -er '.repositories[] | select(.name == "wine") | .commitDate // ""' "$LOCK_FILE")"
-wine_checksum="$(jq -er '.repositories[] | select(.name == "wine") | .snapshotChecksum' "$LOCK_FILE")"
+wine_commit="$(jq -er '.components[] | select(.component == "engine") | .sourceCommit | strings' "$manifest")"
+wine_checksum="$(jq -er '.components[] | select(.component == "engine") | .sourceSnapshotChecksum | strings' "$manifest")"
+wine_date="$(jq -r --arg commit "$wine_commit" '.repositories[] | select(.name == "wine" and .commit == $commit) | .commitDate // ""' "$LOCK_FILE" | head -n 1)"
 wine_path="$(jq -er '.repositories[] | select(.name == "wine") | .localPath' "$LOCK_FILE")"
 wine_submodules="$(jq -c '.repositories[] | select(.name == "wine") | (.submodules // [])' "$LOCK_FILE")"
 wine_lfs="$(jq -r '.repositories[] | select(.name == "wine") | (.gitLFSUsed // false)' "$LOCK_FILE")"
 
 winetricks_repository="$(jq -er '.repositories[] | select(.name == "winetricks") | .repository' "$LOCK_FILE")"
-winetricks_commit="$(jq -er '.repositories[] | select(.name == "winetricks") | .commit' "$LOCK_FILE")"
-winetricks_date="$(jq -r '.repositories[] | select(.name == "winetricks") | .commitDate // ""' "$LOCK_FILE")"
-winetricks_checksum="$(jq -er '.repositories[] | select(.name == "winetricks") | .snapshotChecksum' "$LOCK_FILE")"
+winetricks_commit="$(jq -er '.components[] | select(.component == "winetricks") | .sourceCommit | strings' "$manifest")"
+winetricks_checksum="$(jq -er '.components[] | select(.component == "winetricks") | .sourceSnapshotChecksum | strings' "$manifest")"
+winetricks_date="$(jq -r --arg commit "$winetricks_commit" '.repositories[] | select(.name == "winetricks" and .commit == $commit) | .commitDate // ""' "$LOCK_FILE" | head -n 1)"
 winetricks_path="$(jq -er '.repositories[] | select(.name == "winetricks") | .localPath' "$LOCK_FILE")"
 winetricks_submodules="$(jq -c '.repositories[] | select(.name == "winetricks") | (.submodules // [])' "$LOCK_FILE")"
 winetricks_lfs="$(jq -r '.repositories[] | select(.name == "winetricks") | (.gitLFSUsed // false)' "$LOCK_FILE")"
