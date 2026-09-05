@@ -61,8 +61,29 @@ final class ApplicationInstallationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let installer = InstallationMock(identity: identity("2"))
         let service = PortsideInstallationService(bundle: try XCTUnwrap(Bundle(url: root)), installer: installer)
-        try await service.moveToApplicationsAndReopen()
-        XCTAssertEqual(installer.events, ["validateSource", "install", "validateInstalled", "reopen", "scheduleEjection"])
+        try await service.moveToApplicationsAndReopen { installer.events.append("opening") }
+        XCTAssertEqual(installer.events, ["validateSource", "install", "validateInstalled", "opening", "reopen", "scheduleEjection"])
+    }
+
+    @MainActor func testOpenInstalledApplicationRetriesLaunchWithoutCopyingAgain() async throws {
+        let root = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let installer = InstallationMock(identity: identity("1"), existing: identity("2"))
+        let service = PortsideInstallationService(bundle: try XCTUnwrap(Bundle(url: root)), installer: installer)
+        try await service.openInstalledApplication()
+        XCTAssertEqual(installer.events, ["validateSource", "validateInstalled", "reopen", "scheduleEjection"])
+    }
+
+    @MainActor func testOpenInstalledApplicationRejectsAnUntrustedReplacement() async throws {
+        let root = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let installer = InstallationMock(identity: identity("1"), existing: identity("2"))
+        installer.invalidInstalledSignature = true
+        let service = PortsideInstallationService(bundle: try XCTUnwrap(Bundle(url: root)), installer: installer)
+        do { try await service.openInstalledApplication(); XCTFail("Invalid application was reopened") }
+        catch { XCTAssertEqual(error as? PortsideInstallationError, .invalidSignature) }
+        XCTAssertFalse(installer.events.contains("reopen"))
+        XCTAssertFalse(installer.events.contains("install"))
     }
 
     @MainActor func testNewerInstallationPreventsCopyAndRelaunch() async throws {
@@ -138,7 +159,7 @@ final class ApplicationInstallationTests: XCTestCase {
         let validate: (URL) throws -> PortsideSignedApplication = { url in
             self.identity(try String(contentsOf: url.appendingPathComponent("version"), encoding: .utf8))
         }
-        try PortsideInstallationTransaction.perform(source: source, destination: destination, identity: identity("2"), owner: getuid(), group: getgid(), validate: validate)
+        try PortsideInstallationTransaction.perform(source: source, destination: destination, identity: identity("2"), owner: getuid(), group: getgid(), assess: { _ in }, validate: validate)
         XCTAssertEqual(try validate(destination).version, "2")
         XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: destination.appendingPathComponent("link").path), "version")
         let previous = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first { $0.lastPathComponent.hasPrefix(".Portside-Previous-") })
@@ -155,7 +176,7 @@ final class ApplicationInstallationTests: XCTestCase {
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try Data("original".utf8).write(to: destination.appendingPathComponent("marker"))
-        XCTAssertThrowsError(try PortsideInstallationTransaction.perform(source: source, destination: destination, identity: identity("2"), owner: getuid(), group: getgid(), validate: { url in
+        XCTAssertThrowsError(try PortsideInstallationTransaction.perform(source: source, destination: destination, identity: identity("2"), owner: getuid(), group: getgid(), assess: { _ in }, validate: { url in
             if url == destination { return self.identity("1") }
             throw PortsideInstallationError.invalidSignature
         })) { XCTAssertEqual($0 as? PortsideInstallationError, .invalidSignature) }
@@ -168,7 +189,7 @@ final class ApplicationInstallationTests: XCTestCase {
         let destination = root.appendingPathComponent("Portside.app")
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        XCTAssertThrowsError(try PortsideInstallationTransaction.perform(source: source, destination: destination, identity: identity("2"), owner: getuid(), group: getgid(), validate: { _ in
+        XCTAssertThrowsError(try PortsideInstallationTransaction.perform(source: source, destination: destination, identity: identity("2"), owner: getuid(), group: getgid(), assess: { _ in }, validate: { _ in
             try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
             try Data("concurrent installation".utf8).write(to: destination.appendingPathComponent("marker"))
             return self.identity("2")
@@ -184,7 +205,7 @@ final class ApplicationInstallationTests: XCTestCase {
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try Data("newer installation".utf8).write(to: destination.appendingPathComponent("marker"))
-        XCTAssertThrowsError(try PortsideInstallationTransaction.perform(source: source, destination: destination, identity: identity("1"), owner: getuid(), group: getgid(), validate: { _ in self.identity("2") })) { XCTAssertEqual($0 as? PortsideInstallationError, .newerInstallation) }
+        XCTAssertThrowsError(try PortsideInstallationTransaction.perform(source: source, destination: destination, identity: identity("1"), owner: getuid(), group: getgid(), assess: { _ in }, validate: { _ in self.identity("2") })) { XCTAssertEqual($0 as? PortsideInstallationError, .newerInstallation) }
         XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("marker"), encoding: .utf8), "newer installation")
     }
 
@@ -200,7 +221,7 @@ final class ApplicationInstallationTests: XCTestCase {
             try? FileManager.default.removeItem(at: root)
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: destination.deletingLastPathComponent().path)
-        XCTAssertThrowsError(try PortsideInstallationTransaction.perform(source: source, destination: destination, identity: identity("1"), owner: getuid(), group: getgid(), validate: { _ in self.identity("1") })) { XCTAssertEqual($0 as? PortsideInstallationError, .permissionDenied) }
+        XCTAssertThrowsError(try PortsideInstallationTransaction.perform(source: source, destination: destination, identity: identity("1"), owner: getuid(), group: getgid(), assess: { _ in }, validate: { _ in self.identity("1") })) { XCTAssertEqual($0 as? PortsideInstallationError, .permissionDenied) }
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
     }
 

@@ -15,7 +15,7 @@ public enum PortsideInstallationTransaction {
     }
 
     // Internal injection is used only by tests with temporary directories.
-    static func perform(source: URL, destination: URL, identity: PortsideSignedApplication, owner: uid_t, group: gid_t, validate: (URL) throws -> PortsideSignedApplication) throws {
+    static func perform(source: URL, destination: URL, identity: PortsideSignedApplication, owner: uid_t, group: gid_t, assess: (URL) throws -> Void = PortsideApplicationLaunchPreparation.assess, validate: (URL) throws -> PortsideSignedApplication) throws {
         let fileManager = FileManager.default
         let parent = destination.deletingLastPathComponent()
         let lockURL = parent.appendingPathComponent(".Portside-installation.lock")
@@ -55,6 +55,7 @@ public enum PortsideInstallationTransaction {
         guard stat(stagedBundle.path, &permissions) == 0,
               chmod(stagedBundle.path, permissions.st_mode | S_IWUSR) == 0 else { throw fileError() }
         guard try validate(stagedBundle) == identity else { throw PortsideInstallationError.invalidSignature }
+        try PortsideApplicationLaunchPreparation.prepare(stagedBundle, identity: identity, assess: assess, validate: validate)
 
         if let previousIdentity {
             // Revalidate immediately before exchanging directory entries. A

@@ -25,7 +25,10 @@ are not part of that handoff.
 
 The installer validates Developer ID signatures, bundle identity, publisher and
 both version values. It copies with `ditto --rsrc --extattr --acl`, validates the
-staged copy, and atomically exchanges an older installation. Previous bundles
+staged copy, requires Gatekeeper execution approval, releases only that private
+copy's quarantine attributes, revalidates its signature, and atomically exchanges
+an older installation. See [the reopen regression report](INSTALLATION_REOPEN_FIX.md)
+for the 0.1.24 translocation failure and scoped verification. Previous bundles
 are retained under `/Applications/.Portside-Previous-<UUID>.app`. An absent target
 is installed with an exclusive rename. Authorization is requested only after a
 permission failure; privileged code runs from a verified private copy. The new
@@ -76,7 +79,8 @@ a first-launch scenario.
    final app and helper Info.plists, and installed Sparkle load commands.
 3. Open the DMG app and verify the English move gate is visible. No runtime,
    license recovery, Steam setup or appcast request should have started.
-4. Click **Move to Applications and Reopen**. Verify the installed path, valid
+4. Click **Install and Open**. Verify progress through installation and opening,
+   the installed path, valid
    signature, new process, original process exit and best-effort DMG ejection.
 5. Confirm `app_update_check_started trigger=launch mode=immediate_probe` before
    `app_update_preflight_finished` and before runtime checking/download logs.

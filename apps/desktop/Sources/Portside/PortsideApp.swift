@@ -33,6 +33,8 @@ final class PortsideModel: ObservableObject {
     @Published private(set) var bootstrap = PortsideBootstrap()
     @Published private(set) var needsInstallationMove = false
     @Published private(set) var installationMoveError: String?
+    @Published private(set) var installationIsOpening = false
+    @Published private(set) var canOpenInstalledApplication = false
     @Published var state: EnvironmentState
     @Published var requirements = SystemRequirements()
     @Published var setupStep: SetupStep = .checking
@@ -165,27 +167,34 @@ final class PortsideModel: ObservableObject {
         else { continueAfterLicense() }
     }
 
-    func moveToApplications() {
+    func moveToApplications(openInstalled: Bool = false) {
         guard needsInstallationMove, !isWorking else { return }
         if bootstrap.state == .failed { _ = bootstrap.retry() }
         guard advanceBootstrap(to: .movingToApplications) else { return }
         isWorking = true
         installationMoveError = nil
+        installationIsOpening = openInstalled
+        canOpenInstalledApplication = false
         Task { @MainActor in
             do {
-                try await installationService.moveToApplicationsAndReopen()
+                if openInstalled {
+                    try await installationService.openInstalledApplication()
+                } else {
+                    try await installationService.moveToApplicationsAndReopen {
+                        self.installationIsOpening = true
+                    }
+                }
                 _ = advanceBootstrap(to: .relaunching)
                 NSApp.terminate(nil)
             } catch {
+                let installationError = error as? PortsideInstallationError
+                canOpenInstalledApplication = installationError == .reopenFailed || installationError == .newerInstallation
                 installationMoveError = error.localizedDescription
+                logger.write("application_install_failed stage=\(installationIsOpening ? "opening" : "installing") reason=\(installationError.map { String(describing: $0) } ?? "unexpected_error")", level: .error)
                 _ = advanceBootstrap(to: .failed)
                 isWorking = false
             }
         }
-    }
-
-    func openApplicationsFolder() {
-        NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications", isDirectory: true))
     }
 
     private func continueAfterLicense() {
@@ -678,21 +687,25 @@ struct RootView: View {
                     if model.needsInstallationMove {
                         VStack(spacing: 14) {
                             Spacer()
-                            Text(model.installationMoveError == nil
-                                 ? "Move Portside to Applications"
-                                 : "Portside couldn’t be moved to your Applications folder.")
+                            Text(model.isWorking
+                                 ? (model.installationIsOpening ? "Opening Portside…" : "Installing Portside…")
+                                 : model.canOpenInstalledApplication ? "Portside is installed"
+                                 : model.installationMoveError == nil ? "Install Portside" : "Installation needs attention")
                                 .font(.title3.weight(.medium))
                                 .multilineTextAlignment(.center)
-                            Text(model.installationMoveError ?? "Portside must be installed in your Applications folder to work correctly and receive updates.")
+                            Text(model.isWorking
+                                 ? (model.installationIsOpening ? "Your installed app will open automatically." : "We’re preparing Portside in Applications. Approve the macOS permission request if it appears.")
+                                 : model.installationMoveError ?? "Portside will install itself in Applications and open automatically. Your games and data stay in place.")
                                 .font(.subheadline).foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
-                            if model.installationMoveError != nil {
-                                Button("Open Applications Folder") { model.openApplicationsFolder() }
-                                Button("Try Again") { model.moveToApplications() }
-                                    .buttonStyle(.borderedProminent).disabled(model.isWorking)
+                            if model.isWorking {
+                                ProgressView().controlSize(.small)
+                            } else if model.canOpenInstalledApplication {
+                                Button("Open Portside") { model.moveToApplications(openInstalled: true) }
+                                    .buttonStyle(.borderedProminent)
                             } else {
-                                Button("Move to Applications and Reopen") { model.moveToApplications() }
-                                    .buttonStyle(.borderedProminent).disabled(model.isWorking)
+                                Button(model.installationMoveError == nil ? "Install and Open" : "Try Again") { model.moveToApplications() }
+                                    .buttonStyle(.borderedProminent)
                             }
                             Spacer()
                         }.padding(.horizontal, 28)

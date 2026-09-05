@@ -14,6 +14,8 @@ public enum PortsideInstallationError: LocalizedError, Equatable {
     case helperUnavailable
     case reopenFailed
     case alreadyMoving
+    case launchNotApproved
+    case launchPreparationFailed
 
     public var errorDescription: String? {
         switch self {
@@ -25,8 +27,10 @@ public enum PortsideInstallationError: LocalizedError, Equatable {
         case .installationChanged: return "The installation changed while Portside was being copied. No existing application was removed. Try again."
         case .copyFailed: return "Portside could not copy and verify the complete application. Check the available disk space and try again."
         case .helperUnavailable: return "The application’s installation helper is missing or invalid. Download a new copy of Portside from the official website."
-        case .reopenFailed: return "Portside was installed, but macOS could not open it. Open Portside from Applications to continue."
+        case .reopenFailed: return "Portside is installed, but macOS could not open it. Select Open Portside to try again."
         case .alreadyMoving: return "Portside is already being moved to Applications."
+        case .launchNotApproved: return "macOS could not approve this copy of Portside. Connect to the internet and try again."
+        case .launchPreparationFailed: return "Portside could not finish preparing the installed app. Try installing again."
         }
     }
 
@@ -38,6 +42,8 @@ public enum PortsideInstallationError: LocalizedError, Equatable {
         case .differentPublisher: return 67
         case .newerInstallation: return 68
         case .installationChanged: return 69
+        case .launchNotApproved: return 70
+        case .launchPreparationFailed: return 71
         default: return 74
         }
     }
@@ -50,6 +56,8 @@ public enum PortsideInstallationError: LocalizedError, Equatable {
         case 67: return .differentPublisher
         case 68: return .newerInstallation
         case 69: return .installationChanged
+        case 70: return .launchNotApproved
+        case 71: return .launchPreparationFailed
         default: return .copyFailed
         }
     }
@@ -184,7 +192,7 @@ public enum PortsideApplicationSignature {
 
     /// Returns only after LaunchServices has opened the installed copy. The
     /// caller must then terminate this instance; the ejection helper waits for it.
-    public func moveToApplicationsAndReopen() async throws {
+    public func moveToApplicationsAndReopen(onOpening: () -> Void = {}) async throws {
         guard !isMoving else { throw PortsideInstallationError.alreadyMoving }
         isMoving = true
         defer { isMoving = false }
@@ -195,8 +203,17 @@ public enum PortsideApplicationSignature {
         try await installer.install(source: bundle.bundleURL, identity: identity)
         let installed = try installer.validate(Self.destination)
         guard identity == installed else { throw PortsideInstallationError.installationChanged }
+        onOpening()
         try await installer.reopen(Self.destination)
         logger.write("Installed Portside copy opened successfully; the installer instance can now exit.")
+        installer.scheduleDiskImageEjection(source: bundle.bundleURL, installed: Self.destination)
+    }
+
+    public func openInstalledApplication() async throws {
+        let source = try installer.validate(bundle.bundleURL)
+        let installed = try installer.validate(Self.destination)
+        try installed.validateReplacement(of: source)
+        try await installer.reopen(Self.destination)
         installer.scheduleDiskImageEjection(source: bundle.bundleURL, installed: Self.destination)
     }
 }
@@ -213,6 +230,7 @@ public enum PortsideApplicationSignature {
         let owner = getuid(), group = getgid()
         let arguments = ["--install", source.path, identity.codeDirectoryHash, String(owner), String(group)]
         let status = try await Task.detached { try PortsideInstallationTransaction.run(executable: helper, arguments: arguments) }.value
+        PortsideLogger().write("application_install_helper_finished status=\(status)")
         if status == 0 { return }
         guard status == PortsideInstallationError.permissionDenied.installerExitStatus else { throw PortsideInstallationError.from(exitStatus: status) }
         // Copy into a root-owned private directory BEFORE executing elevated
