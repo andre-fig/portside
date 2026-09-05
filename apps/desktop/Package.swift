@@ -7,7 +7,8 @@ let package = Package(
     products: [
         .library(name: "PortsideCore", targets: ["PortsideCore"]),
         .executable(name: "Portside", targets: ["Portside"]),
-        .executable(name: "PortsideAgent", targets: ["PortsideAgent"])
+        .executable(name: "PortsideAgent", targets: ["PortsideAgent"]),
+        .executable(name: "PortsideInstaller", targets: ["PortsideInstaller"])
     ],
     dependencies: [
         .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.26.0"),
@@ -24,6 +25,8 @@ let package = Package(
             ]
         ),
         .executableTarget(name: "PortsideAgent", dependencies: ["PortsideCore"]),
-        .testTarget(name: "PortsideCoreTests", dependencies: ["PortsideCore"])
+        .executableTarget(name: "PortsideInstaller", dependencies: ["PortsideCore"]),
+        .testTarget(name: "PortsideCoreTests", dependencies: ["PortsideCore"]),
+        .testTarget(name: "PortsideAppTests", dependencies: ["Portside", "PortsideCore", .product(name: "Sparkle", package: "Sparkle")])
     ]
 )

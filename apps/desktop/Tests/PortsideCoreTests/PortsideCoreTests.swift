@@ -39,11 +39,12 @@ final class PortsideCoreTests: XCTestCase {
     }
 
     func testSteamInstallUsesPortsideWinetricksVerbAndNoCustomSteamFlags() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("app")
         let launcher = root.appendingPathComponent("Contents/MacOS/PortsideRuntimeHost")
         try FileManager.default.createDirectory(at: launcher.deletingLastPathComponent(), withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: launcher.path, contents: Data())
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: launcher.path)
+        try PropertyListSerialization.data(fromPropertyList: ["CFBundleExecutable": "PortsideRuntimeHost", "CFBundleIdentifier": "com.portside.runtime", "CFBundlePackageType": "APPL"], format: .xml, options: 0).write(to: root.appendingPathComponent("Contents/Info.plist"))
         defer { try? FileManager.default.removeItem(at: root) }
         let spec = try PortsideSteamFlow.installationSpec(wrapper: root)
         XCTAssertEqual(spec.arguments, ["--winetricks", "steam"])
@@ -52,11 +53,12 @@ final class PortsideCoreTests: XCTestCase {
     }
 
     func testCleanLaunchUsesThePortsideHostWithoutDirectWineOrSteamArguments() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("app")
         let launcher = root.appendingPathComponent("Contents/MacOS/PortsideRuntimeHost")
         try FileManager.default.createDirectory(at: launcher.deletingLastPathComponent(), withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: launcher.path, contents: Data())
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: launcher.path)
+        try PropertyListSerialization.data(fromPropertyList: ["CFBundleExecutable": "PortsideRuntimeHost", "CFBundleIdentifier": "com.portside.runtime", "CFBundlePackageType": "APPL"], format: .xml, options: 0).write(to: root.appendingPathComponent("Contents/Info.plist"))
         defer { try? FileManager.default.removeItem(at: root) }
         let spec = try PortsideSteamFlow.cleanLaunchSpec(wrapper: root)
         XCTAssertEqual(spec.arguments, [])

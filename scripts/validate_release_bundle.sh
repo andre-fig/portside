@@ -26,6 +26,9 @@ for key in PortsideAPIBaseURL PortsideArtifactHosts PortsideRuntimeManifestPubli
 done
 
 codesign --verify --deep --strict "$APP_DIR"
+[ -x "$APP_DIR/Contents/MacOS/PortsideInstaller" ] || { echo "Missing installation helper" >&2; exit 1; }
+codesign --verify --strict "$APP_DIR/Contents/MacOS/PortsideInstaller"
+[ "$(plist_value CFBundleDevelopmentRegion)" = en ] || { echo "Portside must use English" >&2; exit 1; }
 
 DMG="$BUILD_DIR/Portside-${VERSION}.dmg"
 [ -f "$DMG" ] || { echo "Missing production DMG" >&2; exit 1; }

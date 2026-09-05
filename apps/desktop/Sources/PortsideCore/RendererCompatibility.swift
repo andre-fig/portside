@@ -60,8 +60,12 @@ public struct RuntimeComponentInventory: Codable, Equatable, Sendable {
 
     public static func detect(wrapper: URL, fileManager: FileManager = .default) -> RuntimeComponentInventory {
         let root = wrapper.standardizedFileURL
-        let wineRoot = root.appendingPathComponent("Contents/SharedSupport/wine", isDirectory: true)
-        let frameworks = root.appendingPathComponent("Contents/Frameworks", isDirectory: true)
+        guard let bundle = Bundle(url: root),
+              let sharedSupport = bundle.sharedSupportURL,
+              let frameworks = bundle.privateFrameworksURL else {
+            return RuntimeComponentInventory(wrapper: root, renderers: [])
+        }
+        let wineRoot = sharedSupport.appendingPathComponent("wine", isDirectory: true)
         let wineVersion = readFirstLine(wineRoot.appendingPathComponent("bin/version"))
         let wined3d = firstExisting([
             wineRoot.appendingPathComponent("lib/wine/i386-windows/wined3d.dll"),

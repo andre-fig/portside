@@ -5,23 +5,19 @@ import PortsideCore
 @main
 struct PortsideApp: App {
     @StateObject private var model: PortsideModel
-    private let updateCoordinator: PortsideUpdateCoordinator
 
     init() {
-        let updateCoordinator = PortsideUpdateCoordinator()
-        self.updateCoordinator = updateCoordinator
         let model = PortsideModel(diagnostics: SentryDiagnosticsService())
         _model = StateObject(wrappedValue: model)
         Task { @MainActor in
-            await updateCoordinator.waitForInitialCheck()
-            model.startAutomatically()
+            await model.startAutomatically()
         }
     }
 
     var body: some Scene {
         WindowGroup {
                 RootView(model: model)
-                .frame(width: 460, height: model.setupStep == .failed ? 320 : model.setupStep == .license ? 330 : 260)
+                .frame(width: 460, height: model.needsInstallationMove ? 360 : model.setupStep == .failed ? 320 : model.setupStep == .license ? 330 : 260)
         }
         .defaultSize(width: 460, height: 260)
         .windowResizability(.contentSize)
@@ -34,11 +30,14 @@ struct PortsideApp: App {
 
 @MainActor
 final class PortsideModel: ObservableObject {
+    @Published private(set) var bootstrap = PortsideBootstrap()
+    @Published private(set) var needsInstallationMove = false
+    @Published private(set) var installationMoveError: String?
     @Published var state: EnvironmentState
     @Published var requirements = SystemRequirements()
     @Published var setupStep: SetupStep = .checking
     @Published var progress = 0.0
-    @Published var progressIsIndeterminate = false
+    @Published var progressIsIndeterminate = true
     @Published var message = "Preparing Portside…"
     @Published var errorMessage: String?
     @Published var isWorking = false
@@ -61,6 +60,26 @@ final class PortsideModel: ObservableObject {
     private let requiresCommercialLicense: Bool
     private var hasValidLicense = false
     private var startedAutomatically = false
+    private let installationService = PortsideInstallationService()
+    private var appUpdater: PortsideUpdateCoordinator?
+    private var retryAppCheck = false
+    private var forceRuntimeRepair = false
+    private var runtimeActivityLease: PortsideRuntimeActivityLease?
+
+    private func recordBootstrap() {
+        logger.write("bootstrap stage=\(bootstrap.state.rawValue)")
+    }
+
+    @discardableResult
+    private func advanceBootstrap(to stage: PortsideBootstrapState) -> Bool {
+        guard bootstrap.advance(to: stage) else { return false }
+        recordBootstrap()
+        if stage == .ready || (stage == .failed && bootstrap.appUpdateCompleted) {
+            runtimeActivityLease?.release()
+            runtimeActivityLease = nil
+        }
+        return true
+    }
 
     var appVersion: String {
         (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.0.0"
@@ -83,41 +102,130 @@ final class PortsideModel: ObservableObject {
         self.wrapperInstaller = PortsideRuntimeInstaller(logger: PortsideLogger(logFileName: "runtime-install.log"))
         self.steamLauncher = SteamProcessLauncher()
         self.readinessMonitor = SteamReadinessMonitor()
-        try? store.prepareDirectories()
-        self.state = store.load()
+        self.state = EnvironmentState()
     }
 
-    func startAutomatically() {
+    func startAutomatically() async {
         guard !startedAutomatically else { return }
         startedAutomatically = true
+        recordBootstrap()
+        let assessment = installationService.inspect()
+        if assessment.requiresMove {
+            needsInstallationMove = true
+            showsInstaller = true
+            return
+        }
+        do {
+            if runtimeActivityLease == nil {
+                if assessment.isCommercialBuild { try await agentLauncher.quiesceRuntimeUpdaters() }
+                runtimeActivityLease = try await PortsideRuntimeActivityLease.acquire()
+            }
+        } catch {
+            _ = advanceBootstrap(to: .failed)
+            message = "Portside could not finish preparing. Please try again."
+            setupStep = .failed
+            return
+        }
+        guard bootstrap.confirmInstallation() else { return }
+        recordBootstrap()
+        let updater = appUpdater ?? PortsideUpdateCoordinator(isCommercialBuild: assessment.isCommercialBuild)
+        appUpdater = updater
+        updater.onPhaseChanged = { [weak self] phase in
+            guard let self else { return }
+            switch phase {
+            case .checking: break
+            case .installing:
+                _ = self.advanceBootstrap(to: .installingAppUpdate)
+            case .relaunching:
+                _ = self.advanceBootstrap(to: .relaunching)
+            }
+        }
+        let outcome = retryAppCheck ? await updater.retryInitialCheck() : await updater.runInitialCheck()
+        retryAppCheck = false
+        if case .relaunching = outcome {
+            _ = advanceBootstrap(to: .relaunching)
+            return
+        }
+        guard bootstrap.finishAppUpdate(allowsBootstrap: outcome.allowsBootstrap) else { return }
+        recordBootstrap()
+        guard outcome.allowsBootstrap else {
+            if case .blocked(let reason) = outcome { errorMessage = reason }
+            message = errorMessage ?? "Portside needs to be updated before Steam can open."
+            setupStep = .failed
+            return
+        }
+        try? store.prepareDirectories()
+        state = store.load()
+        if forceRuntimeRepair {
+            state.setupCompleted = false
+            forceRuntimeRepair = false
+        }
         diagnostics.breadcrumb("setup_started", context: context(stage: "startup"))
-        if requiresCommercialLicense {
-            prepareLicense()
-        } else {
-            continueAfterLicense()
+        if requiresCommercialLicense { prepareLicense() }
+        else { continueAfterLicense() }
+    }
+
+    func moveToApplications() {
+        guard needsInstallationMove, !isWorking else { return }
+        if bootstrap.state == .failed { _ = bootstrap.retry() }
+        guard advanceBootstrap(to: .movingToApplications) else { return }
+        isWorking = true
+        installationMoveError = nil
+        Task { @MainActor in
+            do {
+                try await installationService.moveToApplicationsAndReopen()
+                _ = advanceBootstrap(to: .relaunching)
+                NSApp.terminate(nil)
+            } catch {
+                installationMoveError = error.localizedDescription
+                _ = advanceBootstrap(to: .failed)
+                isWorking = false
+            }
         }
     }
 
+    func openApplicationsFolder() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications", isDirectory: true))
+    }
+
     private func continueAfterLicense() {
+        guard bootstrap.state == .checkingRuntime, bootstrap.appUpdateCompleted, !isWorking else { return }
         if let wrapperPath = state.wrapperPath.map(URL.init(fileURLWithPath:)),
            isValidWrapper(wrapperPath),
            state.setupCompleted {
+            isWorking = true
+            setupStep = .checking
             Task { @MainActor in
+                defer { isWorking = false }
+                var requiresRuntimeUpdate = false
                 do {
+                    // Fetch the signed runtime policy on every launch, including
+                    // installations that already have a usable wrapper.
+                    let manifest = try await updateService.checkRuntimeUpdate()
+                    requiresRuntimeUpdate = manifest?.critical == true
                     let prefix = URL(fileURLWithPath: state.prefixPath ?? PortsidePaths.steamPrefix.path)
-                    if !isManagedSteamRunning(wrapper: wrapperPath, prefix: prefix),
-                       let applied = try await updateService.applyPendingRuntime(using: wrapperInstaller) {
-                        state.wrapperPath = applied.result.validation.wrapper.path
-                        state.prefixPath = applied.result.validation.prefix.path
-                        state.runtimeRecord = applied.result.runtimeRecord
-                        state.runtimeManifestVersion = applied.manifest.manifestVersion
-                        persist()
+                    if !isManagedSteamRunning(wrapper: wrapperPath, prefix: prefix) {
+                        if let manifest {
+                            _ = try await updateService.prepareRuntimeUpdate(manifest: manifest)
+                        }
+                        if try updateService.pendingRuntimeUpdate() != nil {
+                            guard advanceBootstrap(to: .installingRuntime) else { return }
+                        }
+                        if let applied = try await updateService.applyPendingRuntime(using: wrapperInstaller) {
+                            state.wrapperPath = applied.result.validation.wrapper.path
+                            state.prefixPath = applied.result.validation.prefix.path
+                            state.runtimeRecord = applied.result.runtimeRecord
+                            state.runtimeManifestVersion = applied.manifest.manifestVersion
+                            persist()
+                        }
                     }
                 } catch {
                     // A non-critical runtime update never prevents an existing
                     // working installation from opening. The pending copy stays
                     // on disk for retry and rollback remains available.
-                    if (try? updateService.pendingRuntimeUpdate()?.manifest.critical) == true {
+                    if requiresRuntimeUpdate || error as? PortsideCommercialError == .incompatibleVersion ||
+                       (try? updateService.pendingRuntimeUpdate()?.manifest.critical) == true {
+                        _ = advanceBootstrap(to: .failed)
                         errorMessage = "We couldn't verify an important Portside update. Steam was not opened."
                         message = "Portside needs attention before Steam can open."
                         setupStep = .failed
@@ -127,6 +235,15 @@ final class PortsideModel: ObservableObject {
                     }
                     logger.write("runtime update was deferred: \(error.localizedDescription)", level: .warning)
                 }
+                guard advanceBootstrap(to: .checkingSteam) else { return }
+                let currentPrefix = URL(fileURLWithPath: state.prefixPath ?? PortsidePaths.steamPrefix.path)
+                guard FileManager.default.fileExists(atPath: PortsideSteamFlow.steamExecutable(prefix: currentPrefix).path) else {
+                    _ = advanceBootstrap(to: .failed)
+                    isWorking = false
+                    repair()
+                    return
+                }
+                _ = advanceBootstrap(to: .ready)
                 showsInstaller = false
                 message = "Steam is ready to play"
             }
@@ -170,6 +287,7 @@ final class PortsideModel: ObservableObject {
     }
 
     func activateLicense() {
+        guard bootstrap.appUpdateCompleted, !isWorking else { return }
         guard !licenseKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let licenseClient else {
             licenseMessage = "Enter your purchase key to continue."
             return
@@ -183,17 +301,17 @@ final class PortsideModel: ObservableObject {
                 licenseKey = ""
                 licenseMessage = "Portside is activated."
                 isWorking = false
-                setUp()
+                continueAfterLicense()
             } catch {
                 licenseMessage = "That purchase key could not be activated. Check it and try again."
                 diagnostics.capture(error: error, context: context(stage: "license_activation", errorCode: "license_activation_failed"))
+                isWorking = false
             }
-            isWorking = false
         }
     }
 
     func setUp() {
-        guard !isWorking else { return }
+        guard bootstrap.state == .checkingRuntime, bootstrap.appUpdateCompleted, !isWorking else { return }
         if requiresCommercialLicense && !hasValidLicense {
             prepareLicense()
             return
@@ -228,6 +346,7 @@ final class PortsideModel: ObservableObject {
                 }
                 diagnostics.breadcrumb("runtime_verified", context: context(stage: "runtime_verified"))
 
+                guard advanceBootstrap(to: .installingRuntime) else { return }
                 setupStep = .installing
                 message = "Setting up your private Steam experience…"
                 progress = 0.5
@@ -247,6 +366,7 @@ final class PortsideModel: ObservableObject {
                 state.phase = .prefixCreating
                 persist()
 
+                guard advanceBootstrap(to: .checkingSteam) else { return }
                 let steamExecutable = PortsideSteamFlow.steamExecutable(prefix: installed.validation.prefix)
                 if !FileManager.default.fileExists(atPath: steamExecutable.path) {
                     message = "Installing Steam securely…"
@@ -273,6 +393,7 @@ final class PortsideModel: ObservableObject {
                     try? await Task.sleep(for: .milliseconds(250))
                 }
 
+                guard advanceBootstrap(to: .launchingSteam) else { return }
                 setupStep = .opening
                 message = "Starting Steam…"
                 diagnostics.breadcrumb("steam_launch_requested", context: context(stage: "steam_launch"))
@@ -295,10 +416,12 @@ final class PortsideModel: ObservableObject {
                 agentLauncher.startRuntimeUpdater()
                 diagnostics.event("steam_window_detected", context: context(stage: "window_detected", report: report))
                 progress = 1
+                _ = advanceBootstrap(to: .ready)
                 setupStep = .ready
                 showsInstaller = false
                 hideAfterSteamWindow()
             } catch {
+                _ = advanceBootstrap(to: .failed)
                 state.phase = .failedRecoverable
                 state.lastError = PortsideLogger.sanitize(error.localizedDescription)
                 state.lastErrorCode = errorCode(error)
@@ -320,9 +443,16 @@ final class PortsideModel: ObservableObject {
     func installRosetta() { setUp() }
 
     func launchSteam() {
-        guard !isWorking, let path = state.wrapperPath else { return }
+        guard bootstrap.state == .ready, bootstrap.appUpdateCompleted,
+              !isWorking, let path = state.wrapperPath else { return }
         let wrapper = URL(fileURLWithPath: path)
-        guard isValidWrapper(wrapper) else { setUp(); return }
+        guard isValidWrapper(wrapper) else {
+            _ = advanceBootstrap(to: .launchingSteam)
+            _ = advanceBootstrap(to: .failed)
+            repair()
+            return
+        }
+        guard advanceBootstrap(to: .launchingSteam) else { return }
         isWorking = true
         message = "Starting Steam…"
         Task { @MainActor in
@@ -339,9 +469,11 @@ final class PortsideModel: ObservableObject {
                 state.lastErrorCode = nil
                 persist()
                 agentLauncher.startRuntimeUpdater()
+                _ = advanceBootstrap(to: .ready)
                 showsInstaller = false
                 hideAfterSteamWindow()
             } catch {
+                _ = advanceBootstrap(to: .failed)
                 let userMessage = userFacingSetupFailure(error)
                 errorMessage = userMessage
                 message = userMessage
@@ -361,7 +493,18 @@ final class PortsideModel: ObservableObject {
         message = "Steam is closing…"
     }
 
-    func repair() { state.setupCompleted = false; setUp() }
+    func repair() {
+        guard !isWorking, bootstrap.state == .failed else { return }
+        let retryRuntime = bootstrap.appUpdateCompleted
+        guard bootstrap.retry() else { return }
+        if retryRuntime { forceRuntimeRepair = true }
+        startedAutomatically = false
+        errorMessage = nil
+        setupStep = .checking
+        message = "Preparing Portside…"
+        retryAppCheck = true
+        Task { @MainActor in await startAutomatically() }
+    }
 
     func exportReport() {
         do {
@@ -532,7 +675,28 @@ struct RootView: View {
                     .padding(.horizontal, 22)
                     .frame(height: 58)
                     Divider()
-                    if model.setupStep == .license {
+                    if model.needsInstallationMove {
+                        VStack(spacing: 14) {
+                            Spacer()
+                            Text(model.installationMoveError == nil
+                                 ? "Move Portside to Applications"
+                                 : "Portside couldn’t be moved to your Applications folder.")
+                                .font(.title3.weight(.medium))
+                                .multilineTextAlignment(.center)
+                            Text(model.installationMoveError ?? "Portside must be installed in your Applications folder to work correctly and receive updates.")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                            if model.installationMoveError != nil {
+                                Button("Open Applications Folder") { model.openApplicationsFolder() }
+                                Button("Try Again") { model.moveToApplications() }
+                                    .buttonStyle(.borderedProminent).disabled(model.isWorking)
+                            } else {
+                                Button("Move to Applications and Reopen") { model.moveToApplications() }
+                                    .buttonStyle(.borderedProminent).disabled(model.isWorking)
+                            }
+                            Spacer()
+                        }.padding(.horizontal, 28)
+                    } else if model.setupStep == .license {
                         VStack(spacing: 14) {
                             Spacer()
                             Text("Activate Portside").font(.title3.weight(.medium))

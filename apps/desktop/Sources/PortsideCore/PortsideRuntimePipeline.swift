@@ -116,14 +116,14 @@ public struct PortsideWrapperConfiguration: Sendable, Equatable {
         info["PortsideDXMT"] = 0
         info["PortsideDXVK"] = 0
         try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: infoURL, options: .atomic)
-        let host = wrapper.appendingPathComponent("Contents/MacOS/PortsideRuntimeHost")
+        let host = try PortsideBundleComponents.runtimeHost(in: wrapper, fileManager: fileManager)
         guard fileManager.isExecutableFile(atPath: host.path) else { throw PortsideError.invalidArtifact("PortsideRuntimeHost is missing") }
     }
 }
 
 public enum PortsideRuntimeValidator {
     public static func validate(wrapper: URL, configuration: PortsideRuntimeConfiguration = .golden, fileManager: FileManager = .default) throws -> PortsideWrapperValidation {
-        let host = wrapper.appendingPathComponent("Contents/MacOS/PortsideRuntimeHost")
+        let host = try PortsideBundleComponents.runtimeHost(in: wrapper, fileManager: fileManager)
         let prefix = wrapper.appendingPathComponent("Contents/SharedSupport/prefix", isDirectory: true)
         let engine = wrapper.appendingPathComponent("Contents/SharedSupport/engine", isDirectory: true)
         let versionURL = engine.appendingPathComponent("version")
@@ -301,10 +301,21 @@ public final class PortsideUpdateService: @unchecked Sendable {
         return try await backend.downloadArtifacts(manifest: manifest, to: PortsidePaths.downloads, progress: progress)
     }
 
+    public func checkRuntimeUpdate() async throws -> PortsideRuntimeManifest? {
+        guard let backend else { throw PortsideCommercialError.backendUnavailable }
+        return try await backend.fetchRuntimeManifest(currentVersion: currentVersion)
+    }
+
     @discardableResult
     public func prepareRuntimeUpdate(progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> PortsideRuntimeManifest? {
         guard let backend else { throw PortsideCommercialError.backendUnavailable }
         let manifest = try await backend.fetchRuntimeManifest(currentVersion: currentVersion)
+        return try await prepareRuntimeUpdate(manifest: manifest, progress: progress)
+    }
+
+    @discardableResult
+    public func prepareRuntimeUpdate(manifest: PortsideRuntimeManifest, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> PortsideRuntimeManifest? {
+        guard let backend else { throw PortsideCommercialError.backendUnavailable }
         let installedVersion = EnvironmentStore().load().runtimeManifestVersion
         if let installedVersion,
            PortsideManifestVerifier.compareVersions(manifest.manifestVersion, installedVersion) <= 0,
@@ -373,19 +384,19 @@ public enum PortsideSteamFlow {
     }
 
     public static func installationSpec(wrapper: URL) throws -> ProcessLaunchSpec {
-        let host = wrapper.appendingPathComponent("Contents/MacOS/PortsideRuntimeHost")
+        let host = try PortsideBundleComponents.runtimeHost(in: wrapper)
         guard FileManager.default.isExecutableFile(atPath: host.path) else { throw PortsideError.runtimeUnavailable }
         return ProcessLaunchSpec(executable: host, arguments: ["--winetricks", "steam"], environment: processEnvironment, currentDirectory: wrapper, timeout: 3_600)
     }
 
     public static func prefixCreationSpec(wrapper: URL) throws -> ProcessLaunchSpec {
-        let host = wrapper.appendingPathComponent("Contents/MacOS/PortsideRuntimeHost")
+        let host = try PortsideBundleComponents.runtimeHost(in: wrapper)
         guard FileManager.default.isExecutableFile(atPath: host.path) else { throw PortsideError.runtimeUnavailable }
         return ProcessLaunchSpec(executable: host, arguments: ["--create-prefix"], environment: processEnvironment, currentDirectory: wrapper, timeout: 1_800)
     }
 
     public static func cleanLaunchSpec(wrapper: URL) throws -> ProcessLaunchSpec {
-        let host = wrapper.appendingPathComponent("Contents/MacOS/PortsideRuntimeHost")
+        let host = try PortsideBundleComponents.runtimeHost(in: wrapper)
         guard FileManager.default.isExecutableFile(atPath: host.path) else { throw PortsideError.runtimeUnavailable }
         return ProcessLaunchSpec(executable: host, environment: processEnvironment, currentDirectory: wrapper, timeout: 60)
     }

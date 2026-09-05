@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import Security
 
 /// Native launcher for a Portside runtime. It deliberately uses Foundation's
 /// Process API with an executable URL and an argument array; no command string
@@ -24,7 +25,7 @@ struct PortsideRuntimeHost {
             let result = try await run(arguments: Array(CommandLine.arguments.dropFirst()), bundle: bundle, configuration: configuration)
             exit(result)
         } catch {
-            writeLog("runtime host failed: \(redact(String(describing: error)))")
+            writeLog("runtime host failed: \(redact(error.localizedDescription))")
             fputs("Portside could not start the gaming environment.\n", stderr)
             exit(1)
         }
@@ -116,16 +117,54 @@ struct PortsideRuntimeHost {
         throw HostError.missingFile(names.joined(separator: " or "))
     }
 
-    static func bundleURL() throws -> URL {
-        let executable = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
-        let bundle = executable.deletingLastPathComponent().deletingLastPathComponent()
-        guard bundle.pathExtension == "app" else { throw HostError.notInBundle }
-        return bundle
+    static func bundleURL(bundle: Bundle = .main) throws -> URL {
+        let bundleURL = bundle.bundleURL
+        let executable = bundle.executableURL
+        let reason: String?
+        if bundleURL.pathExtension != "app" {
+            reason = "Foundation did not resolve an application bundle"
+        } else if bundle.bundleIdentifier != "com.portside.runtime" {
+            reason = "The runtime bundle identifier is not com.portside.runtime"
+        } else if executable == nil {
+            reason = "CFBundleExecutable did not resolve a runtime host executable"
+        } else if executable?.lastPathComponent != "PortsideRuntimeHost" {
+            reason = "CFBundleExecutable does not identify PortsideRuntimeHost"
+        } else if !executable!.resolvingSymlinksInPath().path.hasPrefix(bundleURL.resolvingSymlinksInPath().path + "/") {
+            reason = "The runtime host executable resolves outside its bundle"
+        } else if !FileManager.default.isExecutableFile(atPath: executable!.path) {
+            reason = "The runtime host executable is missing or is not executable"
+        } else {
+            reason = nil
+        }
+        if let reason {
+            let diagnostic = bundleRejectionDiagnostic(bundleURL: bundleURL, executable: executable, reason: reason)
+            writeLog(diagnostic)
+            throw HostError.notInBundle(reason)
+        }
+        return bundleURL
+    }
+
+    static func bundleRejectionDiagnostic(bundleURL: URL, executable: URL?, reason: String) -> String {
+        let exists = executable.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+        let signature = executable.map(signatureStatus) ?? "not_checked:no_executable_url"
+        return redact("notInBundle bundle_url=\(bundleURL.absoluteString) helper_url=\(executable?.absoluteString ?? "unresolved") file_exists=\(exists) signature=\(signature) reason=\(reason)")
+    }
+
+    /// The assembled wrapper is mutable (its prefix is installed separately).
+    /// Its trust comes from the verified runtime manifest; code-signature status
+    /// here is diagnostic and does not replace that authentication contract.
+    static func signatureStatus(at url: URL) -> String {
+        var code: SecStaticCode?
+        let creation = SecStaticCodeCreateWithPath(url as CFURL, [], &code)
+        guard creation == errSecSuccess, let code else { return "unavailable:OSStatus=\(creation)" }
+        let validation = SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures), nil)
+        return validation == errSecSuccess ? "valid" : "invalid:OSStatus=\(validation)"
     }
 
     static func loadConfiguration(bundle: URL) throws -> Configuration {
-        let url = bundle.appendingPathComponent("Contents/Resources/portside-runtime.json")
-        guard let data = try? Data(contentsOf: url) else { throw HostError.missingFile(url.path) }
+        guard let runtimeBundle = Bundle(url: bundle),
+              let url = runtimeBundle.url(forResource: "portside-runtime", withExtension: "json"),
+              let data = try? Data(contentsOf: url) else { throw HostError.missingFile("portside-runtime.json") }
         return try JSONDecoder().decode(Configuration.self, from: data)
     }
 
@@ -137,7 +176,7 @@ struct PortsideRuntimeHost {
         let directory = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support/Portside/Logs", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let file = directory.appendingPathComponent("runtime-host.log")
-        let line = "[\(ISO8601DateFormatter().string(from: Date()))] \(message)\n"
+        let line = "[\(ISO8601DateFormatter().string(from: Date()))] \(redact(message))\n"
         if !FileManager.default.fileExists(atPath: file.path) { FileManager.default.createFile(atPath: file.path, contents: nil) }
         if let handle = try? FileHandle(forWritingTo: file) {
             _ = try? handle.seekToEnd()
@@ -158,12 +197,12 @@ struct PortsideRuntimeHost {
     }
 
     enum HostError: LocalizedError {
-        case notInBundle
+        case notInBundle(String)
         case missingFile(String)
         case invalidArguments
         var errorDescription: String? {
             switch self {
-            case .notInBundle: return "PortsideRuntimeHost must run inside an app bundle"
+            case .notInBundle(let reason): return "PortsideRuntimeHost must run inside its runtime app bundle. \(reason)."
             case .missingFile(let path): return "required runtime file is missing: \(path)"
             case .invalidArguments: return "runtime host arguments are invalid"
             }

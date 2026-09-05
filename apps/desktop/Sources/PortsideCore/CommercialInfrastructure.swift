@@ -68,9 +68,8 @@ public enum PortsideAppUpdateConfiguration {
 /// Identifies the temporary locations macOS uses while an app is opened
 /// directly from a mounted installer or from a quarantined download.
 ///
-/// Sparkle must not update an app bundle in either location. The app is still
-/// allowed to complete its first-time setup there; update checks resume when
-/// the user opens the installed copy.
+/// Commercial bootstrap must stop in these locations before initializing
+/// update, runtime or Steam services.
 public enum PortsideInstallLocation {
     public static func isInstallerBundle(_ bundleURL: URL) -> Bool {
         let path = bundleURL.standardizedFileURL.path
@@ -228,7 +227,7 @@ public struct PortsideRuntimeManifest: Codable, Equatable, Sendable {
 }
 
 public enum PortsideManifestVerifier {
-    public static func verify(_ data: Data, publicKeyBase64: String, expectedKeyID: String? = nil, expectedChannel: String? = nil, currentVersion: String, allowedHosts: Set<String> = []) throws -> PortsideRuntimeManifest {
+    public static func verify(_ data: Data, publicKeyBase64: String, expectedKeyID: String? = nil, expectedChannel: String? = nil, currentVersion: String, allowedHosts: Set<String> = [], enforceMinimumVersion: Bool = true) throws -> PortsideRuntimeManifest {
         let decoder = JSONDecoder.portside
         let manifest = try decoder.decode(PortsideRuntimeManifest.self, from: data)
         if let expectedKeyID, manifest.signatureKeyId != expectedKeyID { throw PortsideCommercialError.invalidSignature }
@@ -237,7 +236,6 @@ public enum PortsideManifestVerifier {
         let publicKey = try Curve25519.Signing.PublicKey(rawRepresentation: Data(base64Encoded: publicKeyBase64, options: [.ignoreUnknownCharacters]).unwrap(or: PortsideCommercialError.invalidSignature))
         let unsigned = try PortsideCanonicalJSON.unsignedManifestData(from: data)
         guard publicKey.isValidSignature(signature, for: unsigned) else { throw PortsideCommercialError.invalidSignature }
-        guard compareVersions(currentVersion, manifest.minimumPortsideVersion) >= 0 else { throw PortsideCommercialError.incompatibleVersion }
         guard !allowedHosts.isEmpty else { throw PortsideCommercialError.unauthorizedURL }
         var identifiers = Set<String>()
         guard manifest.components.count == PortsideRuntimeCatalog.requiredComponents.count,
@@ -250,7 +248,12 @@ public enum PortsideManifestVerifier {
             guard component.downloadURL.scheme == "https", let host = component.downloadURL.host, allowedHosts.contains(host), component.sha256.count == 64, component.sha256.allSatisfy(\.isHexDigit), component.size > 0, component.builtBy == "Portside", component.sourcePath?.isEmpty == false, component.sourceCommit?.isEmpty == false, component.sourceSnapshotChecksum?.isEmpty == false, component.license?.isEmpty == false else { throw PortsideCommercialError.invalidManifest("component is incomplete, not Portside-built, or outside the Portside host allowlist") }
             guard !component.downloadURL.absoluteString.localizedCaseInsensitiveContains("sikarugir"), !component.downloadURL.absoluteString.localizedCaseInsensitiveContains("raw.githubusercontent.com") else { throw PortsideCommercialError.unauthorizedURL }
         }
+        if enforceMinimumVersion { try requireCompatibleApp(manifest, currentVersion: currentVersion) }
         return manifest
+    }
+
+    public static func requireCompatibleApp(_ manifest: PortsideRuntimeManifest, currentVersion: String) throws {
+        guard compareVersions(currentVersion, manifest.minimumPortsideVersion) >= 0 else { throw PortsideCommercialError.incompatibleVersion }
     }
 
     public static func compareVersions(_ lhs: String, _ rhs: String) -> Int {

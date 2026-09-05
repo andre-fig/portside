@@ -5,40 +5,59 @@ public final class PortsideBackendClient: @unchecked Sendable {
     private let configuration: PortsideBackendConfiguration
     private let session: URLSession
     private let downloader: SecureDownloader
+    private let manifestDirectory: URL
+    private var manifestURL: URL { manifestDirectory.appendingPathComponent("runtime-manifest.json") }
+    private var manifestETagURL: URL { manifestDirectory.appendingPathComponent("runtime-manifest.etag") }
 
-    public init(configuration: PortsideBackendConfiguration, session: URLSession = .shared) throws {
+    public init(configuration: PortsideBackendConfiguration, session: URLSession = .shared, manifestDirectory: URL = PortsidePaths.manifests) throws {
         guard configuration.isConfigured, let baseURL = configuration.baseURL, baseURL.scheme == "https", baseURL.user == nil, baseURL.password == nil else { throw PortsideCommercialError.backendUnavailable }
         self.configuration = configuration
+        self.manifestDirectory = manifestDirectory
         self.session = session
         self.downloader = SecureDownloader(allowedHosts: configuration.allowedHosts)
     }
 
     public func fetchRuntimeManifest(currentVersion: String) async throws -> PortsideRuntimeManifest {
         guard let publicKey = configuration.runtimeManifestPublicKey else { throw PortsideCommercialError.invalidSignature }
-        let cachedData = try? Data(contentsOf: PortsidePaths.runtimeManifest)
-        let cachedManifest = cachedData.flatMap { try? PortsideManifestVerifier.verify($0, publicKeyBase64: publicKey, expectedChannel: expectedChannel, currentVersion: currentVersion, allowedHosts: configuration.allowedHosts) }
-        let etag = try? String(contentsOf: PortsidePaths.runtimeManifestETag, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        let cachedData = try? Data(contentsOf: manifestURL)
+        let cachedManifest = cachedData.flatMap { try? PortsideManifestVerifier.verify($0, publicKeyBase64: publicKey, expectedChannel: expectedChannel, currentVersion: currentVersion, allowedHosts: configuration.allowedHosts, enforceMinimumVersion: false) }
+        let etag = try? String(contentsOf: manifestETagURL, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        var observedManifest: PortsideRuntimeManifest?
         do {
             let response = try await requestResponse(path: "/v1/runtime/manifest", headers: etag.map { ["If-None-Match": $0] } ?? [:])
-            if response.status == 304, let cachedManifest { return cachedManifest }
+            if response.status == 304, let cachedManifest {
+                try PortsideManifestVerifier.requireCompatibleApp(cachedManifest, currentVersion: currentVersion)
+                return cachedManifest
+            }
             guard (200..<300).contains(response.status), response.status != 304 else { throw PortsideCommercialError.backendUnavailable }
-            let manifest = try PortsideManifestVerifier.verify(response.data, publicKeyBase64: publicKey, expectedChannel: expectedChannel, currentVersion: currentVersion, allowedHosts: configuration.allowedHosts)
+            let manifest = try PortsideManifestVerifier.verify(response.data, publicKeyBase64: publicKey, expectedChannel: expectedChannel, currentVersion: currentVersion, allowedHosts: configuration.allowedHosts, enforceMinimumVersion: false)
             if let cachedManifest,
                PortsideManifestVerifier.compareVersions(manifest.manifestVersion, cachedManifest.manifestVersion) < 0,
                manifest.rollbackVersion != cachedManifest.manifestVersion {
                 throw PortsideCommercialError.invalidManifest("runtime update would downgrade the installed release")
             }
-            try FileManager.default.createDirectory(at: PortsidePaths.manifests, withIntermediateDirectories: true)
-            try response.data.write(to: PortsidePaths.runtimeManifest, options: .atomic)
+            observedManifest = manifest
+            try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+            try response.data.write(to: manifestURL, options: .atomic)
             if let responseETag = response.headers["etag"] {
-                try responseETag.write(to: PortsidePaths.runtimeManifestETag, atomically: true, encoding: .utf8)
-            } else { try? FileManager.default.removeItem(at: PortsidePaths.runtimeManifestETag) }
+                try responseETag.write(to: manifestETagURL, atomically: true, encoding: .utf8)
+            } else { try? FileManager.default.removeItem(at: manifestETagURL) }
+            // Persist the authenticated minimum version as well, so a later
+            // offline launch cannot forget that this build was blocked.
+            try PortsideManifestVerifier.requireCompatibleApp(manifest, currentVersion: currentVersion)
             return manifest
         } catch {
             // A verified cached manifest keeps an existing installation usable
             // while the service is offline or temporarily unavailable. Invalid
             // network data is never written over that cache.
-            if let cachedManifest { return cachedManifest }
+            if let observedManifest {
+                try PortsideManifestVerifier.requireCompatibleApp(observedManifest, currentVersion: currentVersion)
+            }
+            if error as? PortsideCommercialError == .incompatibleVersion { throw error }
+            if let cachedManifest {
+                try PortsideManifestVerifier.requireCompatibleApp(cachedManifest, currentVersion: currentVersion)
+                return cachedManifest
+            }
             throw error
         }
     }

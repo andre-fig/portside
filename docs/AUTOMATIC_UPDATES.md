@@ -39,7 +39,7 @@ DATABASE_URL=postgresql://... npm --prefix apps/backend ci
 ./scripts/publish_release.sh
 ```
 
-Runtime manifests are signed before production publication. The desktop validates the Ed25519 signature, production channel, minimum Portside version, approved HTTPS host, SHA-256 and size before download. ETag/304 responses and a verified local cache preserve offline operation. The background `PortsideAgent` prepares runtime updates after the main app exits; installation happens on a later opening while Steam is stopped. The existing wrapper/prefix remain the rollback boundary.
+Runtime manifests are signed before production publication. The desktop validates the Ed25519 signature, production channel, minimum Portside version, approved HTTPS host, SHA-256 and size before download. ETag/304 responses and a verified local cache preserve offline operation. After the installation-location and awaited Sparkle preflight gates, each launch checks the signed runtime manifest and prepares/applies updates while Steam is stopped. The background `PortsideAgent` also prepares runtime updates after the main app exits. The existing wrapper/prefix remain the rollback boundary.
 
 The backend appcast is generated from `AppRelease` rows with `channel=production` and `status=production`; it returns the current release and two previous releases. A release is registered directly in production after signing, notarization and validation. The release workflow uses the validated runtime version as its base application version; if that version is already present in the production appcast, it automatically advances the application patch version so a rebuilt app cannot overwrite a different artifact under the same version.
 

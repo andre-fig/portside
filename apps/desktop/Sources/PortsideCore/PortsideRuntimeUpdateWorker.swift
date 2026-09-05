@@ -24,7 +24,14 @@ public final class PortsideRuntimeUpdateWorker: @unchecked Sendable {
         logger.write("runtime update service started")
         while !Task.isCancelled {
             do {
+                // The app holds the same lease from its preflight through
+                // foreground runtime/Steam preparation. A previous worker can
+                // neither start a competing download nor race pending archives.
+                let activity = try await PortsideRuntimeActivityLease.acquire()
+                defer { activity.release() }
                 _ = try await updateService.prepareRuntimeUpdate()
+            } catch is CancellationError {
+                return
             } catch {
                 // Offline operation is expected. Keep the current runtime and
                 // retry later without surfacing a technical dialog to users.
