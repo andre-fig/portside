@@ -45,8 +45,8 @@ link/instruction consistency checks rather than dispatched workflows.
 Known traps: successful CI currently means source policy plus backend schema/build,
 not the full local test suite; Environment protection is external; retained GitHub
 artifacts expire; a storage upload does not establish backend registration;
-`Verify Railway` is a health probe, not a deploy; the clean-GUI script cannot
-confirm acceptance without an interactive terminal. Signatures/notarization,
+Railway deployment is provider-side and separate from GitHub CI; the clean-GUI
+script cannot confirm acceptance without an interactive terminal. Signatures/notarization,
 Sparkle, Steam windows and games require their own recorded validation.
 
 GitHub artifacts, build trees, downloaded runtimes, dSYM, DMG and ZIP files are

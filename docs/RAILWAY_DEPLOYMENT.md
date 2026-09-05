@@ -18,8 +18,11 @@ operational statements in the previous version are retained in Git history;
 | Object storage | [`AppConfig`](../apps/backend/src/core/app-config.ts)                                                             | One private S3-compatible connection; no secondary failover                                 |
 | Landing        | [`vite.config.ts`](../apps/landing/vite.config.ts), [`build-landing.yml`](../.github/workflows/build-landing.yml) | Nitro Node SSR bundle in `.output`; Bun install/lint/typecheck/build in CI                  |
 
-Backend service roots must make the backend Dockerfile's relative `COPY` paths
-resolve against `apps/backend`. The [Dockerfile](../apps/backend/Dockerfile)
+The API, Worker and Cron are separate Railway services connected directly to
+the repository. Each service must select its matching configuration file above
+in the Railway connector. Backend service roots must make the backend
+Dockerfile's relative `COPY` paths resolve against `apps/backend`. The
+[Dockerfile](../apps/backend/Dockerfile)
 uses Node 22 Debian stages, installs locked npm dependencies, generates Prisma,
 compiles TypeScript, copies runtime output/manifests, and runs as the `node`
 user. It does not use the service filesystem as persistent artifact storage.
@@ -102,10 +105,10 @@ for the complete signing/publishing variable contract.
    or responding healthcheck does not complete desktop discovery, Sparkle,
    notarization, or graphical clean-install acceptance.
 
-[`Verify Railway`](../.github/workflows/deploy-railway.yml) follows successful
-CI for relevant backend/deploy changes and polls a configured public `/health`
-URL. It does not deploy, check `/ready`, validate the exact served revision,
-prove backups, or inspect Stripe/storage. The landing workflow produces a build
-artifact; its title alone does not prove a Railway gate is configured. Actual
-publication behavior and manual authorization boundaries are in
-[RELEASE](RELEASE.md); rollback precondition gaps are in [BACKEND](BACKEND.md).
+Deployment is performed by the Railway connector for the three backend
+services. The API healthcheck is available at `/health`; the connector deploy
+does not by itself validate the exact served revision, prove backups, or inspect
+Stripe/storage. The landing workflow produces a build artifact; its title alone
+does not prove a Railway deployment is configured. Actual publication behavior
+and manual authorization boundaries are in [RELEASE](RELEASE.md); rollback
+precondition gaps are in [BACKEND](BACKEND.md).
