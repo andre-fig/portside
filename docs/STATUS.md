@@ -28,13 +28,22 @@ Steam acceptance; the audit matrix below retains its original scope.
 **Implemented but not end-to-end validated:** desktop startup and successful
 runtime installation now bound replaceable Portside storage to one rollback,
 one failed wrapper and one legacy prefix recovery point, and remove abandoned
-staging directories after 24 hours. Fixture tests verify name scoping, symlink
-exclusion, retention ordering and preservation of a synthetic managed-prefix
-marker. The active Steam prefix and game libraries are never cleanup targets.
-No everyday-account data was deleted and no real accumulated installation was
-used as a destructive test fixture. Validation passed 119 desktop tests with
-one explicitly unconfigured signed-app probe skipped, the desktop build,
-production source policy and `git diff --check`.
+staging directories and direct download-cache entries after 24 hours. History
+ordering accepts current millisecond names, legacy second names and filesystem
+attribute dates when archive timestamps are invalid. Fixture tests verify entry
+age, symlink exclusion, retention ordering and preservation of a synthetic
+managed-prefix marker. The active Steam prefix and game libraries are never
+cleanup targets.
+
+**Verified manual cleanup, scoped:** with explicit user authorization, eight old
+runtime rollback directories and re-creatable download caches were removed from
+one real installation while retaining the newest `0.1.17` rollback. Portside
+storage fell from approximately 39.6 GiB to 28 GiB and available disk space rose
+from 181 GiB to 193 GiB. The active wrapper, managed prefix, Steam installation,
+games and saves were excluded by exact path. This validates the manual target
+selection, not startup execution of the revised maintenance code. Validation
+passed 121 desktop tests with one explicitly unconfigured signed-app probe
+skipped, the desktop build, production source policy and `git diff --check`.
 
 ## Executive assessment
 

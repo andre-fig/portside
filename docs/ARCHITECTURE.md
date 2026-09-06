@@ -185,7 +185,8 @@ They are runtime locations, not repository files.
 | `SteamLibrary`                          | Additional managed scan root; created by Portside, but no setup code automatically redirects Steam's game installation here. Games may remain within the prefix's Steam `steamapps`.         |
 | `Runtime/Pending`, `Runtime/rollback-*` | Prepared downloads and retained wrappers. One completed rollback wrapper is retained; these are not a backup of games/saves and rollback is not fully transactional.                         |
 | `Manifests`                             | Authenticated cached runtime JSON and ETag. Preserve signed minimum-version behavior.                                                                                                        |
-| `Cache/Downloads`, `Cache/XDG`          | Re-creatable runtime downloads and tool cache. Cache cleanup must never broaden into prefix/library removal.                                                                                 |
+| `Cache/Downloads`, legacy `Downloads`   | Re-creatable runtime downloads. Direct non-symlink entries expire after 24 hours once the active wrapper validates.                                                                          |
+| `Cache/XDG`                             | Runtime-tool cache. Cleanup must never broaden into prefix/library removal.                                                                                                                  |
 | Legacy `Backups/Steam-prefix-*`         | Recovery points made by older releases. Startup retention keeps the newest one and never enters the active prefix.                                                                           |
 | `Profiles`                              | Locally derived or explicitly validated game/renderer configuration.                                                                                                                         |
 | `Logs`, `Diagnostics`                   | Technical logs/reports; may contain local metadata and require review before sharing.                                                                                                        |
@@ -201,8 +202,11 @@ files to determine compatibility.
 After validating the active wrapper, startup maintenance bounds replaceable
 storage to one rollback, one failed wrapper and one legacy prefix recovery
 point. Abandoned extraction and pending-staging directories older than 24 hours
-are removed. The maintenance matches only direct, non-symlink directories with
-Portside-owned names; it never traverses the active prefix or game library.
+are removed, as are direct entries in the current and legacy download caches
+after 24 hours. History ordering accepts current millisecond names, legacy
+second names and filesystem attribute dates when archived modification dates
+are invalid. The maintenance matches only direct, non-symlink entries in
+Portside-owned locations; it never traverses the active prefix or game library.
 
 ## Compatibility boundaries and implementation gaps
 

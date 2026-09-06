@@ -181,12 +181,14 @@ record its replacement and update related docs; do not silently restore old beha
 - **Decision:** After validating the active wrapper, run storage maintenance on
   startup and after successful installation. Retain one runtime rollback, one
   failed wrapper and one legacy prefix recovery point; remove abandoned staging
-  directories after 24 hours.
+  directories and direct entries in Portside-owned download caches after 24
+  hours. Accept current millisecond and legacy second history timestamps, falling
+  back to filesystem attribute dates when archived modification dates are invalid.
 - **Reason:** Bound replaceable disk usage while preserving a recovery path.
 - **Consequences:** The active managed prefix, Steam credentials, games, saves and
   libraries are never cleanup candidates. Cleanup is best effort, accepts only
-  direct non-symlink directories with owned names, and cleanup failures do not
-  block startup.
+  direct non-symlink entries in owned locations, and cleanup failures do not block
+  startup. Downloaded artifacts may need to be fetched again after expiration.
 - **Relevant files:**
   [maintenance](../apps/desktop/Sources/PortsideCore/PortsideStorageMaintenance.swift),
   [runtime installer](../apps/desktop/Sources/PortsideCore/PortsideRuntimePipeline.swift),

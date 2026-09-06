@@ -4,12 +4,13 @@ public struct PortsideStorageMaintenanceReport: Equatable, Sendable {
     public var removedRollbacks = 0
     public var removedFailedWrappers = 0
     public var removedTemporaryDirectories = 0
+    public var removedCachedDownloads = 0
     public var removedLegacyBackups = 0
 
     public init() {}
 
     public var removedItemCount: Int {
-        removedRollbacks + removedFailedWrappers + removedTemporaryDirectories + removedLegacyBackups
+        removedRollbacks + removedFailedWrappers + removedTemporaryDirectories + removedCachedDownloads + removedLegacyBackups
     }
 }
 
@@ -22,6 +23,7 @@ public final class PortsideStorageMaintenance: @unchecked Sendable {
     private let runtimeDirectory: URL
     private let cacheDirectory: URL
     private let pendingDirectory: URL
+    private let downloadDirectories: [URL]
     private let legacyBackupDirectories: [URL]
     private let fileManager: FileManager
 
@@ -29,6 +31,10 @@ public final class PortsideStorageMaintenance: @unchecked Sendable {
         runtimeDirectory: URL = PortsidePaths.runtime,
         cacheDirectory: URL = PortsidePaths.cache,
         pendingDirectory: URL = PortsidePaths.runtimePending,
+        downloadDirectories: [URL] = [
+            PortsidePaths.downloads,
+            PortsidePaths.root.appendingPathComponent("Downloads", isDirectory: true)
+        ],
         legacyBackupDirectories: [URL] = [
             PortsidePaths.root.appendingPathComponent("Backups", isDirectory: true),
             PortsidePaths.backups
@@ -38,6 +44,7 @@ public final class PortsideStorageMaintenance: @unchecked Sendable {
         self.runtimeDirectory = runtimeDirectory
         self.cacheDirectory = cacheDirectory
         self.pendingDirectory = pendingDirectory
+        self.downloadDirectories = downloadDirectories
         self.legacyBackupDirectories = legacyBackupDirectories
         self.fileManager = fileManager
     }
@@ -64,6 +71,12 @@ public final class PortsideStorageMaintenance: @unchecked Sendable {
             prefix: ".pending-",
             olderThan: now.addingTimeInterval(-Self.orphanMaximumAge)
         )
+        report.removedCachedDownloads = downloadDirectories.reduce(into: 0) { removed, directory in
+            removed += removeStaleDirectEntries(
+                in: directory,
+                olderThan: now.addingTimeInterval(-Self.orphanMaximumAge)
+            )
+        }
         report.removedLegacyBackups = pruneAcrossDirectories(
             legacyBackupDirectories,
             prefix: "Steam-prefix-",
@@ -100,6 +113,29 @@ public final class PortsideStorageMaintenance: @unchecked Sendable {
         remove(sortedCandidates(in: directory, prefix: prefix).filter { $0.date < cutoff })
     }
 
+    private func removeStaleDirectEntries(in directory: URL, olderThan cutoff: Date) -> Int {
+        let keys: Set<URLResourceKey> = [
+            .isDirectoryKey,
+            .isRegularFileKey,
+            .isSymbolicLinkKey,
+            .contentModificationDateKey,
+            .creationDateKey,
+            .attributeModificationDateKey
+        ]
+        let candidates = ((try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: Array(keys),
+            options: []
+        )) ?? []).compactMap { url -> Candidate? in
+            guard let values = try? url.resourceValues(forKeys: keys),
+                  values.isSymbolicLink != true,
+                  values.isDirectory == true || values.isRegularFile == true else { return nil }
+            let date = filesystemDate(from: values)
+            return date < cutoff ? Candidate(url: url, date: date) : nil
+        }
+        return remove(candidates)
+    }
+
     private func remove(_ candidates: [Candidate]) -> Int {
         var removed = 0
         for candidate in candidates {
@@ -114,7 +150,13 @@ public final class PortsideStorageMaintenance: @unchecked Sendable {
     }
 
     private func sortedCandidates(in directory: URL, prefix: String) -> [Candidate] {
-        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey]
+        let keys: Set<URLResourceKey> = [
+            .isDirectoryKey,
+            .isSymbolicLinkKey,
+            .contentModificationDateKey,
+            .creationDateKey,
+            .attributeModificationDateKey
+        ]
         return ((try? fileManager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: Array(keys),
@@ -127,10 +169,20 @@ public final class PortsideStorageMaintenance: @unchecked Sendable {
             return Candidate(
                 url: url,
                 date: timestamp(in: url.lastPathComponent, prefix: prefix)
-                    ?? values.contentModificationDate
-                    ?? .distantPast
+                    ?? filesystemDate(from: values)
             )
         }.sorted(by: newestFirst)
+    }
+
+    private func filesystemDate(from values: URLResourceValues) -> Date {
+        let earliestReliableArchiveDate = Date(timeIntervalSince1970: 946_684_800)
+        if let modified = values.contentModificationDate, modified >= earliestReliableArchiveDate {
+            return modified
+        }
+        return values.attributeModificationDate
+            ?? values.creationDate
+            ?? values.contentModificationDate
+            ?? .distantPast
     }
 
     private func newestFirst(_ lhs: Candidate, _ rhs: Candidate) -> Bool {
@@ -141,8 +193,13 @@ public final class PortsideStorageMaintenance: @unchecked Sendable {
     private func timestamp(in name: String, prefix: String) -> Date? {
         let suffix = name.dropFirst(prefix.count)
         guard let firstComponent = suffix.split(separator: "-", maxSplits: 1).first,
-              let milliseconds = Int64(firstComponent),
-              milliseconds >= 1_000_000_000_000 else { return nil }
-        return Date(timeIntervalSince1970: TimeInterval(milliseconds) / 1_000)
+              let rawTimestamp = Int64(firstComponent) else { return nil }
+        if rawTimestamp >= 1_000_000_000_000 {
+            return Date(timeIntervalSince1970: TimeInterval(rawTimestamp) / 1_000)
+        }
+        if rawTimestamp >= 1_000_000_000 {
+            return Date(timeIntervalSince1970: TimeInterval(rawTimestamp))
+        }
+        return nil
     }
 }

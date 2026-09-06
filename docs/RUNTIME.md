@@ -129,17 +129,18 @@ Paths are defined in [PortsidePaths](../apps/desktop/Sources/PortsideCore/Portsi
 All entries below are relative to the user's Application Support `Portside`
 directory; they are not part of `/Applications/Portside.app`.
 
-| Location                          | Ownership and use                                                                                      |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `Wrappers/PortsideBaseline.app`   | Replaceable active runtime wrapper.                                                                    |
-| `Prefixes/PortsideBaseline`       | Persistent user Wine prefix, Windows registry, Steam installation and account/game data. Preserve it.  |
-| `Runtime/Pending`                 | Downloaded update archives and local pending index.                                                    |
-| `Runtime/rollback-<time>-<UUID>`  | Prior wrapper; successful installation/startup retention keeps the newest one.                         |
-| `Runtime/failed-<time>-<UUID>`    | Failed replacement retained for bounded recovery diagnostics; only the newest one is kept.             |
-| `Cache/Downloads`, `Cache/XDG`    | Artifact and runtime-tool caches.                                                                      |
-| `Manifests`                       | Cached manifest and ETag.                                                                              |
-| `SteamLibrary`                    | Created application directory and scan root; source does not establish that Steam installs games here. |
-| `Logs`, `Diagnostics`, `Profiles` | Local operational state; inspect only with appropriate sanitization.                                   |
+| Location                              | Ownership and use                                                                                           |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `Wrappers/PortsideBaseline.app`       | Replaceable active runtime wrapper.                                                                         |
+| `Prefixes/PortsideBaseline`           | Persistent user Wine prefix, Windows registry, Steam installation and account/game data. Preserve it.       |
+| `Runtime/Pending`                     | Downloaded update archives and local pending index.                                                         |
+| `Runtime/rollback-<time>-<UUID>`      | Prior wrapper; successful installation/startup retention keeps the newest one.                              |
+| `Runtime/failed-<time>-<UUID>`        | Failed replacement retained for bounded recovery diagnostics; only the newest one is kept.                  |
+| `Cache/Downloads`, legacy `Downloads` | Re-creatable artifacts; direct non-symlink entries expire after 24 hours once the active wrapper validates. |
+| `Cache/XDG`                           | Runtime-tool cache.                                                                                         |
+| `Manifests`                           | Cached manifest and ETag.                                                                                   |
+| `SteamLibrary`                        | Created application directory and scan root; source does not establish that Steam installs games here.      |
+| `Logs`, `Diagnostics`, `Profiles`     | Local operational state; inspect only with appropriate sanitization.                                        |
 
 [PortsideRuntimeInstaller](../apps/desktop/Sources/PortsideCore/PortsideRuntimePipeline.swift)
 extracts archives into a temporary cache directory, combines components under
@@ -164,9 +165,10 @@ Storage maintenance runs after a successful runtime installation and on startup
 only when the active wrapper validates. It retains one rollback, one failed
 wrapper and the newest legacy `Backups/Steam-prefix-*` recovery point. Direct
 temporary extraction directories under `Cache` and incomplete pending staging
-directories older than 24 hours are removed. Symlinks, unrelated names, the
-managed prefix and game libraries are excluded. This bounds future accumulation
-without treating user-owned Steam data as disposable cache.
+directories older than 24 hours are removed. Direct files and directories in
+the current and legacy download caches also expire after 24 hours. Symlinks,
+unrelated names, the managed prefix and game libraries are excluded. This bounds
+future accumulation without treating user-owned Steam data as disposable cache.
 
 The Steam flow installs the `steam` verb, launches the wrapper for the initial
 updater cycle and launches it again for interactive use. Subsequent desktop
@@ -188,10 +190,12 @@ transaction across the whole setup. Final prefix setup/layout validation occurs
 after replacing the active wrapper. Pending-update application attempts rollback
 on an exception; direct setup/repair calls do not provide that same catch path.
 New rollback names contain a sortable creation timestamp, and rollback selection
-also supports legacy UUID names using filesystem modification dates. The failed
-destination is now uniquely timestamped rather than using a literal placeholder.
-Crash journaling and a fully transactional prefix/layout transition are still
-not established, so reliable end-to-end recovery remains unverified.
+also supports legacy second timestamps and UUID names. When an archive preserved
+an invalid epoch modification date, selection falls back to the filesystem
+attribute-change date. The failed destination is now uniquely timestamped rather
+than using a literal placeholder. Crash journaling and a fully transactional
+prefix/layout transition are still not established, so reliable end-to-end
+recovery remains unverified.
 
 The pending-index reader checks file presence/count and relative paths but does
 not reverify signature or archive hashes at application time. Archive listing
