@@ -5,6 +5,12 @@ wrapper and opens the official Windows Steam client. It targets macOS 13+ on
 Apple silicon. Steam is obtained from Valve through winetricks; games, account
 sessions and DRM/anti-cheat bypasses are not distributed by Portside.
 
+## Download
+
+[Download the latest production Portside DMG](https://api-production-6d06.up.railway.app/app/production/latest).
+The stable API endpoint redirects to the currently registered production DMG;
+temporary signed storage URLs should not be copied or bookmarked.
+
 Start with [AGENTS.md](AGENTS.md) for working rules and
 [docs/README.md](docs/README.md) for the documentation map. The
 [audit snapshot](docs/STATUS.md) distinguishes local evidence, implementation,

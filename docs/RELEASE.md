@@ -114,9 +114,10 @@ The backend [runtime service](../apps/backend/src/modules/runtime/runtime.servic
 serves `/v1/appcast.xml` from registered production/superseded app releases
 (up to three), and `/v1/runtime/manifest` from the published production manifest.
 [App download routes](../apps/backend/src/modules/artifacts/app-download.controller.ts)
-serve `/app/production/latest` (DMG) and versioned files using signed private
-storage redirects. The uploaded static `appcast.xml` is a separate artifact;
-inspect the configured `SUFeedURL` and actual API response during acceptance.
+serve the stable [latest production DMG](https://api-production-6d06.up.railway.app/app/production/latest)
+and versioned files using signed private storage redirects. The uploaded static
+`appcast.xml` is a separate artifact; inspect the configured `SUFeedURL` and
+actual API response during acceptance.
 
 ## Runtime publication and manual operations
 
