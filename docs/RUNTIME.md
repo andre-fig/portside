@@ -134,7 +134,8 @@ directory; they are not part of `/Applications/Portside.app`.
 | `Wrappers/PortsideBaseline.app`   | Replaceable active runtime wrapper.                                                                    |
 | `Prefixes/PortsideBaseline`       | Persistent user Wine prefix, Windows registry, Steam installation and account/game data. Preserve it.  |
 | `Runtime/Pending`                 | Downloaded update archives and local pending index.                                                    |
-| `Runtime/rollback-<UUID>`         | Retained prior wrappers.                                                                               |
+| `Runtime/rollback-<time>-<UUID>`  | Prior wrapper; successful installation/startup retention keeps the newest one.                         |
+| `Runtime/failed-<time>-<UUID>`    | Failed replacement retained for bounded recovery diagnostics; only the newest one is kept.             |
 | `Cache/Downloads`, `Cache/XDG`    | Artifact and runtime-tool caches.                                                                      |
 | `Manifests`                       | Cached manifest and ETag.                                                                              |
 | `SteamLibrary`                    | Created application directory and scan root; source does not establish that Steam installs games here. |
@@ -159,6 +160,14 @@ runtime variables are `WINEPREFIX`, `WINEARCH`, `WINEDEBUG`, `WINE`,
 `WINESERVER`, `WINELOADER`, `WINEMSYNC`, `WINEESYNC`, `D3DMETAL`, `DXMT`,
 `DXVK`, `PATH` and `XDG_CACHE_HOME`. Do not log their sensitive values.
 
+Storage maintenance runs after a successful runtime installation and on startup
+only when the active wrapper validates. It retains one rollback, one failed
+wrapper and the newest legacy `Backups/Steam-prefix-*` recovery point. Direct
+temporary extraction directories under `Cache` and incomplete pending staging
+directories older than 24 hours are removed. Symlinks, unrelated names, the
+managed prefix and game libraries are excluded. This bounds future accumulation
+without treating user-owned Steam data as disposable cache.
+
 The Steam flow installs the `steam` verb, launches the wrapper for the initial
 updater cycle and launches it again for interactive use. Subsequent desktop
 startup performs app/runtime checks and offers Open Steam. The detached wrapper
@@ -178,8 +187,11 @@ verified manifest and installed runtime, subject to minimum-app gates.
 transaction across the whole setup. Final prefix setup/layout validation occurs
 after replacing the active wrapper. Pending-update application attempts rollback
 on an exception; direct setup/repair calls do not provide that same catch path.
-`rollbackLatest()` sorts random UUID directory names lexicographically and uses
-a literal `failed-(UUID().uuidString)` destination. These limit reliable recovery.
+New rollback names contain a sortable creation timestamp, and rollback selection
+also supports legacy UUID names using filesystem modification dates. The failed
+destination is now uniquely timestamped rather than using a literal placeholder.
+Crash journaling and a fully transactional prefix/layout transition are still
+not established, so reliable end-to-end recovery remains unverified.
 
 The pending-index reader checks file presence/count and relative paths but does
 not reverify signature or archive hashes at application time. Archive listing

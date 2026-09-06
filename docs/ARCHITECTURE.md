@@ -183,9 +183,10 @@ They are runtime locations, not repository files.
 | `Wrappers/PortsideBaseline.app`         | Replaceable wrapper with engine and winetricks; separate from the signed main application.                                                                                                   |
 | `Prefixes/PortsideBaseline`             | Persistent Wine registry, Windows user files and Steam installation/account state. Wrapper `Contents/SharedSupport/prefix` links here. Never delete for repair, license failure or rollback. |
 | `SteamLibrary`                          | Additional managed scan root; created by Portside, but no setup code automatically redirects Steam's game installation here. Games may remain within the prefix's Steam `steamapps`.         |
-| `Runtime/Pending`, `Runtime/rollback-*` | Prepared downloads and retained wrappers. These are not a backup of games/saves; rollback is not fully transactional.                                                                        |
+| `Runtime/Pending`, `Runtime/rollback-*` | Prepared downloads and retained wrappers. One completed rollback wrapper is retained; these are not a backup of games/saves and rollback is not fully transactional.                         |
 | `Manifests`                             | Authenticated cached runtime JSON and ETag. Preserve signed minimum-version behavior.                                                                                                        |
 | `Cache/Downloads`, `Cache/XDG`          | Re-creatable runtime downloads and tool cache. Cache cleanup must never broaden into prefix/library removal.                                                                                 |
+| Legacy `Backups/Steam-prefix-*`         | Recovery points made by older releases. Startup retention keeps the newest one and never enters the active prefix.                                                                           |
 | `Profiles`                              | Locally derived or explicitly validated game/renderer configuration.                                                                                                                         |
 | `Logs`, `Diagnostics`                   | Technical logs/reports; may contain local metadata and require review before sharing.                                                                                                        |
 | `app-update-relaunch.json`, lock files  | Expected app build across relaunch and process coordination; not persisted bootstrap progress.                                                                                               |
@@ -196,6 +197,12 @@ the Steam account/session. Backend owns license/device/challenge and release
 records; storage owns published binary objects. Portside code must not copy a
 native macOS Steam session, migrate another user's prefix, or inspect account
 files to determine compatibility.
+
+After validating the active wrapper, startup maintenance bounds replaceable
+storage to one rollback, one failed wrapper and one legacy prefix recovery
+point. Abandoned extraction and pending-staging directories older than 24 hours
+are removed. The maintenance matches only direct, non-symlink directories with
+Portside-owned names; it never traverses the active prefix or game library.
 
 ## Compatibility boundaries and implementation gaps
 

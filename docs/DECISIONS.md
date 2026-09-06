@@ -170,3 +170,24 @@ record its replacement and update related docs; do not silently restore old beha
 - **Relevant files:** [app plist](../apps/desktop/Resources/Info.plist),
   [bundle validation](../scripts/validate_release_bundle.sh),
   [landing routes](../apps/landing/src/routes), [AGENTS](../AGENTS.md).
+
+## D12 — Bound replaceable local storage without pruning user data
+
+- **Date:** September 6, 2026.
+- **Status:** Confirmed implementation; real accumulated-data cleanup is not end-to-end validated.
+- **Context:** Runtime replacement previously retained every rollback indefinitely,
+  and interrupted extraction could leave large temporary directories. Older
+  releases could also leave multiple prefix recovery points.
+- **Decision:** After validating the active wrapper, run storage maintenance on
+  startup and after successful installation. Retain one runtime rollback, one
+  failed wrapper and one legacy prefix recovery point; remove abandoned staging
+  directories after 24 hours.
+- **Reason:** Bound replaceable disk usage while preserving a recovery path.
+- **Consequences:** The active managed prefix, Steam credentials, games, saves and
+  libraries are never cleanup candidates. Cleanup is best effort, accepts only
+  direct non-symlink directories with owned names, and cleanup failures do not
+  block startup.
+- **Relevant files:**
+  [maintenance](../apps/desktop/Sources/PortsideCore/PortsideStorageMaintenance.swift),
+  [runtime installer](../apps/desktop/Sources/PortsideCore/PortsideRuntimePipeline.swift),
+  [RUNTIME](RUNTIME.md).

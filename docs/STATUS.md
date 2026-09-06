@@ -23,6 +23,19 @@ Gatekeeper/quarantine preparation and opened at its exact requested path without
 translocation. This follow-up does not establish complete customer bootstrap or
 Steam acceptance; the audit matrix below retains its original scope.
 
+## Local storage retention follow-up — 2026-09-06 UTC
+
+**Implemented but not end-to-end validated:** desktop startup and successful
+runtime installation now bound replaceable Portside storage to one rollback,
+one failed wrapper and one legacy prefix recovery point, and remove abandoned
+staging directories after 24 hours. Fixture tests verify name scoping, symlink
+exclusion, retention ordering and preservation of a synthetic managed-prefix
+marker. The active Steam prefix and game libraries are never cleanup targets.
+No everyday-account data was deleted and no real accumulated installation was
+used as a destructive test fixture. Validation passed 119 desktop tests with
+one explicitly unconfigured signed-app probe skipped, the desktop build,
+production source policy and `git diff --check`.
+
 ## Executive assessment
 
 The repository implements the native application/install/update pipeline, a
@@ -55,7 +68,7 @@ qualifies external/historical evidence; it is not a sixth operational state.
 | Runtime signed manifest delivery                  | Implemented but not end-to-end validated | Signer, backend publish verifier, client verifier, stable API redirect                         | Real signed discovery/download/checksum/install                                        | Trace one release across storage, DB and desktop                              |
 | GitHub Actions execution / environment reviewers  | Unknown                                  | YAML and static lint only                                                                      | Current runs, secrets, approvals, branch protection                                    | Inspect externally only in an authorized operational task                     |
 | Artifact publication / storage policy             | Unknown                                  | Single-bucket publishers and S3 client                                                         | Object existence/hash, public/private policy, retention and backups                    | Validate the configured bucket and final URLs                                 |
-| Railway API/worker/PostgreSQL/landing             | Unknown                                  | Dockerfile, service JSON, worker and Railway connector                                         | Deployed revision, readiness, migrations, connector configuration                     | Verify provider configuration and exact running revision                      |
+| Railway API/worker/PostgreSQL/landing             | Unknown                                  | Dockerfile, service JSON, worker and Railway connector                                         | Deployed revision, readiness, migrations, connector configuration                      | Verify provider configuration and exact running revision                      |
 | Cron synchronization                              | Planned                                  | Cron entrypoint currently logs startup only                                                    | Actual periodic work                                                                   | Implement an explicit job if required                                         |
 | Stripe payment / Apple Pay / DNS / email services | Unknown                                  | Checkout call and proposed configuration names                                                 | Live/test-mode payment/domain/provider evidence                                        | Use a separately authorized commerce validation                               |
 | Checkout fulfillment                              | Blocked                                  | `getOrderStatus` always pending; no webhook/purchase writer/license issuer/email handler       | Complete paid purchase → delivered license                                             | Implement fulfillment with authenticated, idempotent payment processing       |
@@ -74,8 +87,10 @@ qualifies external/historical evidence; it is not a sixth operational state.
    again at apply time; tar path checks do not explicitly validate link targets.
    The clean-install harness links into the template's existing prefix directory,
    apparently separating host state from its external Steam/marker checks; this is
-   a source inference, not an executed failure. Wrapper replacement precedes final prefix/layout work; UUID lexical rollback
-   selection and a literal failed-destination name make recovery unreliable.
+   a source inference, not an executed failure. Wrapper replacement precedes
+   final prefix/layout work. Timestamped rollback selection and bounded history
+   correct the earlier UUID/literal-destination defects, but crash journaling and
+   end-to-end recovery remain unvalidated.
    See [SECURITY](SECURITY.md) and [RUNTIME](RUNTIME.md).
 2. **Release rollback contract:** backend rollback requires a published target even
    though newer publication supersedes it; an old signed payload does not create

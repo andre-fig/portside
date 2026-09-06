@@ -158,6 +158,10 @@ final class PortsideModel: ObservableObject {
         }
         try? store.prepareDirectories()
         state = store.load()
+        let installer = wrapperInstaller
+        _ = await Task.detached(priority: .utility) {
+            installer.performStorageMaintenance()
+        }.value
         if forceRuntimeRepair {
             state.setupCompleted = false
             forceRuntimeRepair = false

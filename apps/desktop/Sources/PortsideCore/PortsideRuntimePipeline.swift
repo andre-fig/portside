@@ -152,11 +152,18 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
     private let runner: ProcessRunning
     private let logger: PortsideLogger
     private let fileManager: FileManager
+    private let storageMaintenance: PortsideStorageMaintenance
 
-    public init(runner: ProcessRunning = SystemProcessRunner(), logger: PortsideLogger = PortsideLogger(), fileManager: FileManager = .default) {
+    public init(
+        runner: ProcessRunning = SystemProcessRunner(),
+        logger: PortsideLogger = PortsideLogger(),
+        fileManager: FileManager = .default,
+        storageMaintenance: PortsideStorageMaintenance? = nil
+    ) {
         self.runner = runner
         self.logger = logger
         self.fileManager = fileManager
+        self.storageMaintenance = storageMaintenance ?? PortsideStorageMaintenance(fileManager: fileManager)
     }
 
     public func install(artifacts: [PortsideRuntimeArtifact: URL], configuration: PortsideRuntimeConfiguration = .golden) async throws -> PortsideRuntimeInstallResult {
@@ -201,7 +208,10 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
             // timestamp-only rollback name makes the second attempt fail with
             // "an item with the same name already exists" before the atomic
             // install can run.
-            let rollback = PortsidePaths.runtime.appendingPathComponent("rollback-\(UUID().uuidString)", isDirectory: true)
+            let rollback = PortsidePaths.runtime.appendingPathComponent(
+                PortsideStorageMaintenance.historyName(prefix: "rollback-"),
+                isDirectory: true
+            )
             try fileManager.createDirectory(at: rollback.deletingLastPathComponent(), withIntermediateDirectories: true)
             try fileManager.moveItem(at: destination, to: rollback)
         }
@@ -227,18 +237,41 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
         try JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys]).write(to: PortsidePaths.prefixes.appendingPathComponent("PortsideBaseline.json"), options: .atomic)
         guard let engineArtifact = artifacts.keys.first(where: { $0.component == "engine" }) else { throw PortsideError.invalidArtifact("engine artifact is missing") }
         let record = PortsideRuntimeRecord(manifest: engineArtifact, installedPath: destination, executablePath: validation.launcher, graphicsBackend: configuration.renderer)
+        let maintenance = storageMaintenance.run()
+        if maintenance.removedItemCount > 0 {
+            logger.write("Removed \(maintenance.removedItemCount) replaceable Portside storage items")
+        }
         logger.write("Installed Portside runtime wrapper with WineD3D")
         return PortsideRuntimeInstallResult(validation: canonical, runtimeRecord: record)
     }
 
     @discardableResult
+    public func performStorageMaintenance() -> PortsideStorageMaintenanceReport {
+        guard (try? PortsideRuntimeValidator.validate(wrapper: PortsidePaths.baselineWrapper, fileManager: fileManager)) != nil else {
+            return PortsideStorageMaintenanceReport()
+        }
+        let report = storageMaintenance.run()
+        if report.removedItemCount > 0 {
+            logger.write("Removed \(report.removedItemCount) replaceable Portside storage items")
+        }
+        return report
+    }
+
+    @discardableResult
     public func rollbackLatest() throws -> PortsideWrapperValidation? {
-        let candidates = (try? fileManager.contentsOfDirectory(at: PortsidePaths.runtime, includingPropertiesForKeys: nil)) ?? []
-        guard let previous = candidates.filter({ $0.lastPathComponent.hasPrefix("rollback-") }).sorted(by: { $0.lastPathComponent > $1.lastPathComponent }).first else { return nil }
+        guard let previous = storageMaintenance.newestRollback() else { return nil }
         let destination = PortsidePaths.baselineWrapper
-        if fileManager.fileExists(atPath: destination.path) { try fileManager.moveItem(at: destination, to: PortsidePaths.runtime.appendingPathComponent("failed-(UUID().uuidString)", isDirectory: true)) }
+        if fileManager.fileExists(atPath: destination.path) {
+            let failed = PortsidePaths.runtime.appendingPathComponent(
+                PortsideStorageMaintenance.historyName(prefix: "failed-"),
+                isDirectory: true
+            )
+            try fileManager.moveItem(at: destination, to: failed)
+        }
         try fileManager.moveItem(at: previous, to: destination)
-        return try PortsideRuntimeValidator.validate(wrapper: destination)
+        let validation = try PortsideRuntimeValidator.validate(wrapper: destination)
+        _ = storageMaintenance.run()
+        return validation
     }
 
     private func artifact(_ component: String, in artifacts: [PortsideRuntimeArtifact: URL]) -> URL? {
