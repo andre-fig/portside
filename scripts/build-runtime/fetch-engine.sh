@@ -4,6 +4,11 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 BUILD_DIR="${PORTSIDE_RUNTIME_BUILD_DIR:-$ROOT_DIR/build/runtime}"
 RUNTIME_VERSION="${PORTSIDE_RUNTIME_VERSION:?Set PORTSIDE_RUNTIME_VERSION}"
+case "$BUILD_DIR" in "$ROOT_DIR"/*) ;; *) echo "runtime build directory must be inside the checkout" >&2; exit 1 ;; esac
+if [ "${PORTSIDE_USE_PREPARED_ENGINE:-false}" = true ]; then
+    python3 "$ROOT_DIR/scripts/build-runtime/prepared-engine.py" verify "$BUILD_DIR" "$RUNTIME_VERSION"
+    exit 0
+fi
 BUCKET="${PORTSIDE_ENGINE_BUCKET:-${PORTSIDE_PUBLIC_BUCKET:?Set PORTSIDE_PUBLIC_BUCKET}}"
 ACCESS_KEY_ID="${PORTSIDE_ENGINE_ACCESS_KEY_ID:-${PORTSIDE_S3_ACCESS_KEY_ID:?Set PORTSIDE_S3_ACCESS_KEY_ID}}"
 SECRET_ACCESS_KEY="${PORTSIDE_ENGINE_SECRET_ACCESS_KEY:-${PORTSIDE_S3_SECRET_ACCESS_KEY:?Set PORTSIDE_S3_SECRET_ACCESS_KEY}}"

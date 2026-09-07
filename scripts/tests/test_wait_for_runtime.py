@@ -214,6 +214,12 @@ class RuntimeChangeFilterTests(unittest.TestCase):
             with self.subTest(file=file):
                 self.assertEqual(self.decisions([file]), (1, 1))
 
+    def test_runtime_preparation_changes_do_not_rebuild_wine(self):
+        for file in ("scripts/build-runtime/prepared-engine.py", "scripts/build-runtime/fetch-engine.sh",
+                     ".github/workflows/build-runtime.yml"):
+            with self.subTest(file=file):
+                self.assertEqual(self.decisions([file]), (1, 0))
+
     def test_recipe_change_requires_engine_before_assembly(self):
         self.assertEqual(self.decisions(["scripts/build-runtime/build-wine-engine.sh",
                                          "apps/desktop/Sources/Portside/PortsideApp.swift"]), (0, 0))

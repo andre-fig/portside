@@ -141,14 +141,16 @@ committed [documentation manifest](runtime-manifest.json) and
 [backend manifest](../apps/backend/manifests/runtime-manifest.json) are blocked,
 empty placeholders; they are not signed usable production releases.
 
-[build-runtime.yml](../.github/workflows/build-runtime.yml) assembles and executes
-native probes on macOS, then transfers explicit archives/metadata to Linux for
+[build-runtime.yml](../.github/workflows/build-runtime.yml) fetches and repackages
+the engine on Linux. A source/run/version/hash-bound prepared receipt is checked
+by the macOS consumer, which builds the host and executes native probes before
+transferring explicit archives/metadata to Linux for
 manifest signing and upload to the single configured production bucket.
 [validate-publication.py](../scripts/build-runtime/validate-publication.py)
 rechecks source/run identity, SHA-256 and size before signing transferred bytes.
 The temporary assembly artifact expires after one day; final evidence after 30.
 Only the developer's local engine build needs the Wine compiler dependencies;
-assembly needs the storage client and tools supplied by the macOS image. The engine
+the native assembly job needs no storage credentials/client or compiler setup. The engine
 workflow likewise publishes from Linux after a native receipt binds the local
 archive/metadata to the validating workflow run. Producer metadata retains
 `local-pre-push` and its outgoing source revision; it is not relabeled as a

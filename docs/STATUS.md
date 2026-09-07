@@ -284,6 +284,52 @@ that target, and every engine Mach-O must pass architecture/deployment checks.
 Fifty-five Python 3.14 tests passed. The earlier local archive is not eligible
 for upload; this source correction requires a new local build.
 
+**Verified final local build and hosted engine pipeline:** source `02bad9d1`
+completed its macOS 13-targeted build in 1,138.1 seconds. All 34 Mach-O files
+passed x86_64/deployment checks and the personal-path audit passed. Actual host
+bootstrap returned 0 in 23.045 seconds; both Windows command architectures
+returned 37/23; official Steam installation returned 0 in 69.415 seconds. A
+separately extracted consumer fixture passed the same platform/path checks,
+returned 0/37/23 and passed publication evidence validation. No graphical window
+or Steam authentication was part of these checks.
+
+The normal pre-push ran its checks, reused the completed exact-commit input,
+uploaded it through the linked production Railway provider and pushed
+`9b0a70e6..02bad9d1`. Secrets remained in memory; no Railway variables or services
+were changed. [Engine run 34141434553](https://github.com/andre-fig/portside/actions/runs/34141434553)
+then passed: Linux source/input validation took 22 seconds, the complete macOS
+job took 2 minutes 5 seconds and Linux publication took 27 seconds. Hosted checks
+confirmed all 34 Mach-O files and expected 0/37/23 exits (x64: 33.826 seconds).
+There was no hosted Wine compiler/toolchain/cache step. The published archive
+is 337,106,284 bytes, SHA-256
+`30fad3f925bdb550cb584833bd43cd70978c628d1bf7ec85e33ff04379ed159b`, engine
+`wine-Wineversion11.17-36b6a2cf679f-x86_64-fe553e2d62ce`.
+
+CI passed; the initial runtime, desktop and release detection paths skipped
+their unneeded native/application jobs. Engine completion automatically started
+[runtime run 34141696153](https://github.com/andre-fig/portside/actions/runs/34141696153)
+for that same source. That runtime completed and published signed manifest
+`0.1.33`: native assembly/validation took 11 minutes 5 seconds and Linux signing/
+publication took 55 seconds. Hosted real-host bootstrap returned 0 in 46.554
+seconds with subsequent 37/23 exits. No application release/backend promotion
+or graphical/Developer ID distribution acceptance follows from those results.
+
+**Runtime packaging follow-up:** the successful runtime log attributes 8 minutes
+35 seconds between wrapper completion and engine reuse to engine fetch/validation/
+repackaging on macOS. Source now performs that work on Linux, with BSD metadata
+normalization and parallel XZ for archive writes. A receipt binds source, workflow,
+runtime version, engine metadata and archive bytes before native use. macOS keeps
+host compilation and native checks; its storage credentials/client setup and
+engine repackaging are removed. Missing prepared evidence fails without fallback.
+Sixty-one Python 3.14 tests, actionlint, shell/source audits, policy, documentation
+links and diff checks passed. The actual published `0.1.33` runtime was downloaded
+into a new build fixture: prepared receipt record/verification and native fetch
+passed with no storage credentials, then all 34 Mach-O files and 0/37/23 engine
+controls passed. Real host bootstrap completed in 14.567 seconds with subsequent
+37/23 exits and clean layout validation passed. A small disposable parallel-XZ
+archive preserved its extracted contents. Hosted Linux preparation/native handoff
+remains pending at this snapshot.
+
 ## Executive assessment
 
 The repository implements the native application/install/update pipeline, a

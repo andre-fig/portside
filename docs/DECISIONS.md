@@ -270,7 +270,7 @@ record its replacement and update related docs; do not silently restore old beha
 ## D16 — Compile Wine locally before engine-changing pushes
 
 - **Date:** September 7, 2026; explicit user correction after observing the cold hosted build.
-- **Status:** Implemented but not end-to-end validated; local handoff configuration is required.
+- **Status:** Verified for local preparation, input handoff and hosted engine publication on September 7, 2026; see [STATUS](STATUS.md) for runtime and graphical acceptance scope.
 - **Decision:** Move Wine compilation/cache reuse into pre-push for outgoing main
   revisions. Export committed source into a disposable build tree; upload only
   unpublished build inputs to the existing bucket. GitHub verifies source/hash
@@ -285,3 +285,20 @@ record its replacement and update related docs; do not silently restore old beha
   the CI receipt separately records validation. Ordinary app changes reuse the
   validated engine. Production manifest signing and publication remain in CI.
   No user prefix/runtime data or system trust setting is modified.
+
+## D17 — Prepare versioned runtime engine archives on Linux
+
+- **Date:** September 7, 2026.
+- **Status:** Implemented; native consumer/hosted follow-up validation recorded in [STATUS](STATUS.md).
+- **Decision:** Fetch, verify and repackage the published engine in Linux runtime
+  preparation, using the existing archive format and metadata normalization.
+  Transfer an archive/metadata receipt bound to source, workflow and runtime
+  version; verify it before macOS builds the host and runs native layout/bootstrap
+  checks. Storage credentials and the AWS client stay out of the native job.
+- **Reason:** The first successful revised runtime still spent 8 minutes 35
+  seconds fetching/verifying/repackaging the engine on macOS. That work needs no
+  native execution. XZ compression can also use the Linux runner's available cores.
+- **Consequences:** Missing or modified prepared evidence fails without a native
+  download/repackaging fallback. Local runtime builds without prepared mode retain
+  their explicit fetch path. Archive roots, manifests, production destinations and
+  app-release triggers are preserved; no additional Wine compilation is required.

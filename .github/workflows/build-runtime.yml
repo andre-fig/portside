@@ -44,9 +44,17 @@ concurrency:
 
 jobs:
   changes:
-    name: Detect and validate runtime sources
+    name: Prepare runtime engine on Linux
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
+    environment: production
+    env:
+      PORTSIDE_RUNTIME_VERSION: ${{ inputs.version || format('0.1.{0}', github.run_number) }}
+      PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
+      PORTSIDE_S3_ACCESS_KEY_ID: ${{ secrets.PORTSIDE_S3_ACCESS_KEY_ID }}
+      PORTSIDE_S3_SECRET_ACCESS_KEY: ${{ secrets.PORTSIDE_S3_SECRET_ACCESS_KEY }}
+      PORTSIDE_S3_REGION: ${{ secrets.PORTSIDE_S3_REGION }}
+      PORTSIDE_S3_ENDPOINT: ${{ secrets.PORTSIDE_S3_ENDPOINT }}
     outputs:
       assemble_runtime: ${{ steps.detect.outputs.assemble_runtime }}
     steps:
@@ -109,6 +117,41 @@ jobs:
           done
           ./scripts/validate-production-policy.sh
 
+      - name: Prepare the runtime engine archive on Linux
+        if: steps.detect.outputs.assemble_runtime == 'true'
+        run: |
+          set -eu
+          if ! command -v bsdtar >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends libarchive-tools
+          fi
+          # Preserve BSD archive metadata options; parallelize XZ only for writes.
+          archive_tools="$RUNNER_TEMP/portside-runtime-archive-tools"
+          mkdir "$archive_tools"
+          cat > "$archive_tools/tar" <<'SH'
+          #!/bin/sh
+          case "${1:-}" in
+            -cJf) exec bsdtar --options xz:threads=0 "$@" ;;
+            *) exec bsdtar "$@" ;;
+          esac
+          SH
+          chmod 755 "$archive_tools/tar"
+          PATH="$archive_tools:$PATH" ./scripts/build-runtime/fetch-engine.sh
+          python3 scripts/build-runtime/prepared-engine.py record build/runtime "$PORTSIDE_RUNTIME_VERSION"
+
+      - name: Transfer the prepared engine to native validation
+        if: steps.detect.outputs.assemble_runtime == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: portside-runtime-engine-${{ github.run_id }}
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+          path: |
+            build/runtime/PortsideWineEngine-*.tar.xz
+            build/runtime/engine-input.json
+            build/runtime/prepared-engine.json
+
   build-runtime:
     name: Assemble and validate production runtime
     needs: changes
@@ -121,11 +164,7 @@ jobs:
       PORTSIDE_RUNTIME_CHANNEL: production
       PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX: ${{ inputs.artifact_url_prefix || secrets.PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX }}
       PORTSIDE_MANIFEST_SIGNING_KEY_ID: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY_ID }}
-      PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
-      PORTSIDE_S3_ACCESS_KEY_ID: ${{ secrets.PORTSIDE_S3_ACCESS_KEY_ID }}
-      PORTSIDE_S3_SECRET_ACCESS_KEY: ${{ secrets.PORTSIDE_S3_SECRET_ACCESS_KEY }}
-      PORTSIDE_S3_REGION: ${{ secrets.PORTSIDE_S3_REGION }}
-      PORTSIDE_S3_ENDPOINT: ${{ secrets.PORTSIDE_S3_ENDPOINT }}
+      PORTSIDE_USE_PREPARED_ENGINE: 'true'
     steps:
       - name: Check out Portside sources
         uses: actions/checkout@v7
@@ -142,14 +181,16 @@ jobs:
           swift --version
           for tool in clang clang++ make tar shasum jq node swiftc; do command -v "$tool"; done
 
-      - name: Ensure runtime assembly tools
+      - name: Verify native assembly tools
         run: |
           set -eu
-          if ! command -v aws >/dev/null 2>&1; then
-            brew trust aws/tap
-            brew install awscli
-          fi
-          for tool in aws jq node python3 swiftc lipo tar shasum; do command -v "$tool"; done
+          for tool in jq node python3 swiftc lipo tar shasum; do command -v "$tool"; done
+
+      - name: Download the prepared engine for this workflow
+        uses: actions/download-artifact@v7
+        with:
+          name: portside-runtime-engine-${{ github.run_id }}
+          path: build/runtime
 
       - name: Validate production publication inputs
         run: |
@@ -164,12 +205,7 @@ jobs:
           }
           for variable in \
             PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX \
-            PORTSIDE_MANIFEST_SIGNING_KEY_ID \
-            PORTSIDE_PUBLIC_BUCKET \
-            PORTSIDE_S3_ACCESS_KEY_ID \
-            PORTSIDE_S3_SECRET_ACCESS_KEY \
-            PORTSIDE_S3_REGION \
-            PORTSIDE_S3_ENDPOINT; do
+            PORTSIDE_MANIFEST_SIGNING_KEY_ID; do
             require_env "$variable"
           done
           case "$PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX" in

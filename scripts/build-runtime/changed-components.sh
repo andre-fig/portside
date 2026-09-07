@@ -22,7 +22,7 @@ assembly_changed=0
 while IFS= read -r path; do
     [ -n "$path" ] || continue
     case "$path" in
-        scripts/build-runtime/validate-steam-bootstrap.py)
+        scripts/build-runtime/validate-steam-bootstrap.py|scripts/build-runtime/prepared-engine.py)
             assembly_changed=1 ;;
         apps/desktop/*|scripts/*release*.sh|scripts/package_app.sh|scripts/create_dmg.sh|scripts/generate_appcast.sh)
             assembly_changed=1 ;;

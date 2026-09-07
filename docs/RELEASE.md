@@ -35,7 +35,7 @@ the YAML's `environment: production` alone does not prove required reviewers.
 | [Build Desktop Validation](../.github/workflows/build-desktop.yml)                 | Successful CI on `main` with relevant desktop/packaging paths, or dispatch; arm64 app ZIP, DMG, dSYM and checksums, retained 14 days.                                      | Development bundle, ad hoc by default; no notarization or GUI acceptance.                                                                     |
 | Railway connector                                                                  | Provider-side deployment of the Landing service from `main`; local pre-push runs Bun lint, typecheck and build before publication.                                         | External to GitHub Actions; service variables, domains and the deployed revision remain provider-side state.                                  |
 | [Build Portside Engine](../.github/workflows/build-engine.yml)                     | Relevant `main` changes or dispatch; Pre-push compiles locally; Linux verifies the uploaded input, macOS runs short execution checks, then Linux publishes with 30-day evidence.                                                            | Independent source engine; no app release or runtime manifest.                                                                                |
-| [Build Portside Runtime](../.github/workflows/build-runtime.yml)                   | Assembly changes or successful engine workflow; dispatch requires runtime version and artifact URL prefix. Combined Linux detection/preflight, macOS assembly/validation, then Linux manifest signing and storage upload.  | Uses existing engine; one-day assembly handoff, full and metadata-only evidence retained 30 days. No backend manifest registration here.                               |
+| [Build Portside Runtime](../.github/workflows/build-runtime.yml)                   | Assembly changes or successful engine workflow; dispatch requires runtime version and artifact URL prefix. Linux detection/preflight and engine repackaging, macOS host build/validation, then Linux manifest signing and storage upload.  | Uses existing engine; one-day assembly handoff, full and metadata-only evidence retained 30 days. No backend manifest registration here.                               |
 | [Release Portside](../.github/workflows/release-production.yml)                    | CI or runtime completion on `main` rechecks both prerequisites for the same source; existing app/runtime-host/packaging filter or explicit main dispatch applies.                                               | Configured app, signature, notarization, upload, then backend runtime and app registration. Automatic publication, not gated by GUI workflow. |
 | [Validate Clean Portside Runtime](../.github/workflows/validate-clean-install.yml) | Dispatch with selected current/optional previous runtime artifact; self-hosted macOS arm64 GUI session.                                                                    | Operator-assisted test. Script needs an interactive terminal to confirm checks; otherwise it exits 2 without accepting GUI success.           |
 | Railway connector                                                                  | Provider-side deployment of the API, Worker and Cron services using the three `apps/backend/railway.*.json` configurations.                                                | External to GitHub Actions; service variables, domains and the deployed revision remain provider-side state.                                  |
@@ -80,7 +80,8 @@ flowchart LR
     I --> E[Linux source and checksum verification]
     E --> V[Short native execution checks on macOS]
     V --> P[Engine publication on Linux]
-    P --> R[Runtime assembly and execution on macOS]
+    P --> F[Fetch and package runtime engine on Linux]
+    F --> R[Host build and native runtime checks on macOS]
     R --> S[Manifest signing and runtime publication on Linux]
     S --> Q
     Q -->|both ready for the same commit| A[App build, sign and notarize on macOS]
@@ -147,6 +148,15 @@ Both source recipes set the macOS 13.0 deployment floor, and native validation
 checks all nested Mach-O architectures and minimum OS versions. The local SDK
 version must not silently raise the app's supported OS requirement.
 
+Runtime preparation now fetches and repackages the persistent engine on Linux,
+using BSD tar metadata normalization and parallel XZ compression. Its one-day
+artifact includes a [prepared-engine receipt](../scripts/build-runtime/prepared-engine.py)
+binding the runtime version, source commit, workflow run, original input metadata
+and repackaged bytes. The macOS consumer verifies that receipt before using the
+archive, builds the host and runs extracted-layout/Windows/bootstrap checks.
+The native job has neither storage credentials nor an AWS CLI installation step.
+Missing or changed prepared evidence fails; it does not fetch/repackage on macOS.
+
 The compile-only review command below creates a local input without uploading
 or pushing; the normal pre-push invocation always requires a successful handoff:
 
@@ -154,8 +164,8 @@ or pushing; the normal pre-push invocation always requires a successful handoff:
 python3 scripts/build-runtime/prepare-engine-push.py --build-only BASE_SHA OUTGOING_SHA
 ```
 
-Runtime assembly installs only its missing storage client, not the Wine compiler
-toolchain. Ubuntu 24.04 supplies AWS CLI and jobs verify tools before publication.
+Linux runtime preparation supplies BSD tar; Ubuntu 24.04 supplies AWS CLI.
+Jobs verify tools before preparation/publication.
 App signing/notarization and runtime assembly remain native jobs; Apple
 notarization still uses `notarytool --wait`. This change preserves the qualifying
 app-change filter and does not establish graphical Steam or Developer ID runtime
