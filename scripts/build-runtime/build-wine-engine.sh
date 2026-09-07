@@ -65,6 +65,7 @@ native_ldflags="${PORTSIDE_WINE_NATIVE_LDFLAGS:--arch $native_arch}"
 target_cflags="${PORTSIDE_WINE_CFLAGS:--O2 -arch $target_arch}"
 target_cxxflags="${PORTSIDE_WINE_CXXFLAGS:--O2 -arch $target_arch}"
 target_ldflags="${PORTSIDE_WINE_LDFLAGS:--arch $target_arch}"
+cross_cflags="${CROSSCFLAGS:--g -O2}"
 
 case "$native_arch:$target_arch" in
     x86_64:x86_64|arm64:x86_64) ;;
@@ -76,7 +77,11 @@ macos_version="$(sw_vers -productVersion 2>/dev/null || uname -s)"
 xcode_version="$(xcodebuild -version 2>/dev/null | tr '\n' ';' || true)"
 clang_version="$(clang --version | head -n 1)"
 recipe_checksum="$(cat "$0" "$ROOT_DIR/scripts/build-runtime/build-freetype.sh" "$ROOT_DIR/upstream/dependencies.json" | shasum -a 256 | awk '{print $1}')"
-cache_signature="$recipe_checksum|$wine_version|$wine_snapshot_checksum|$native_arch|$target_arch|$native_cflags|$native_cxxflags|$native_ldflags|$target_cflags|$target_cxxflags|$target_ldflags|$macos_version|$xcode_version|$clang_version"
+cache_signature="$recipe_checksum|$wine_version|$wine_snapshot_checksum|$native_arch|$target_arch|$native_cflags|$native_cxxflags|$native_ldflags|$target_cflags|$target_cxxflags|$target_ldflags|$cross_cflags|$macos_version|$xcode_version|$clang_version"
+# Keep developer checkout paths out of native/PE debug data and __FILE__.
+# The virtual destination is stable; the disposable source directory is not a
+# cache input because its actual location must not affect the resulting bytes.
+prefix_maps="-ffile-prefix-map=$ROOT_DIR=/portside-source -fdebug-prefix-map=$ROOT_DIR=/portside-source"
 
 package_engine() {
     ENGINE_STAGE="$WORK_DIR/PortsideWineEngine-$VERSION"
@@ -85,6 +90,7 @@ package_engine() {
     cp -R "$INSTALL_ROOT/lib" "$ENGINE_STAGE/"
     cp -R "$INSTALL_ROOT/share/wine" "$ENGINE_STAGE/share-wine"
     "$ROOT_DIR/scripts/build-runtime/validate-engine-execution.py" "$INSTALL_ROOT"
+    python3 "$ROOT_DIR/scripts/build-runtime/validate-engine-privacy.py" "$ENGINE_STAGE"
     printf 'Wine %s\nPortside build target: %s\nWoW64 PE architectures: i386,x86_64\n' "$wine_version" "$target_arch" > "$ENGINE_STAGE/version"
     rm -f "$ARCHIVE"
     "$ROOT_DIR/scripts/build-runtime/create-archive.sh" "$ARCHIVE" "$WORK_DIR" "PortsideWineEngine-$VERSION"
@@ -111,8 +117,8 @@ fi
 
 # The native tools are executed by the build machine. They must use the
 # machine architecture even when a separate target architecture is selected.
-export CFLAGS="$native_cflags ${FREETYPE_CPPFLAGS:-}"
-export CXXFLAGS="$native_cxxflags ${FREETYPE_CPPFLAGS:-}"
+export CFLAGS="$native_cflags ${FREETYPE_CPPFLAGS:-} $prefix_maps"
+export CXXFLAGS="$native_cxxflags ${FREETYPE_CPPFLAGS:-} $prefix_maps"
 export LDFLAGS="$native_ldflags ${FREETYPE_LDFLAGS:-}"
 
 cd "$TOOLS_TREE"
@@ -143,19 +149,22 @@ cd "$BUILD_TREE"
 target_freetype="$BUILD_DIR/work/freetype/install"
 export FREETYPE_CFLAGS="-I$target_freetype/include/freetype2"
 export FREETYPE_LIBS="-L$target_freetype/lib -lfreetype"
-export CFLAGS="$target_cflags"
-export CXXFLAGS="$target_cxxflags"
+export CFLAGS="$target_cflags $prefix_maps"
+export CXXFLAGS="$target_cxxflags $prefix_maps"
 export LDFLAGS="$target_ldflags"
+export CROSSCFLAGS="$cross_cflags $prefix_maps"
 "$SOURCE_COPY/configure" \
     --build="$(uname -m)-apple-darwin" \
     --host="$host" \
-    --prefix="$INSTALL_ROOT" \
+    --prefix=/opt/portside-wine \
     --with-wine-tools="$TOOLS_TREE" \
     --enable-win64 \
     --enable-archs=i386,x86_64 \
     --disable-tests
 make -j"$jobs"
-make install
+make install DESTDIR="$WORK_DIR/dest"
+rmdir "$INSTALL_ROOT"
+mv "$WORK_DIR/dest/opt/portside-wine" "$INSTALL_ROOT"
 cp -L "$target_freetype/lib/libfreetype.6.dylib" "$INSTALL_ROOT/lib/wine/x86_64-unix/"
 install_name_tool -id '@rpath/libfreetype.6.dylib' "$INSTALL_ROOT/lib/wine/x86_64-unix/libfreetype.6.dylib"
 mkdir -p "$INSTALL_ROOT/share/wine/licenses/freetype"

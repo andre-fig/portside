@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import tarfile
@@ -18,6 +19,10 @@ publication = engine_input.publication
 prepare_spec = importlib.util.spec_from_file_location("prepare_engine_push", Path(__file__).parents[1] / "build-runtime/prepare-engine-push.py")
 prepare_engine = importlib.util.module_from_spec(prepare_spec)
 prepare_spec.loader.exec_module(prepare_engine)
+privacy_spec = importlib.util.spec_from_file_location("engine_privacy", Path(__file__).parents[1] / "build-runtime/validate-engine-privacy.py")
+privacy = importlib.util.module_from_spec(privacy_spec)
+privacy_spec.loader.exec_module(privacy)
+
 
 
 def local_fixture(root):
@@ -45,6 +50,38 @@ def proof(root, expected):
 
 
 class LocalEngineTests(unittest.TestCase):
+    def test_failed_compilation_preserves_a_sanitized_log_and_blocks_push(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, output = root / "source", root / "output"
+            script = source / "scripts/build-runtime/build-engine.sh"
+            script.parent.mkdir(parents=True)
+            output.mkdir()
+            script.write_text('#!/bin/sh\nprintf "%s\\n" "$0" "$HOME/private-example"\nexit 7\n')
+            script.chmod(0o700)
+            with patch.object(prepare_engine, "ROOT", root), self.assertRaisesRegex(RuntimeError, "Push blocked"):
+                prepare_engine.build_engine(source, output, os.environ.copy())
+            log = (output / "build.log").read_text()
+            self.assertNotIn(str(root), log)
+            self.assertNotIn(str(Path.home()), log)
+            self.assertIn("$SOURCE/scripts/", log)
+            self.assertIn("$HOME/private-example", log)
+
+    def test_embedded_personal_paths_are_rejected_without_echoing_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for private in (b"/Users/fixture-user/build/wine", b"/home/fixture-user/build/wine"):
+                (root / "binary").write_bytes(b"header\0" + private + b"\0tail")
+                with self.assertRaises(RuntimeError) as failure:
+                    privacy.validate(root)
+                self.assertNotIn("fixture-user", str(failure.exception))
+
+    def test_virtual_build_prefix_and_shared_system_path_are_allowed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "binary").write_bytes(b"/opt/portside-wine/lib\0/portside-source/dlls\0/Users/Shared/library")
+            privacy.validate(root)
+
     def test_ordinary_push_does_not_require_storage_or_start_compilation(self):
         with patch.object(prepare_engine.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)) as run, \
                 patch.object(prepare_engine.engine_input, "storage_environment") as storage:

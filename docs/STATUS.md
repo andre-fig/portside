@@ -236,6 +236,20 @@ prefix, installed runtime, game, save or credential was changed. Gatekeeper and
 quarantine checks remain intact; the local AWS CLI installation added its Homebrew
 dependencies and upgraded OpenSSL as required by that package.
 
+**Additional local-build finding:** the existing install tree contains personal
+build paths in native loader/ntdll installation constants and PE debug data. The
+recipe now uses a virtual Wine prefix with DESTDIR installation and native/PE
+compiler prefix maps. A new audit rejects personal paths without echoing values,
+before packaging and after CI extraction. Forty-nine Python tests passed with
+Python 3.14 after this addition. The previous cached recipe/macOS/Clang matched,
+but the observed Xcode version changed, so the local build correctly rejected
+that compilation cache. These recipe changes require a new locally validated
+engine; the previous archive must not be uploaded as the corrected output.
+The first exact-commit local build completed in approximately 14 minutes and
+returned expected version/x64/x86 statuses 0/37/23; this preceded the path-clean
+recipe and is not a publishable candidate. Local compiler logs now redact source,
+checkout and home paths, with a regression proving failure still blocks push.
+
 **Pending configuration/validation at this snapshot:** no local storage variables,
 AWS profile, backend environment file or release-secret directory was configured
 when inspected. The user was asked only for the secret provider/location, not to

@@ -23,7 +23,7 @@ tar -xJf "$archive" -C "$WORK/source" --strip-components=1
 cd "$WORK/source"
 # FreeType includes its own gzip inflater. Keep the rasterizer self-contained;
 # optional PNG, Brotli, bzip2 and HarfBuzz integrations are not runtime inputs.
-CC=clang CFLAGS='-O2 -arch x86_64' LDFLAGS='-arch x86_64' \
+CC=clang CFLAGS="-O2 -arch x86_64 -ffile-prefix-map=$ROOT_DIR=/portside-source -fdebug-prefix-map=$ROOT_DIR=/portside-source" LDFLAGS='-arch x86_64' \
     ./configure --host=x86_64-apple-darwin --prefix="$WORK/install" \
     --disable-static --enable-shared --without-zlib --without-bzip2 \
     --without-png --without-harfbuzz --without-brotli

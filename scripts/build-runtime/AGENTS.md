@@ -10,6 +10,9 @@ persistent component; `fetch-engine.sh` validates and reuses it; `build.sh`
 assembles wrapper, engine and winetricks. `build-wrapper.sh` compiles
 `apps/runtime-host`; `build-winetricks.sh` packages the vendored tool.
 `changed-components.sh` works with workflow path filters to select builds.
+`prepare-engine-push.py` builds the exact outgoing committed engine locally;
+`engine-input.py` transfers unpublished inputs and performs native CI checks.
+Hosted engine jobs must not fall back to compiling Wine when input is missing.
 
 - Preserve local changes and all user prefixes, Steam installations, games,
   libraries, credentials and installed runtimes. Restrict cleanup to disposable

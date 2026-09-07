@@ -125,7 +125,10 @@ extraction and executes the real x64/x86 controls in a disposable prefix. Its
 receipt binds this workflow run to both metadata files and the archive hash.
 Linux publication requires that receipt; locally claimed build provenance alone
 cannot publish through CI. Original local producer identity remains in metadata.
-Production keys are not passed into the local compilation subprocess.
+Production keys are not passed into the local compilation subprocess. Compiler
+output is retained in a sanitized local `build.log`; a failed build blocks push. Native/PE
+prefix maps and a virtual Wine installation prefix avoid embedded developer
+paths; both packaging and CI extraction audit the produced tree before publication.
 
 The compile-only review command below creates a local input without uploading
 or pushing; the normal pre-push invocation always requires a successful handoff:

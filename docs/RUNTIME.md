@@ -67,6 +67,10 @@ A successful input for the same outgoing commit can be reused on retry. This is
 a complete install cache, not resumable partial compilation. GitHub does not
 compile Wine or restore a compiler cache; it verifies the local input and runs
 short x64/x86 execution controls after safe extraction, before Linux publication.
+Native and PE compiler prefix maps replace the developer checkout path, and
+Wine uses a virtual `/opt/portside-wine` install prefix with disposable DESTDIR
+installation. The packaged and extracted engine must pass a personal-path audit;
+local build paths cannot be shipped in binaries or debug data.
 See [RELEASE](RELEASE.md) for local storage configuration and the unpublished
 build-input namespace. No generated binaries enter Git.
 

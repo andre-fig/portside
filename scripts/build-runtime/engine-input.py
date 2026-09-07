@@ -88,6 +88,7 @@ def validate_native(directory, sha, expected):
         root_name = "PortsideWineEngine-" + expected["engineVersion"]
         extract_engine(directory / expected["archiveName"], destination, root_name)
         engine = destination / root_name
+        subprocess.run([sys.executable, str(ROOT / "scripts/build-runtime/validate-engine-privacy.py"), str(engine)], check=True)
         (engine / "share").mkdir()
         (engine / "share-wine").rename(engine / "share/wine")
         subprocess.run([sys.executable, str(ROOT / "scripts/build-runtime/validate-engine-execution.py"), str(engine)], check=True)

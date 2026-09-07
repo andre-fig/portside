@@ -19,6 +19,25 @@ engine_input = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(engine_input)
 
 
+def build_engine(source, output, environment):
+    log = output / "build.log"
+    if log.is_symlink():
+        raise RuntimeError("Local engine build log must not replace a symlink")
+    print("Local compiler output: " + str(log.relative_to(ROOT)), flush=True)
+    substitutions = ((str(source), "$SOURCE"), (str(ROOT), "$CHECKOUT"), (str(Path.home()), "$HOME"))
+    with log.open("w") as handle:
+        with subprocess.Popen([str(source / "scripts/build-runtime/build-engine.sh")], env=environment,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace") as process:
+            for line in process.stdout:
+                for path, replacement in substitutions:
+                    line = line.replace(path, replacement)
+                handle.write(line)
+                if line.startswith(("Built ", "Reusing ", "Engine personal-path audit", '{"probe":')):
+                    print(line.rstrip(), flush=True)
+            if process.wait():
+                raise RuntimeError("Local engine compilation failed; review the sanitized build.log. Push blocked.")
+
+
 def prepare(base, sha, upload=True):
     if not all(re.fullmatch(r"[0-9a-f]{40}", value) for value in (base, sha)):
         raise RuntimeError("Invalid outgoing engine revision")
@@ -56,13 +75,15 @@ def prepare(base, sha, upload=True):
         except (RuntimeError, KeyError, ValueError, OSError):
             print("Preparing the engine locally before push; compatible Wine compilation cache will be reused.", flush=True)
             # Compilation needs no publication credentials or production keys.
+            build_variables = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TMP", "TEMP", "LANG",
+                               "SDKROOT", "DEVELOPER_DIR", "MACOSX_DEPLOYMENT_TARGET", "CC", "CXX", "CFLAGS",
+                               "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "CROSSCFLAGS", "PORTSIDE_BUILD_JOBS"}
             environment = {key: value for key, value in os.environ.items()
-                           if not key.startswith(("AWS_", "PORTSIDE_S3_", "PORTSIDE_MANIFEST_"))
-                           and key not in ("GH_TOKEN", "GITHUB_TOKEN")}
+                           if key in build_variables or key.startswith(("LC_", "PORTSIDE_WINE_"))}
             environment.update(PORTSIDE_COMMIT=sha, GITHUB_RUN_ID="local-" + sha, GITHUB_RUN_ATTEMPT="1",
                                PORTSIDE_ENGINE_PRODUCER="local-pre-push", PORTSIDE_ENGINE_BUILD_DIR=str(source / "build/engine"),
                                PORTSIDE_WINE_CACHE_DIR=str(cache))
-            subprocess.run([str(source / "scripts/build-runtime/build-engine.sh")], env=environment, check=True)
+            build_engine(source, output, environment)
             built = source / "build/engine"
             engine_input.publication.validate_local_engine(built, sha, expected)
             for name in (expected["archiveName"], "engine-metadata.json", "engine-provenance.json"):
