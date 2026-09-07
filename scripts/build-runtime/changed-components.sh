@@ -30,7 +30,7 @@ while IFS= read -r path; do
             engine_changed=1 ;;
         vendor/winetricks/*|apps/runtime-host/*|runtime/wrapper-template/*|scripts/build-runtime/build.sh|scripts/build-runtime/build-wrapper.sh|scripts/build-runtime/build-winetricks.sh|scripts/build-runtime/fetch-engine.sh|scripts/build-runtime/resolve-engine.sh|scripts/build-runtime/changed-components.sh|scripts/build-runtime/validate-clean-layout.sh|scripts/build-runtime/validate-manifest.sh|scripts/generate_manifest.sh|scripts/publish_runtime.sh|.github/workflows/build-runtime.yml)
             assembly_changed=1 ;;
-        scripts/build-runtime/create-archive.sh|scripts/build-runtime/source-audit.sh)
+        scripts/build-runtime/create-archive.sh|scripts/build-runtime/source-audit.sh|scripts/build-runtime/validate-publication.py)
             engine_changed=1
             assembly_changed=1 ;;
         upstream/lock.json)

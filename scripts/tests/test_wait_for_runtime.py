@@ -62,6 +62,30 @@ class RuntimeSelectionTests(unittest.TestCase):
     def test_pull_request_cannot_supply_production_runtime(self):
         self.assertIsNone(runtime.select_runtime([run(event="pull_request")], SHA, api))
 
+    def test_split_runtime_requires_native_validation_and_linux_publication(self):
+        for publication in ("success", "failure", "skipped", None):
+            def split(path):
+                if "/jobs?" in path:
+                    jobs = [{"name": "Assemble and validate production runtime", "conclusion": "success"}]
+                    if publication is not None:
+                        jobs.append({"name": "Sign and publish production runtime on Linux", "conclusion": publication})
+                    return {"jobs": jobs}
+                return api(path)
+            with self.subTest(publication=publication):
+                if publication == "success":
+                    self.assertEqual(runtime.select_runtime([run()], SHA, split)["runtime_run_id"], "2")
+                else:
+                    with self.assertRaises(RuntimeError):
+                        runtime.select_runtime([run()], SHA, split)
+
+    def test_intermediate_assembly_artifact_cannot_qualify_for_release(self):
+        def intermediate(path):
+            if "/jobs?" in path:
+                return api(path)
+            return {"artifacts": [{"name": "portside-runtime-assembly-production-0.1.30", "expired": False}]}
+        with self.assertRaises(RuntimeError):
+            runtime.select_runtime([run()], SHA, intermediate)
+
 
 class RuntimeEvidenceTests(unittest.TestCase):
     def evidence(self, root):
@@ -101,6 +125,66 @@ class RuntimeEvidenceTests(unittest.TestCase):
                 runtime.validate_evidence(directory, SHA, "2")
 
 
+class ReleaseEventTests(unittest.TestCase):
+    def api(self, ci_ready=True, runtime_ready=True, published=False, release_failed=False):
+        def request(path):
+            if "workflows/release-production.yml" in path:
+                return {"workflow_runs": [run(id=4, event="workflow_run", display_title="Release / Runtime production " + SHA)] if published else []}
+            if "workflows/ci.yml" in path:
+                return {"workflow_runs": [run(id=1, status="completed" if ci_ready else "in_progress", conclusion="success" if ci_ready else None)]}
+            if "workflows/build-runtime.yml" in path:
+                return {"workflow_runs": [run(status="completed" if runtime_ready else "in_progress", conclusion="success" if runtime_ready else None)]}
+            if "/runs/1/jobs?" in path:
+                return {"jobs": [{"name": name, "conclusion": "success"} for name in ["Production source policy", "Backend schema and build"]]}
+            if "/runs/4/jobs?" in path:
+                return {"jobs": [{"name": "Build, notarize and publish production release", "conclusion": "failure" if release_failed else "success",
+                                   "steps": [{"name": "Publish production artifacts to Portside storage", "conclusion": "success"}]}]}
+            return api(path)
+        return request
+
+    def test_ci_first_defers_once_then_runtime_event_can_release(self):
+        self.assertEqual(runtime.check_release(SHA, self.api(runtime_ready=False)), {"ready": "false", "reason": "runtime_not_ready"})
+        self.assertEqual(runtime.check_release(SHA, self.api())["ready"], "true")
+
+    def test_runtime_first_defers_once_then_ci_event_can_release(self):
+        self.assertEqual(runtime.check_release(SHA, self.api(ci_ready=False)), {"ready": "false", "reason": "ci_not_ready"})
+        self.assertEqual(runtime.check_release(SHA, self.api())["ready"], "true")
+
+    def test_duplicate_completion_cannot_publish_twice(self):
+        self.assertEqual(runtime.check_release(SHA, self.api(published=True)), {"ready": "false", "reason": "already_published"})
+
+    def test_successful_storage_publication_blocks_automatic_retry_after_later_failure(self):
+        self.assertEqual(runtime.check_release(SHA, self.api(published=True, release_failed=True))["reason"], "already_published")
+
+    def test_manual_recovery_still_requires_both_prerequisites(self):
+        self.assertEqual(runtime.check_release(SHA, self.api(published=True), automatic=False)["ready"], "true")
+        self.assertEqual(runtime.check_release(SHA, self.api(published=True, ci_ready=False), automatic=False)["ready"], "false")
+
+    def test_missing_required_ci_job_cannot_publish(self):
+        valid = self.api()
+        def missing(path):
+            if "/runs/1/jobs?" in path:
+                return {"jobs": [{"name": "Production source policy", "conclusion": "success"}]}
+            return valid(path)
+        self.assertEqual(runtime.check_release(SHA, missing)["ready"], "false")
+
+    def test_runtime_event_uses_checkout_sha_when_default_head_advanced(self):
+        event = {"workflow_run": {"name": "Build Portside Runtime", "head_branch": "main", "head_sha": OTHER, "display_title": "Runtime production " + SHA}}
+        self.assertEqual(runtime.resolve_target("workflow_run", event, OTHER, "refs/heads/main")["sha"], SHA)
+
+    def test_runtime_event_without_source_title_is_rejected(self):
+        event = {"workflow_run": {"name": "Build Portside Runtime", "head_branch": "main", "head_sha": SHA}}
+        with self.assertRaises(RuntimeError):
+            runtime.resolve_target("workflow_run", event, SHA, "refs/heads/main")
+
+    def test_ci_target_and_main_only_manual_dispatch(self):
+        event = {"workflow_run": {"name": "CI", "head_branch": "main", "head_sha": SHA}}
+        self.assertEqual(runtime.resolve_target("workflow_run", event, OTHER, "refs/heads/main")["sha"], SHA)
+        self.assertEqual(runtime.resolve_target("workflow_dispatch", {}, SHA, "refs/heads/main")["sha"], SHA)
+        with self.assertRaises(RuntimeError):
+            runtime.resolve_target("workflow_dispatch", {}, SHA, "refs/heads/feature")
+
+
 class RuntimeChangeFilterTests(unittest.TestCase):
     def decisions(self, files):
         # Supply a synthetic diff without making commits or changing this checkout.
@@ -121,6 +205,9 @@ class RuntimeChangeFilterTests(unittest.TestCase):
     def test_recipe_change_requires_engine_before_assembly(self):
         self.assertEqual(self.decisions(["scripts/build-runtime/build-wine-engine.sh",
                                          "apps/desktop/Sources/Portside/PortsideApp.swift"]), (0, 0))
+
+    def test_publication_validator_checks_both_pipelines(self):
+        self.assertEqual(self.decisions(["scripts/build-runtime/validate-publication.py"]), (0, 0))
 
 
 if __name__ == "__main__":

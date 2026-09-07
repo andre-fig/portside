@@ -199,12 +199,15 @@ extracted all three archives, passed the engine x64/x86 checks, and completed th
 production-host bootstrap in 16.686 seconds, followed by expected exits 37/23.
 This is local assembly evidence, not signed production manifest evidence.
 
-The release race is also corrected in source: app publication waits on Linux
-for runtime assembly of `target_sha`, then validates source and workflow-run
+The release race is also corrected in source: app publication requires
+runtime assembly of `target_sha`, then validates source and workflow-run
 binding in downloaded provenance and manifests. App-only changes assemble a
 wrapper with the recipe-selected existing engine. Skipped change-filter runs
 cannot pass; failures, cancellations, expired evidence and timeouts block the
-release. Thirteen local regression tests and `actionlint` pass. No GitHub workflow,
+release. The initial thirteen local regression tests and `actionlint` passed.
+The subsequent [runner allocation follow-up](STATUS.md#actions-runner-allocation-follow-up--2026-09-07-utc)
+replaces active waiting with completion events and expands local coverage.
+During the original first-launch work, no GitHub workflow,
 storage publication, signing/notarization or backend registration was executed.
 
 Additional commands included `brew install cabextract` for the official

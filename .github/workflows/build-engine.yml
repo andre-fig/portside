@@ -8,7 +8,16 @@ on:
       - "upstream/lock.json"
       - "upstream/dependencies.json"
       - "upstream/patches/**"
-      - "scripts/build-runtime/**"
+      - "scripts/build-runtime/build-engine.sh"
+      - "scripts/build-runtime/build-wine-engine.sh"
+      - "scripts/build-runtime/build-freetype.sh"
+      - "scripts/build-runtime/resolve-engine.sh"
+      - "scripts/build-runtime/validate-engine-execution.py"
+      - "scripts/build-runtime/validate-publication.py"
+      - "scripts/build-runtime/create-archive.sh"
+      - "scripts/build-runtime/source-audit.sh"
+      - "scripts/publish_engine.sh"
+      - ".github/workflows/build-engine.yml"
   workflow_dispatch:
     inputs:
       force_rebuild:
@@ -26,8 +35,9 @@ concurrency:
 
 jobs:
   changes:
-    name: Detect engine changes
+    name: Detect and validate engine sources
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       build_engine: ${{ steps.detect.outputs.build_engine }}
     steps:
@@ -56,17 +66,8 @@ jobs:
           fi
           printf 'build_engine=%s\n' "$build_engine" >> "$GITHUB_OUTPUT"
 
-  preflight:
-    name: Validate engine sources on Linux
-    needs: changes
-    if: needs.changes.outputs.build_engine == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Check out Portside sources
-        uses: actions/checkout@v7
-
       - name: Validate sources and build inputs
+        if: steps.detect.outputs.build_engine == 'true'
         run: |
           set -eu
           ./scripts/build-runtime/source-audit.sh
@@ -79,8 +80,8 @@ jobs:
           ./scripts/validate-production-policy.sh
 
   build-engine:
-    name: Build and publish persistent Wine engine
-    needs: [changes, preflight]
+    name: Build and validate persistent Wine engine
+    needs: changes
     if: needs.changes.outputs.build_engine == 'true'
     runs-on: macos-15
     timeout-minutes: 180
@@ -105,22 +106,21 @@ jobs:
           swift --version
           for tool in clang clang++ make tar shasum jq node; do command -v "$tool"; done
 
-      - name: Install pinned engine toolchain
+      - name: Install native engine build tools
+        id: toolchain
         run: |
           set -eu
-          brew trust aws/tap
-          for formula in awscli bison mingw-w64 llvm lld freetype pkgconf; do brew list "$formula" >/dev/null 2>&1 || brew install "$formula"; done
-          aws --version
+          for formula in bison mingw-w64 llvm lld freetype pkgconf; do brew list "$formula" >/dev/null 2>&1 || brew install "$formula"; done
           printf 'bison: '; "$(brew --prefix bison)/bin/bison" --version | awk 'NR==1 {print}'
           for formula in mingw-w64 llvm lld freetype pkgconf; do brew list --versions "$formula"; done
+          toolchain_id="$( { sw_vers -productVersion; xcodebuild -version; clang --version; brew list --versions bison mingw-w64 llvm lld freetype pkgconf; } | shasum -a 256 | awk '{print $1}')"
+          printf 'cache_id=%s\n' "$toolchain_id" >> "$GITHUB_OUTPUT"
 
-      - name: Restore cached compilation inputs
+      - name: Restore compatible Wine install cache
         uses: actions/cache@v5
         with:
           path: ${{ runner.temp }}/portside-wine-cache
-          key: portside-wine-${{ runner.os }}-macos-15-${{ hashFiles('upstream/lock.json', 'scripts/build-runtime/build-wine-engine.sh') }}
-          restore-keys: |
-            portside-wine-${{ runner.os }}-macos-15-
+          key: portside-wine-v2-${{ runner.os }}-${{ runner.arch }}-x86_64-${{ steps.toolchain.outputs.cache_id }}-${{ hashFiles('upstream/lock.json', 'upstream/dependencies.json', 'scripts/build-runtime/build-wine-engine.sh', 'scripts/build-runtime/build-freetype.sh', 'scripts/build-runtime/validate-engine-execution.py') }}
 
       - name: Validate production publication inputs
         run: |
@@ -149,26 +149,48 @@ jobs:
           test -s build/engine/PortsideWineEngine-*.tar.xz
           jq -e '.kind == "PortsideRuntimeEngine" and (.artifact.sha256 | test("^[0-9a-fA-F]{64}$")) and (.artifact.size | numbers) > 0' build/engine/engine-metadata.json >/dev/null
 
-      - name: Publish immutable validated engine
-        env:
-          PORTSIDE_ENGINE_BUILD_DIR: ${{ github.workspace }}/build/engine
-        run: |
-          engine_version="$(./scripts/build-runtime/resolve-engine.sh | jq -r '.engineVersion')"
-          PORTSIDE_ENGINE_VERSION="$engine_version" ./scripts/publish_engine.sh
-
-      - name: Validate and retain engine evidence
-        run: |
-          set -eu
-          ./scripts/validate-production-policy.sh
-          test -s build/engine/engine-metadata.json
-          test -s build/engine/engine-provenance.json
-          test -s build/engine/PortsideWineEngine-*.tar.xz
-          jq -e '.kind == "PortsideRuntimeEngine" and (.artifact.sha256 | test("^[0-9a-fA-F]{64}$"))' build/engine/engine-metadata.json >/dev/null
-
       - name: Upload engine evidence
         uses: actions/upload-artifact@v7
         with:
           name: portside-engine-${{ github.run_number }}
           if-no-files-found: error
           retention-days: 30
-          path: build/engine/
+          compression-level: 0
+          path: |
+            build/engine/PortsideWineEngine-*.tar.xz
+            build/engine/PortsideWineEngine-*.sha256
+            build/engine/engine-metadata.json
+            build/engine/engine-provenance.json
+
+  publish-engine:
+    name: Publish validated engine on Linux
+    needs: build-engine
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    env:
+      PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
+      PORTSIDE_S3_ACCESS_KEY_ID: ${{ secrets.PORTSIDE_S3_ACCESS_KEY_ID }}
+      PORTSIDE_S3_SECRET_ACCESS_KEY: ${{ secrets.PORTSIDE_S3_SECRET_ACCESS_KEY }}
+      PORTSIDE_S3_REGION: ${{ secrets.PORTSIDE_S3_REGION }}
+      PORTSIDE_S3_ENDPOINT: ${{ secrets.PORTSIDE_S3_ENDPOINT }}
+    steps:
+      - name: Check out validated sources
+        uses: actions/checkout@v7
+      - name: Download validated engine evidence
+        uses: actions/download-artifact@v7
+        with:
+          name: portside-engine-${{ github.run_number }}
+          path: build/engine
+      - name: Validate transferred engine and publication tools
+        run: |
+          set -eu
+          command -v aws
+          python3 scripts/build-runtime/validate-publication.py engine build/engine
+          ./scripts/validate-production-policy.sh
+      - name: Publish validated engine
+        env:
+          PORTSIDE_ENGINE_BUILD_DIR: ${{ github.workspace }}/build/engine
+        run: |
+          engine_version="$(./scripts/build-runtime/resolve-engine.sh | jq -r '.engineVersion')"
+          PORTSIDE_ENGINE_VERSION="$engine_version" ./scripts/publish_engine.sh

@@ -1,9 +1,10 @@
 name: Release Portside
+run-name: Release / ${{ github.event.workflow_run.name == 'Build Portside Runtime' && github.event.workflow_run.display_title || format('Runtime production {0}', github.event.workflow_run.head_sha || github.sha) }}
 
 on:
   workflow_dispatch:
   workflow_run:
-    workflows: [CI]
+    workflows: [CI, "Build Portside Runtime"]
     types: [completed]
     branches: [main]
 
@@ -17,32 +18,29 @@ concurrency:
 
 jobs:
   changes:
-    name: Check app release changes
+    name: Check release prerequisites
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
+      ready: ${{ steps.runtime.outputs.ready }}
+      runtime_run_id: ${{ steps.runtime.outputs.runtime_run_id }}
+      runtime_artifact_name: ${{ steps.runtime.outputs.runtime_artifact_name }}
+      runtime_artifact_kind: ${{ steps.runtime.outputs.runtime_artifact_kind }}
       should_release: ${{ steps.filter.outputs.should_release }}
       target_sha: ${{ steps.target.outputs.sha }}
       target_ref: ${{ steps.target.outputs.ref }}
     steps:
+      # Orchestration follows this workflow revision, including when a delayed
+      # runtime event targets an older source commit. Builds still use target_sha.
+      - name: Check out release orchestration
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
       - name: Resolve tested revision
         id: target
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          MANUAL_SHA: ${{ github.sha }}
-          MANUAL_REF: ${{ github.ref }}
-          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
-          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
-        shell: bash
-        run: |
-          set -eu
-          if [ "$EVENT_NAME" = workflow_dispatch ]; then
-            printf 'sha=%s\n' "$MANUAL_SHA" >> "$GITHUB_OUTPUT"
-            printf 'ref=%s\n' "$MANUAL_REF" >> "$GITHUB_OUTPUT"
-          else
-            printf 'sha=%s\n' "$WORKFLOW_RUN_SHA" >> "$GITHUB_OUTPUT"
-            printf 'ref=refs/heads/%s\n' "$WORKFLOW_RUN_BRANCH" >> "$GITHUB_OUTPUT"
-          fi
+        run: python3 scripts/wait_for_runtime.py --resolve-target
 
       - name: Check for app or packaging changes
         id: filter
@@ -71,80 +69,25 @@ jobs:
             echo "should_release=false" >> "$GITHUB_OUTPUT"
           fi
 
-  verify-ci:
-    name: Verify CI for this commit
-    needs: changes
-    if: needs.changes.outputs.should_release == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Require the main branch
-        env:
-          TARGET_REF: ${{ needs.changes.outputs.target_ref }}
-        run: |
-          set -eu
-          test "$TARGET_REF" = "refs/heads/main" || {
-            echo "Production releases must be started from main (received $TARGET_REF)." >&2
-            exit 1
-          }
-
-      - name: Find successful CI for this commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TARGET_SHA: ${{ needs.changes.outputs.target_sha }}
-        run: |
-          set -eu
-          ci_run_id="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${TARGET_SHA}&per_page=20" \
-            --jq '.workflow_runs[] | select(.head_branch == "main" and .status == "completed" and .conclusion == "success") | .id' \
-            | head -n 1)"
-          test -n "$ci_run_id" || {
-            echo "No successful CI run was found for commit ${TARGET_SHA}." >&2
-            echo "Wait for CI to finish, then start the release again." >&2
-            exit 1
-          }
-
-          passed="$(gh run view "$ci_run_id" --json jobs \
-            --jq '[.jobs[] | select(.name == "Production source policy" or .name == "Backend schema and build")] | length == 2 and all(.[]; .conclusion == "success")')"
-          test "$passed" = true || {
-            echo "CI run $ci_run_id did not pass all required jobs." >&2
-            exit 1
-          }
-          echo "Using successful CI run $ci_run_id for commit ${TARGET_SHA}."
-
-  wait-runtime:
-    name: Wait for runtime from this commit
-    needs: [changes, verify-ci]
-    if: needs.changes.outputs.should_release == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 310
-    outputs:
-      runtime_run_id: ${{ steps.runtime.outputs.runtime_run_id }}
-      runtime_artifact_name: ${{ steps.runtime.outputs.runtime_artifact_name }}
-      runtime_artifact_kind: ${{ steps.runtime.outputs.runtime_artifact_kind }}
-    steps:
-      - name: Check out tested sources
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.changes.outputs.target_sha }}
-      - name: Await validated runtime assembly
+      - name: Check CI and matching runtime once
         id: runtime
+        if: steps.filter.outputs.should_release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          TARGET_SHA: ${{ needs.changes.outputs.target_sha }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          TARGET_REF: ${{ steps.target.outputs.ref }}
         run: python3 scripts/wait_for_runtime.py
 
   build-and-publish-production:
     name: Build, notarize and publish production release
-    needs: [changes, verify-ci, wait-runtime]
-    if: needs.changes.outputs.should_release == 'true'
+    needs: changes
+    if: needs.changes.outputs.ready == 'true'
     runs-on: macos-15
     timeout-minutes: 90
     environment: production
     outputs:
       version: ${{ steps.release-version.outputs.version }}
-      runtime_run_id: ${{ needs.wait-runtime.outputs.runtime_run_id }}
+      runtime_run_id: ${{ needs.changes.outputs.runtime_run_id }}
     env:
       PORTSIDE_UPDATE_CHANNEL: production
       PORTSIDE_API_BASE_URL: ${{ secrets.PORTSIDE_API_BASE_URL }}
@@ -192,17 +135,17 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           github-token: ${{ github.token }}
-          run-id: ${{ needs.wait-runtime.outputs.runtime_run_id }}
-          name: ${{ needs.wait-runtime.outputs.runtime_artifact_name }}
+          run-id: ${{ needs.changes.outputs.runtime_run_id }}
+          name: ${{ needs.changes.outputs.runtime_artifact_name }}
           path: ${{ runner.temp }}/portside-release
 
       - name: Validate production runtime source binding
         id: runtime-evidence
         env:
           PORTSIDE_RUNTIME_BUILD_DIR: ${{ runner.temp }}/portside-release
-          PORTSIDE_RUNTIME_ARTIFACT_KIND: ${{ needs.wait-runtime.outputs.runtime_artifact_kind }}
+          PORTSIDE_RUNTIME_ARTIFACT_KIND: ${{ needs.changes.outputs.runtime_artifact_kind }}
           TARGET_SHA: ${{ needs.changes.outputs.target_sha }}
-          RUNTIME_RUN_ID: ${{ needs.wait-runtime.outputs.runtime_run_id }}
+          RUNTIME_RUN_ID: ${{ needs.changes.outputs.runtime_run_id }}
         run: |
           set -eu
           test -s "$PORTSIDE_RUNTIME_BUILD_DIR/runtime-manifest-unsigned.json"

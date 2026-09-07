@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Wait for successful runtime assembly of the tested revision; never reuse latest.
+"""Check release prerequisites once; never occupy a runner awaiting another build.
 
 Read-only GitHub operations. workflow_run's head_sha can describe the default
 branch rather than its explicitly checked-out engine revision, so the runtime's
@@ -10,7 +10,68 @@ import os
 import re
 import subprocess
 import sys
-import time
+
+
+def resolve_target(event_name, event, sha, ref):
+    if event_name == "workflow_run":
+        trigger = event["workflow_run"]
+        if trigger["head_branch"] != "main":
+            raise RuntimeError("Production releases require main")
+        if trigger["name"] == "Build Portside Runtime":
+            match = re.fullmatch(r"Runtime production ([0-9a-f]{40})", trigger.get("display_title", ""))
+            if not match:
+                raise RuntimeError("Runtime event has no explicit source revision")
+            sha = match[1]
+        elif trigger["name"] == "CI":
+            sha = trigger["head_sha"]
+        else:
+            raise RuntimeError("Unexpected release trigger")
+        ref = "refs/heads/main"
+    elif event_name != "workflow_dispatch":
+        raise RuntimeError("Unexpected release event")
+    if ref != "refs/heads/main" or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise RuntimeError("Production releases require a valid main revision")
+    return {"sha": sha, "ref": ref}
+
+
+def check_release(sha, api, automatic=True, current_run_id=None):
+    if automatic:
+        # The workflow-wide concurrency group serializes both completion events.
+        # A successful publication prevents the second event from publishing again,
+        # including when backend registration subsequently failed. Recovery then
+        # requires an explicit manual run, rather than another automatic version.
+        releases = api("actions/workflows/release-production.yml/runs?branch=main&per_page=100")["workflow_runs"]
+        for run in releases:
+            if str(run["id"]) == str(current_run_id) or run["head_branch"] != "main":
+                continue
+            if run.get("display_title") != "Release / Runtime production " + sha:
+                continue
+            jobs = api(f"actions/runs/{run['id']}/jobs?filter=latest&per_page=100")["jobs"]
+            publication = [job for job in jobs if job["name"] == "Build, notarize and publish production release"]
+            if any(job["conclusion"] == "success" or any(
+                    step["name"] == "Publish production artifacts to Portside storage" and step.get("conclusion") == "success"
+                    for step in job.get("steps", [])) for job in publication):
+                return {"ready": "false", "reason": "already_published"}
+
+    ci_runs = api(f"actions/workflows/ci.yml/runs?head_sha={sha}&per_page=100")["workflow_runs"]
+    ci_id = None
+    for run in sorted(ci_runs, key=lambda value: value["id"], reverse=True):
+        if (run["head_sha"] != sha or run["head_branch"] != "main" or run["event"] != "push"
+                or run["status"] != "completed" or run["conclusion"] != "success"):
+            continue
+        jobs = api(f"actions/runs/{run['id']}/jobs?filter=latest&per_page=100")["jobs"]
+        required = [job for job in jobs if job["name"] in ("Production source policy", "Backend schema and build")]
+        if ({job["name"] for job in required} == {"Production source policy", "Backend schema and build"}
+                and len(required) == 2 and all(job["conclusion"] == "success" for job in required)):
+            ci_id = str(run["id"])
+            break
+    if ci_id is None:
+        return {"ready": "false", "reason": "ci_not_ready"}
+    runs = api("actions/workflows/build-runtime.yml/runs?branch=main&per_page=100")["workflow_runs"]
+    selected = select_runtime(runs, sha, api)
+    if selected is None:
+        return {"ready": "false", "reason": "runtime_not_ready"}
+    return {"ready": "true", "ci_run_id": ci_id, **selected}
 
 
 def select_runtime(runs, target_sha, api):
@@ -29,7 +90,8 @@ def select_runtime(runs, target_sha, api):
             pending = True
             continue
         jobs = api(f"actions/runs/{run['id']}/jobs?filter=latest&per_page=100")["jobs"]
-        assembly = [job for job in jobs if job["name"] == "Build and publish production runtime"]
+        assembly = [job for job in jobs if job["name"] in (
+            "Build and publish production runtime", "Assemble and validate production runtime")]
         if run["conclusion"] != "success":
             failures.append(run["id"])
             continue
@@ -39,6 +101,11 @@ def select_runtime(runs, target_sha, api):
         if assembly[0]["conclusion"] != "success":
             failures.append(run["id"])
             continue
+        if assembly[0]["name"] == "Assemble and validate production runtime":
+            publication = [job for job in jobs if job["name"] == "Sign and publish production runtime on Linux"]
+            if len(publication) != 1 or publication[0]["conclusion"] != "success":
+                failures.append(run["id"])
+                continue
         artifacts = api(f"actions/runs/{run['id']}/artifacts?per_page=100")["artifacts"]
         for prefix, kind in [("portside-runtime-metadata-production-", "metadata"), ("portside-runtime-production-", "full")]:
             matches = [a for a in artifacts if not a["expired"] and a["name"].startswith(prefix)]
@@ -75,6 +142,16 @@ def validate_evidence(directory, target_sha, run_id):
 
 
 def main():
+    def output(values):
+        with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+            for key, value in values.items():
+                handle.write(f"{key}={value}\n")
+
+    if sys.argv[1:] == ["--resolve-target"]:
+        with open(os.environ["GITHUB_EVENT_PATH"]) as handle:
+            event = json.load(handle)
+        output(resolve_target(os.environ["GITHUB_EVENT_NAME"], event, os.environ["GITHUB_SHA"], os.environ["GITHUB_REF"]))
+        return
     sha = os.environ["TARGET_SHA"]
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise RuntimeError("Invalid tested revision")
@@ -84,27 +161,24 @@ def main():
     repo = os.environ["GITHUB_REPOSITORY"]
 
     def api(path):
-        result = subprocess.run(["gh", "api", f"repos/{repo}/{path}"], capture_output=True, text=True, timeout=60)
+        result = subprocess.run(["gh", "api", "--paginate", "--slurp", f"repos/{repo}/{path}"], capture_output=True, text=True, timeout=60)
         if result.returncode:
             raise RuntimeError("GitHub runtime evidence request failed")
-        return json.loads(result.stdout)
+        pages = json.loads(result.stdout)
+        return {key: [item for page in pages for item in page.get(key, [])]
+                for key in ("workflow_runs", "jobs", "artifacts")}
 
-    deadline = time.monotonic() + 5 * 60 * 60
-    while time.monotonic() < deadline:
-        runs = api("actions/workflows/build-runtime.yml/runs?branch=main&per_page=100")["workflow_runs"]
-        selected = select_runtime(runs, sha, api)
-        if selected:
-            with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-                for key, value in selected.items():
-                    output.write(f"{key}={value}\n")
-            print(f"Using runtime run {selected['runtime_run_id']} for tested revision {sha}", flush=True)
-            return
-        engines = api(f"actions/workflows/build-engine.yml/runs?head_sha={sha}&branch=main&per_page=100")["workflow_runs"]
-        if engines and all(r["status"] == "completed" and r["conclusion"] != "success" for r in engines):
-            raise RuntimeError("Engine build failed or was cancelled for the tested revision")
-        print(f"Waiting for runtime assembly of tested revision {sha}", flush=True)
-        time.sleep(30)
-    raise RuntimeError("Timed out waiting for runtime evidence of the tested revision")
+    if os.environ["TARGET_REF"] != "refs/heads/main":
+        raise RuntimeError("Production releases require main")
+    automatic = os.environ["GITHUB_EVENT_NAME"] != "workflow_dispatch"
+    selected = check_release(sha, api, automatic, os.environ["GITHUB_RUN_ID"])
+    output(selected)
+    if selected["ready"] == "false":
+        if not automatic:
+            raise RuntimeError("CI and matching runtime must finish before a manual release")
+        print(f"Release deferred: {selected['reason']}; no runner will wait. Completion events recheck prerequisites.", flush=True)
+    else:
+        print(f"Using runtime run {selected['runtime_run_id']} and CI run {selected['ci_run_id']} for tested revision {sha}", flush=True)
 
 
 if __name__ == "__main__":

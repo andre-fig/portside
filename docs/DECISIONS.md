@@ -224,7 +224,8 @@ record its replacement and update related docs; do not silently restore old beha
 - **Reason:** CI can finish before a new engine, so selecting the latest older
   runtime could publish a new app with the original defective engine.
 - **Consequences:** Missing, failed, cancelled or expired matching evidence blocks
-  release. Waiting occurs on Linux before the macOS publication job. Existing
+  release. Completion events recheck prerequisites once on Linux; no runner waits
+  for another workflow. The macOS job starts only when both are ready. Existing
   production publication triggers remain; this change authorizes no agent push,
   dispatch or promotion. See [RELEASE](RELEASE.md).
 
@@ -245,3 +246,23 @@ record its replacement and update related docs; do not silently restore old beha
   separate component installation and acceptance. The production-host bootstrap
   probe exercises the same policy, without test-only overrides. See
   [the investigation](STEAM_FIRST_LAUNCH_FIX.md) and [RUNTIME](RUNTIME.md).
+
+## D15 — Allocate runners only for ready work and keep portable publication on Linux
+
+- **Date:** September 7, 2026.
+- **Status:** Implemented but not end-to-end validated; local regression/static checks only.
+- **Decision:** CI and runtime completion each recheck the same-commit release
+  prerequisites once. Serialize app releases and suppress duplicate automatic
+  publication for a source already uploaded. Keep native compilation/execution
+  on macOS, then verify transferred archive hashes/source/run identity and sign
+  the runtime manifest/publish engine and runtime on Linux. Use local hooks for
+  early lint/test feedback while retaining independent remote trust gates.
+- **Reason:** The former five-hour Linux polling job occupied a runner while
+  another runner compiled Wine. Portable publication and unused compiler tools
+  unnecessarily extended native jobs; whole build-directory uploads retained
+  temporary compiler and extraction trees.
+- **Consequences:** Dependency waits consume no allocated runner. Failed/missing
+  prerequisites never select an older runtime; manual recovery must still meet
+  both gates. A cold native build remains necessary and Apple notarization still
+  waits within its native job. No new production destination or app-change
+  trigger is introduced. See [RELEASE](RELEASE.md) and [TESTING](TESTING.md).

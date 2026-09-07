@@ -31,7 +31,10 @@ swift package resolve --package-path apps/desktop
 There is no root install/test command. Optional `./scripts/install-git-hooks.sh`
 changes `core.hooksPath` to the versioned hooks. Do not run it in an audit that
 forbids configuration changes. Hook behavior and the complete check matrix are
-in [TESTING](TESTING.md).
+in [TESTING](TESTING.md). Workflow edits require local `actionlint`; the hooks
+check staged shell/JSON/Python/workflow syntax before commit and select both Swift
+suites/builds, script regressions or web checks before push. Production trust
+checks still run independently on Linux.
 
 ## Local application entry points
 

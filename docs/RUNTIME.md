@@ -62,7 +62,11 @@ must execute both PE architectures in a disposable symlinked prefix before
 packaging and again after archive extraction. `wine --version` alone is insufficient.
 A local
 cache can reuse an install tree; a matching cache is an optimization, not the
-durable engine source. Its cache identity includes the recipe and dependency lock.
+durable engine source. GitHub cache identity includes runner/target architecture,
+observed macOS/Xcode/Clang/Homebrew versions and recipe/dependency hashes, without
+broad restore-key fallback. The recipe also checks its own cache signature. This
+is a complete install cache, not resumable partial compilation. Native jobs retain
+only archives/checksums/provenance, excluding temporary build and extraction trees.
 
 [build-freetype.sh](../scripts/build-runtime/build-freetype.sh) builds the pinned,
 SHA-256-verified FreeType source for x86_64. The engine includes its dylib and
@@ -127,8 +131,15 @@ committed [documentation manifest](runtime-manifest.json) and
 [backend manifest](../apps/backend/manifests/runtime-manifest.json) are blocked,
 empty placeholders; they are not signed usable production releases.
 
-[build-runtime.yml](../.github/workflows/build-runtime.yml) signs and uploads
-the runtime automatically to the single configured production bucket. Manifest
+[build-runtime.yml](../.github/workflows/build-runtime.yml) assembles and executes
+native probes on macOS, then transfers explicit archives/metadata to Linux for
+manifest signing and upload to the single configured production bucket.
+[validate-publication.py](../scripts/build-runtime/validate-publication.py)
+rechecks source/run identity, SHA-256 and size before signing transferred bytes.
+The temporary assembly artifact expires after one day; final evidence after 30.
+Only the native engine build installs Wine compiler dependencies; assembly needs
+the storage client and tools already supplied by the macOS image. The engine
+workflow likewise publishes its validated archives from Linux. Manifest
 URLs use `/v1/runtime/artifacts/production/<fileName>` on the Portside API,
 which validates the production channel and filename before returning a temporary
 signed storage URL. This runtime route is public and does not check license

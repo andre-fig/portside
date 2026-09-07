@@ -117,6 +117,74 @@ proved SIGKILL cause. The newly compiled x86_64 loader, ntdll and FreeType are
 unsigned local outputs, not final distribution candidates. No security settings or installed artifacts were changed;
 no publication, manifest update, commit, push or deploy occurred.
 
+## Actions runner allocation follow-up — 2026-09-07 UTC
+
+**Verified, scoped live inspection:** source revision
+`a0d6e27d1f4b795f1452f561d6b5bb03e4abf992` was clean before these local changes.
+Read-only GitHub API/log inspection found that
+[release run 34124567328](https://github.com/andre-fig/portside/actions/runs/34124567328)
+allocated its Linux runtime-wait job at 12:56:10 UTC; the polling step began at
+12:56:21. It was awaiting the matching engine/runtime, not waiting for its own
+runner to be assigned. [Engine run 34124509954](https://github.com/andre-fig/portside/actions/runs/34124509954)
+allocated macOS at 12:55:53, installed tools for 84 seconds, restored cache for
+12 seconds, then compiled Wine from 12:57:45 until cancellation at approximately
+13:04:45. Logs show compiler work and an incompatible restored cache, not a
+lint hang. Both runs were later observed cancelled; no cancellation was issued
+by this task. The successful push-triggered runtime run had skipped assembly
+and produced no qualifying runtime. No new production engine completed there.
+
+**Implemented but not end-to-end validated:** release now reacts to CI/runtime
+completion, checks both prerequisites for the same commit once on Linux and
+exits when they are unfinished. There is no active cross-workflow polling job.
+Global release concurrency and prior publication evidence suppress duplicate
+automatic publication; missing/failed/cancelled/expired evidence cannot select
+an older source. App-change scope and production destinations are preserved.
+Native engine compilation/execution and runtime assembly/probes remain macOS;
+engine/runtime publication and runtime Ed25519 manifest signing move to Linux
+with transferred-archive source/run/hash/size checks. Temporary manifest keys
+are removed at job completion. Detection and preflight share one Linux job per
+build workflow. Engine push paths exclude assembly-only scripts; compatible
+cache keys include observed toolchain/architecture and omit broad fallbacks.
+Artifact uploads exclude temporary build trees and disable redundant compression
+of archives; the runtime assembly handoff has one-day retention.
+
+**Verified local automation/checks:** `core.hooksPath` was already `.githooks`;
+no Git configuration change was needed. Pre-commit validates actual staged
+shell/JSON/Python/workflow content. Pre-push selects both Swift test/build suites,
+script regressions and existing backend/landing checks from changed paths.
+Workflow lint requires actionlint. Linux CI retains independent production
+policy/regression/backend gates; bypassable hooks are not a release trust root.
+
+Commands/results for this follow-up:
+
+- `python3 -B -m unittest discover -s scripts/tests -v`: 35 tests passed,
+  including both event orders, duplicate suppression, native/Linux job proof,
+  corrupt/missing/wrong-source artifacts and disposable hook fixtures.
+- `swift test --package-path apps/runtime-host` and `swift build --package-path apps/runtime-host`:
+  15 tests passed and build passed.
+- `swift test --package-path apps/desktop` and `swift build --package-path apps/desktop`:
+  132 tests completed, one optional signed-app probe skipped, no failures; build passed.
+- Source audit, Wine/winetricks snapshot validation and production policy passed.
+  Workflow lint, shell/JSON/Python syntax and `git diff --check` passed.
+- The publication checksum validator read the existing 336,989,260-byte local
+  engine archive successfully and rejected its use for another source/run.
+  This is archive verification, not a new native engine build.
+
+**Remaining validation:** the revised GitHub job graph, Linux signing/storage
+handoff, cold/warm cache timing and remote publication require a subsequent
+explicitly authorized push/run. No engine rebuild, production key usage, new
+Steam graphical probe, workflow dispatch, commit, push, deploy or publication
+was performed in this follow-up. The previous Developer ID/runtime notarization
+and rendered interactive Steam acceptance gaps remain. Apple app notarization
+still uses `notarytool --wait` within its macOS job.
+
+The repository was public at inspection and uses standard hosted runner labels.
+[GitHub billing documentation](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
+states those public-repository runner minutes are free; this does not establish
+artifact/cache storage usage, account billing or larger-runner costs. The changes
+reduce occupied runner time and retained temporary output; savings have not been
+measured on the new workflows.
+
 ## Executive assessment
 
 The repository implements the native application/install/update pipeline, a

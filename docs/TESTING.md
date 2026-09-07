@@ -28,7 +28,10 @@ The release binding tests run with
 `python3 -B -m unittest discover -s scripts/tests -v` and are included in CI's
 production source policy job. They cover pending/failed/cancelled runtime builds,
 skipped engine-dependent assembly, expired artifacts, wrong source/run provenance
-and disagreeing manifests. `actionlint .github/workflows/*.yml` checks wiring;
+and disagreeing manifests. They also cover both completion orders, duplicate
+publication suppression, separate native/Linux runtime jobs, archive corruption,
+wrong workflow/source evidence, symlinks and local hook selection/index behavior.
+`actionlint .github/workflows/*.yml` checks wiring;
 no workflow dispatch is required for these local checks.
 
 Extracted-layout validation also invokes
@@ -96,16 +99,33 @@ No publishing, Apple, GUI or storage step was executed during this audit.
 
 ## Hooks, CI and documentation checks
 
-[pre-commit](../scripts/hooks/pre-commit.sh) checks staged whitespace, shell/JSON
-and workflows when actionlint is available. [pre-push](../scripts/hooks/pre-push.sh)
-runs desktop tests, backend schema/typecheck/lint/tests/build, landing
-lint/typecheck/build and targeted script/policy checks. It does not run every matrix
-entry: runtime-host
-tests and landing/desktop builds need explicit execution.
+[pre-commit](../scripts/hooks/pre-commit.sh) checks the actual staged content:
+whitespace, shell/JSON/Python syntax, and workflow lint. `actionlint` is required
+when committing/pushing workflows; missing tools fail with setup guidance.
+[pre-push](../scripts/hooks/pre-push.sh) selects checks from outgoing changed paths:
 
-Current [CI](../.github/workflows/ci.yml) gates production policy and backend schema/build.
-Swift tests, backend unit tests and the whole matrix are not GitHub release gates.
-[RELEASE](RELEASE.md) describes exact workflow order.
+| Changed area | Local checks |
+| --- | --- |
+| Desktop, runtime host, wrapper template or wrapper build script | Both Swift suites and builds |
+| Workflows or scripts | Release/publication/hook regression tests; workflow lint and shell/Python syntax when relevant |
+| Backend | Prisma schema, typecheck, lint, tests and build |
+| Landing | Lint, typecheck and build |
+| Runtime, application, backend, upstream, scripts or workflows | Production source policy |
+| JSON | Parse changed existing files; deleted files do not fail the hook |
+
+Enable the versioned hooks once per clone using `./scripts/install-git-hooks.sh`;
+`git config --get core.hooksPath` should return `.githooks`. No commit or push is
+needed to run `python3 -B -m unittest discover -s scripts/tests -v`: hook tests
+use a disposable synthetic repository layout and fake commands, with no external
+writes. Local hooks provide early feedback but can be bypassed; they do not
+replace release trust checks.
+
+Current [CI](../.github/workflows/ci.yml) retains production policy, these Python
+regressions and backend schema/build on Linux. Swift tests, backend unit tests and
+the whole local matrix are not GitHub release gates. Native packaging, Wine
+execution, signing and notarization remain macOS jobs; completing a dependency
+is handled by GitHub events/`needs`, without an allocated runner polling another
+workflow. [RELEASE](RELEASE.md) describes exact ordering and remaining Apple wait.
 
 No repository-wide Markdown linter/link checker is configured. Landing declares
 Prettier. A read-only `node apps/landing/node_modules/prettier/bin/prettier.cjs --check`

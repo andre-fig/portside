@@ -11,27 +11,28 @@ echo "Running fast pre-commit checks..."
 git diff --cached --check
 
 printf '%s\n' "$changed_files" | while IFS= read -r file; do
-    [ -f "$file" ] || continue
     case "$file" in
         *.sh)
-            sh -n "$file"
+            git show ":$file" | sh -n
             ;;
         *.json)
             if command -v jq >/dev/null 2>&1; then
-                jq -e . "$file" >/dev/null
+                git show ":$file" | jq -e . >/dev/null
             else
-                node -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))' "$file"
+                git show ":$file" | node -e 'JSON.parse(require("node:fs").readFileSync(0, "utf8"))'
             fi
+            ;;
+        *.py)
+            git show ":$file" | python3 -B -c 'import ast, sys; ast.parse(sys.stdin.read())'
+            ;;
+        .github/workflows/*.yml|.github/workflows/*.yaml)
+            command -v actionlint >/dev/null 2>&1 || {
+                echo "Install actionlint before committing workflow changes: brew install actionlint" >&2
+                exit 1
+            }
+            git show ":$file" | actionlint -stdin-filename "$file" -
             ;;
     esac
 done
-
-if printf '%s\n' "$changed_files" | grep -Eq '^\.github/workflows/'; then
-    if command -v actionlint >/dev/null 2>&1; then
-        actionlint .github/workflows/*.yml
-    else
-        echo "actionlint is not installed; GitHub will validate workflow files." >&2
-    fi
-fi
 
 echo "Fast pre-commit checks passed."

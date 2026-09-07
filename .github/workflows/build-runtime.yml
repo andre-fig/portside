@@ -44,8 +44,9 @@ concurrency:
 
 jobs:
   changes:
-    name: Detect runtime assembly changes
+    name: Detect and validate runtime sources
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       assemble_runtime: ${{ steps.detect.outputs.assemble_runtime }}
     steps:
@@ -76,7 +77,7 @@ jobs:
             if [ "$WORKFLOW_RUN_BRANCH" = main ] && [ "$WORKFLOW_RUN_CONCLUSION" = success ]; then
               # A real build, not a skipped change-filter run. This also handles
               # recipes changed before the final commit of a multi-commit push.
-              assemble_runtime="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ENGINE_RUN_ID}/jobs?filter=latest&per_page=100" --jq '[.jobs[] | select(.name == "Build and publish persistent Wine engine" and .conclusion == "success")] | length == 1')"
+              assemble_runtime="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ENGINE_RUN_ID}/jobs?filter=latest&per_page=100" --jq '[.jobs[] | select((.name == "Build and validate persistent Wine engine" or .name == "Build and publish persistent Wine engine") and .conclusion == "success")] | length == 1')"
             fi
           else
             runtime_changed=false
@@ -89,19 +90,8 @@ jobs:
           fi
           printf 'assemble_runtime=%s\n' "$assemble_runtime" >> "$GITHUB_OUTPUT"
 
-  preflight:
-    name: Validate runtime sources on Linux
-    needs: changes
-    if: needs.changes.outputs.assemble_runtime == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Check out Portside sources
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-
       - name: Validate sources, snapshots and build inputs
+        if: steps.detect.outputs.assemble_runtime == 'true'
         run: |
           set -eu
           ./scripts/build-runtime/source-audit.sh
@@ -120,8 +110,8 @@ jobs:
           ./scripts/validate-production-policy.sh
 
   build-runtime:
-    name: Build and publish production runtime
-    needs: [changes, preflight]
+    name: Assemble and validate production runtime
+    needs: changes
     if: needs.changes.outputs.assemble_runtime == 'true'
     runs-on: macos-15
     timeout-minutes: 180
@@ -152,13 +142,14 @@ jobs:
           swift --version
           for tool in clang clang++ make tar shasum jq node swiftc; do command -v "$tool"; done
 
-      - name: Install pinned runtime toolchain
+      - name: Ensure runtime assembly tools
         run: |
-          brew trust aws/tap
-          for formula in awscli bison mingw-w64 llvm lld freetype pkgconf; do brew list "$formula" >/dev/null 2>&1 || brew install "$formula"; done
-          aws --version
-          printf 'bison: '; "$(brew --prefix bison)/bin/bison" --version | awk 'NR==1 {print}'
-          for formula in mingw-w64 llvm lld freetype pkgconf; do brew list --versions "$formula"; done
+          set -eu
+          if ! command -v aws >/dev/null 2>&1; then
+            brew trust aws/tap
+            brew install awscli
+          fi
+          for tool in aws jq node python3 swiftc lipo tar shasum; do command -v "$tool"; done
 
       - name: Validate production publication inputs
         run: |
@@ -189,6 +180,52 @@ jobs:
       - name: Assemble wrapper, validated engine and winetricks
         run: ./scripts/build-runtime/build.sh
 
+      - name: Upload validated runtime assembly
+        uses: actions/upload-artifact@v7
+        with:
+          name: portside-runtime-assembly-production-${{ env.PORTSIDE_RUNTIME_VERSION }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          path: |
+            build/runtime/Portside*.tar.xz
+            build/runtime/Portside*.sha256
+            build/runtime/runtime-manifest-unsigned.json
+            build/runtime/engine-input.json
+            build/runtime/provenance.json
+            build/runtime/sbom.spdx.json
+
+  publish-runtime:
+    name: Sign and publish production runtime on Linux
+    needs: build-runtime
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    env:
+      PORTSIDE_RUNTIME_VERSION: ${{ inputs.version || format('0.1.{0}', github.run_number) }}
+      PORTSIDE_RUNTIME_CHANNEL: production
+      PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX: ${{ inputs.artifact_url_prefix || secrets.PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX }}
+      PORTSIDE_MANIFEST_SIGNING_KEY_ID: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY_ID }}
+      PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
+      PORTSIDE_S3_ACCESS_KEY_ID: ${{ secrets.PORTSIDE_S3_ACCESS_KEY_ID }}
+      PORTSIDE_S3_SECRET_ACCESS_KEY: ${{ secrets.PORTSIDE_S3_SECRET_ACCESS_KEY }}
+      PORTSIDE_S3_REGION: ${{ secrets.PORTSIDE_S3_REGION }}
+      PORTSIDE_S3_ENDPOINT: ${{ secrets.PORTSIDE_S3_ENDPOINT }}
+    steps:
+      - name: Check out validated sources
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Download validated runtime assembly
+        uses: actions/download-artifact@v7
+        with:
+          name: portside-runtime-assembly-production-${{ env.PORTSIDE_RUNTIME_VERSION }}
+          path: build/runtime
+      - name: Validate transferred runtime and publication tools
+        run: |
+          set -eu
+          for tool in aws jq node python3; do command -v "$tool"; done
+          python3 scripts/build-runtime/validate-publication.py runtime build/runtime
       - name: Materialize validation manifest signing key
         env:
           MANIFEST_PRIVATE_KEY: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY }}
@@ -223,13 +260,21 @@ jobs:
           test -s "build/runtime/provenance.json"
 
       - name: Upload production runtime evidence
-        if: ${{ always() && hashFiles('build/runtime/**') != '' }}
+        if: success()
         uses: actions/upload-artifact@v7
         with:
           name: portside-runtime-production-${{ env.PORTSIDE_RUNTIME_VERSION }}
           if-no-files-found: error
           retention-days: 30
-          path: build/runtime/
+          compression-level: 0
+          path: |
+            build/runtime/Portside*.tar.xz
+            build/runtime/Portside*.sha256
+            build/runtime/runtime-manifest-unsigned.json
+            build/runtime/engine-input.json
+            build/runtime/provenance.json
+            build/runtime/sbom.spdx.json
+            build/runtime/runtime-manifest.json
 
       - name: Upload runtime metadata for release orchestration
         if: ${{ success() }}
@@ -244,3 +289,7 @@ jobs:
             build/runtime/engine-input.json
             build/runtime/provenance.json
             build/runtime/sbom.spdx.json
+
+      - name: Remove temporary manifest signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/portside-runtime-manifest.key"

@@ -34,43 +34,71 @@ the YAML's `environment: production` alone does not prove required reviewers.
 | [CI](../.github/workflows/ci.yml)                                                  | Push/PR to `main`, except landing-only paths; production-source policy and runtime source-binding tests plus backend dependency installation, Prisma schema validation and build.                           | No Swift tests, backend unit tests, lint or typecheck job. Local hooks carry broader checks.                                                  |
 | [Build Desktop Validation](../.github/workflows/build-desktop.yml)                 | Successful CI on `main` with relevant desktop/packaging paths, or dispatch; arm64 app ZIP, DMG, dSYM and checksums, retained 14 days.                                      | Development bundle, ad hoc by default; no notarization or GUI acceptance.                                                                     |
 | Railway connector                                                                  | Provider-side deployment of the Landing service from `main`; local pre-push runs Bun lint, typecheck and build before publication.                                         | External to GitHub Actions; service variables, domains and the deployed revision remain provider-side state.                                  |
-| [Build Portside Engine](../.github/workflows/build-engine.yml)                     | Relevant `main` changes or dispatch; Linux preflight, `macos-15` Wine build, engine upload and 30-day evidence.                                                            | Independent source engine; no app release or runtime manifest.                                                                                |
-| [Build Portside Runtime](../.github/workflows/build-runtime.yml)                   | Assembly changes or successful engine workflow; dispatch requires runtime version and artifact URL prefix. Linux preflight, macOS assembly, signature and storage upload.  | Uses existing engine; full and metadata-only artifacts retained 30 days. No backend manifest registration here.                               |
-| [Release Portside](../.github/workflows/release-production.yml)                    | Successful CI on `main` with app/runtime-host/packaging changes, or dispatch from `main` with successful CI for that commit.                                               | Configured app, signature, notarization, upload, then backend runtime and app registration. Automatic publication, not gated by GUI workflow. |
+| [Build Portside Engine](../.github/workflows/build-engine.yml)                     | Relevant `main` changes or dispatch; Combined Linux detection/preflight, `macos-15` Wine build/validation, then Linux storage upload and 30-day evidence.                                                            | Independent source engine; no app release or runtime manifest.                                                                                |
+| [Build Portside Runtime](../.github/workflows/build-runtime.yml)                   | Assembly changes or successful engine workflow; dispatch requires runtime version and artifact URL prefix. Combined Linux detection/preflight, macOS assembly/validation, then Linux manifest signing and storage upload.  | Uses existing engine; one-day assembly handoff, full and metadata-only evidence retained 30 days. No backend manifest registration here.                               |
+| [Release Portside](../.github/workflows/release-production.yml)                    | CI or runtime completion on `main` rechecks both prerequisites for the same source; existing app/runtime-host/packaging filter or explicit main dispatch applies.                                               | Configured app, signature, notarization, upload, then backend runtime and app registration. Automatic publication, not gated by GUI workflow. |
 | [Validate Clean Portside Runtime](../.github/workflows/validate-clean-install.yml) | Dispatch with selected current/optional previous runtime artifact; self-hosted macOS arm64 GUI session.                                                                    | Operator-assisted test. Script needs an interactive terminal to confirm checks; otherwise it exits 2 without accepting GUI success.           |
 | Railway connector                                                                  | Provider-side deployment of the API, Worker and Cron services using the three `apps/backend/railway.*.json` configurations.                                                | External to GitHub Actions; service variables, domains and the deployed revision remain provider-side state.                                  |
 | [Sync Upstreams](../.github/workflows/sync-upstreams.yml)                          | Daily 03:17 UTC or dispatch; syncs sources and maintains a PR with the scoped `PORTSIDE_UPSTREAM_SYNC_TOKEN`, allowing PR checks to start without `GITHUB_TOKEN` approval. | May commit/push its automation branch and close obsolete PRs. Never merges or publishes runtime artifacts.                                    |
 
 Engine/assembly change decisions come from
 [changed-components.sh](../scripts/build-runtime/changed-components.sh), in
-addition to YAML path filters. Wine/toolchain/patch changes wait for the engine
-workflow; wrapper/winetricks and app changes reuse the recipe-selected engine.
-Every app release requires a runtime assembly of the same `target_sha`, even
-when the engine is unchanged. The Linux `wait-runtime` job waits up to five hours
-for that assembly, ignoring successful change-filter runs whose build was
-skipped. Failed/cancelled builds, expired evidence and timeout block publication;
-there is no fallback to an older commit. Runtime runs carry their actual checkout
-SHA in `run-name`, because a `workflow_run` event can have a different default
-branch head. Both runtime preflight and assembly check out the engine event SHA.
-Runtime concurrency is per source SHA and does not cancel another revision's
-assembly. Reading the engine job result adds `actions: read`, not write access.
-For manual app releases, matching runtime evidence must already exist or be
-produced by a separately authorized runtime build of that revision. The waiter
-does not dispatch workflows or promote any artifacts.
+addition to YAML path filters. Engine inputs trigger Wine compilation/cache reuse;
+wrapper/winetricks and app changes assemble using the recipe-selected engine.
+The engine workflow's push paths exclude assembly-only scripts, so those pushes
+cannot cancel an unrelated ongoing Wine build through engine concurrency.
+
+Every app release requires successful CI and runtime assembly of the same
+`target_sha`. Completion of **either** CI or runtime starts a short Linux
+prerequisite check. If the other is unfinished, the check exits successfully
+with `ready=false`; its completion event rechecks later. There is no polling
+loop, five-hour waiter, or allocated runner between workflows. Only `ready=true`
+starts the macOS app job. Failed/cancelled builds, skipped assembly and expired
+evidence cannot qualify; an older commit is never a substitute. Manual release
+fails promptly unless both prerequisites already exist; it never dispatches a build.
+
+Runtime `run-name` carries its actual checkout SHA because a `workflow_run`
+event can report a different default-branch head. Runtime detection, assembly
+and publication check out the engine event SHA. The release prerequisite job
+checks out its workflow's orchestration revision, resolves the source from the
+trigger, and the native app build checks out that `target_sha`. Runtime
+concurrency remains per source SHA. Release concurrency serializes completion
+events; a successful app storage publication for the same source suppresses
+another automatic publication, even if later registration failed. Such recovery
+requires explicit manual dispatch. Read-only GitHub API checks use `actions: read`.
 
 ```mermaid
 flowchart LR
-    C[CI on main] --> D[Desktop validation]
-    C --> W[Wait for runtime of tested commit]
-    E[Engine build] --> R[Runtime assembly and signature]
-    R --> S[Single production bucket]
-    R --> M[Retained runtime metadata]
-    M --> W
-    W --> A[App release: sign and notarize]
-    A --> S
-    A --> B[Backend runtime and app registration]
-    S --> G[Separate operator GUI acceptance]
+    C[CI on Linux] --> D[Desktop validation on macOS]
+    C --> Q[Check both prerequisites once on Linux]
+    E[Wine build and execution on macOS] --> P[Engine publication on Linux]
+    P --> R[Runtime assembly and execution on macOS]
+    R --> S[Manifest signing and runtime publication on Linux]
+    S --> Q
+    Q -->|both ready for the same commit| A[App build, sign and notarize on macOS]
+    Q -->|unfinished| X[Exit; recheck on next completion event]
+    A --> B[Backend registration on Linux]
 ```
+
+Native jobs upload only named archives, checksums and provenance/SBOM, excluding
+`work/`, compiler objects, extracted trees and caches. Already-compressed archives
+use artifact compression level zero. The runtime handoff expires after one day;
+final runtime metadata/evidence and engine evidence expire after 30 days.
+[validate-publication.py](../scripts/build-runtime/validate-publication.py)
+recomputes SHA-256 and size and binds transferred metadata to the checkout and
+workflow run before Linux signing/upload. It does not replace native Wine
+execution, bootstrap/layout checks, manifest authentication or final Developer ID
+acceptance. The temporary manifest private key is removed on job completion.
+
+Engine cache keys include runner/target architecture, observed macOS/Xcode/Clang
+and Homebrew tool versions plus recipe/dependency hashes. There is no broad
+restore-key fallback to an incompatible installed tree. A cold build must finish
+before a reusable complete install cache exists; cancelled partial compilation
+is not retained. Runtime assembly installs only its missing storage client, not
+the Wine compilation toolchain. Ubuntu 24.04 supplies AWS CLI; jobs verify tools
+before publication. This changes runner allocation, not production destinations
+or the qualifying app-change filter. Apple notarization still uses `notarytool
+--wait` inside the native app job; it is a separate service dependency.
 
 ## Application release sequence
 
