@@ -169,16 +169,22 @@ class ReleaseEventTests(unittest.TestCase):
         self.assertEqual(runtime.check_release(SHA, missing)["ready"], "false")
 
     def test_runtime_event_uses_checkout_sha_when_default_head_advanced(self):
-        event = {"workflow_run": {"name": "Build Portside Runtime", "head_branch": "main", "head_sha": OTHER, "display_title": "Runtime production " + SHA}}
+        event = {"workflow_run": {"name": "Runtime production " + SHA, "path": ".github/workflows/build-runtime.yml", "head_branch": "main", "head_sha": OTHER, "display_title": "Runtime production " + SHA}}
         self.assertEqual(runtime.resolve_target("workflow_run", event, OTHER, "refs/heads/main")["sha"], SHA)
 
     def test_runtime_event_without_source_title_is_rejected(self):
-        event = {"workflow_run": {"name": "Build Portside Runtime", "head_branch": "main", "head_sha": SHA}}
+        event = {"workflow_run": {"name": "Runtime production " + SHA, "path": ".github/workflows/build-runtime.yml", "head_branch": "main", "head_sha": SHA}}
+        with self.assertRaises(RuntimeError):
+            runtime.resolve_target("workflow_run", event, SHA, "refs/heads/main")
+
+    def test_runtime_title_cannot_impersonate_an_unexpected_workflow_path(self):
+        event = {"workflow_run": {"name": "Runtime production " + SHA, "path": ".github/workflows/unrelated.yml",
+                                  "head_branch": "main", "head_sha": SHA, "display_title": "Runtime production " + SHA}}
         with self.assertRaises(RuntimeError):
             runtime.resolve_target("workflow_run", event, SHA, "refs/heads/main")
 
     def test_ci_target_and_main_only_manual_dispatch(self):
-        event = {"workflow_run": {"name": "CI", "head_branch": "main", "head_sha": SHA}}
+        event = {"workflow_run": {"name": "CI", "path": ".github/workflows/ci.yml", "head_branch": "main", "head_sha": SHA}}
         self.assertEqual(runtime.resolve_target("workflow_run", event, OTHER, "refs/heads/main")["sha"], SHA)
         self.assertEqual(runtime.resolve_target("workflow_dispatch", {}, SHA, "refs/heads/main")["sha"], SHA)
         with self.assertRaises(RuntimeError):
@@ -198,9 +204,15 @@ class RuntimeChangeFilterTests(unittest.TestCase):
 
     def test_app_and_release_inputs_assemble_without_rebuilding_wine(self):
         for file in ("apps/desktop/Sources/Portside/PortsideApp.swift", "scripts/sign_release.sh",
-                     "scripts/register_runtime_release.sh", "scripts/wait_for_runtime.py"):
+                     "scripts/register_runtime_release.sh"):
             with self.subTest(file=file):
                 self.assertEqual(self.decisions([file]), (1, 0))
+
+    def test_orchestration_only_changes_do_not_allocate_native_builds(self):
+        for file in ("scripts/wait_for_runtime.py", ".github/workflows/release-production.yml",
+                     "scripts/build-runtime/changed-components.sh"):
+            with self.subTest(file=file):
+                self.assertEqual(self.decisions([file]), (1, 1))
 
     def test_recipe_change_requires_engine_before_assembly(self):
         self.assertEqual(self.decisions(["scripts/build-runtime/build-wine-engine.sh",

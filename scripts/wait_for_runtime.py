@@ -17,12 +17,14 @@ def resolve_target(event_name, event, sha, ref):
         trigger = event["workflow_run"]
         if trigger["head_branch"] != "main":
             raise RuntimeError("Production releases require main")
-        if trigger["name"] == "Build Portside Runtime":
+        # A run-name can replace the API/webhook name with the execution title.
+        # The workflow path remains stable across push and workflow_run events.
+        if trigger.get("path") == ".github/workflows/build-runtime.yml":
             match = re.fullmatch(r"Runtime production ([0-9a-f]{40})", trigger.get("display_title", ""))
             if not match:
                 raise RuntimeError("Runtime event has no explicit source revision")
             sha = match[1]
-        elif trigger["name"] == "CI":
+        elif trigger.get("path") == ".github/workflows/ci.yml":
             sha = trigger["head_sha"]
         else:
             raise RuntimeError("Unexpected release trigger")

@@ -185,6 +185,29 @@ artifact/cache storage usage, account billing or larger-runner costs. The change
 reduce occupied runner time and retained temporary output; savings have not been
 measured on the new workflows.
 
+## Authorized Actions execution follow-up — 2026-09-07 UTC
+
+**Verified, scoped:** the user subsequently authorized commit/push and monitoring.
+Commit `aea61b82b11eaaf8bbd9d857f19a0d8edd2c0ea2` passed the real pre-commit and
+pre-push hooks and was pushed to `main`. CI run `34127517737` passed. Engine run
+`34127517724` passed Linux preflight and entered native compilation; the initial
+runtime detection skipped assembly while the engine was being built, without
+an allocated waiting job. App/desktop jobs were skipped by their existing
+change filters because this commit changes automation only.
+
+**Corrected during monitoring:** runtime completion triggered release run
+`34127543832`, which failed promptly while resolving its source. The real GitHub
+API reports the custom `Runtime production <sha>` title in both `name` and
+`display_title`, instead of the fixed workflow name expected by the initial
+fixtures. Routing now checks `.github/workflows/build-runtime.yml` or
+`.github/workflows/ci.yml` through `workflow_run.path`; the source remains bound
+to the explicit title and downloaded provenance. Regression fixtures use the
+observed shape and reject an unrelated path. The subsequent 37 local script
+tests, actionlint, policy and whitespace checks passed. Orchestration-only
+changes no longer allocate a native runtime assembly, avoiding an extra build
+while the already-authorized engine is compiling. Remote confirmation of this
+follow-up and engine/runtime completion remains pending at this snapshot.
+
 ## Executive assessment
 
 The repository implements the native application/install/update pipeline, a

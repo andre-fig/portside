@@ -47,6 +47,8 @@ addition to YAML path filters. Engine inputs trigger Wine compilation/cache reus
 wrapper/winetricks and app changes assemble using the recipe-selected engine.
 The engine workflow's push paths exclude assembly-only scripts, so those pushes
 cannot cancel an unrelated ongoing Wine build through engine concurrency.
+Release event routing and change-filter changes alone do not allocate native
+engine/runtime jobs; CI and local script tests validate that orchestration.
 
 Every app release requires successful CI and runtime assembly of the same
 `target_sha`. Completion of **either** CI or runtime starts a short Linux
@@ -57,7 +59,9 @@ starts the macOS app job. Failed/cancelled builds, skipped assembly and expired
 evidence cannot qualify; an older commit is never a substitute. Manual release
 fails promptly unless both prerequisites already exist; it never dispatches a build.
 
-Runtime `run-name` carries its actual checkout SHA because a `workflow_run`
+Event routing uses the stable workflow `path`, not the run `name`: GitHub can
+replace `name` with the custom execution title. Runtime `run-name` carries its
+actual checkout SHA because a `workflow_run`
 event can report a different default-branch head. Runtime detection, assembly
 and publication check out the engine event SHA. The release prerequisite job
 checks out its workflow's orchestration revision, resolves the source from the
