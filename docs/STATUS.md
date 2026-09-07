@@ -348,9 +348,9 @@ runtime was modified during these checks.
 
 ## Automatic runtime release follow-up — 2026-09-07 UTC
 
-**Implemented but not end-to-end validated:** user-authorized automatic runtime
-publication now uses successful same-source runtime assembly/publication and CI
-as its gate. The duplicate last-commit desktop/packaging filter is removed.
+**Verified automatic publication and discovery, scoped:** user-authorized automatic
+runtime publication now uses successful same-source runtime assembly/publication
+and CI as its gate. The duplicate last-commit desktop/packaging filter is removed.
 Wine/wrapper/winetricks/packaging changes and multi-commit pushes ending in docs
 can reach app publication and backend registration. Docs-only or skipped-runtime
 runs still cannot allocate a native app release. Completion checks remain one-shot
@@ -369,10 +369,46 @@ of the workflow gate against strict fake Actions evidence. Actionlint, shell
 syntax, runtime source audit, Wine/winetricks snapshot checks, lock/dependency
 JSON, production policy, documentation links and `git diff --check` passed.
 Swift/application code did not change; the earlier Swift test/build results
-remain scoped to the first-launch correction. The authorized push is pending.
-Hosted app signing/notarization, backend registration and rendered interactive
-Steam acceptance remain unverified at this snapshot. No everyday prefix or
-installed runtime is a validation fixture.
+remain scoped to the first-launch correction. The normal pre-push repeated 65
+tests with one Python 3.9 safe-extraction skip (the full Python 3.14 run passed
+all 65), lint and policy, then pushed `8b9c0a88` successfully. A read-only gate
+control against the original `56fc8b66` source selected CI `34144111993` and
+runtime `34144111927` with `ready=true`; it made no external writes.
+
+**Verified initial completion routing:** CI passed for `8b9c0a88`. Its automatic
+[release check 34146349458](https://github.com/andre-fig/portside/actions/runs/34146349458)
+finished in 12 seconds with `runtime_not_ready` and no native app allocation,
+while runtime preparation continued on Linux.
+
+**Verified runtime-to-release handoff:** [runtime run 34146313432](https://github.com/andre-fig/portside/actions/runs/34146313432)
+published `0.1.35`; Linux preparation took 4 minutes 40 seconds, native assembly
+4 minutes 13 seconds and Linux signing/publication 41 seconds. Prepared evidence
+matched source/run/version/bytes. Wine controls returned 0/37/23, real host prefix
+bootstrap returned 0 in 65.506 seconds, subsequent Windows commands returned
+37/23 and clean layout passed. No Wine compiler ran. Completion automatically
+started [release run 34147014277](https://github.com/andre-fig/portside/actions/runs/34147014277);
+its 17-second Linux gate accepted matching CI/runtime and allocated the native
+app job. No manual workflow dispatch was used.
+Before registration, read-only public discovery still returned runtime `0.1.26`
+and app `0.1.28`, confirming that upload alone had not updated customers.
+
+**Verified app publication and public discovery:** release `34147014277` completed
+successfully. Its macOS job took 7 minutes 47 seconds, including 5 minutes 4 seconds
+restoring the existing 2.6 GB Swift cache, 53 seconds compiling the app and 57
+seconds notarizing/stapling. Both Apple submissions returned `Accepted`, strict
+bundle verification and Gatekeeper assessment passed, and app `0.1.35` uploaded.
+Linux registration took 14 seconds and checked out `8b9c0a88`. A subsequent public
+API check returned runtime `0.1.35` bound to that commit with components matching
+the retained signed manifest, and the appcast announced app `0.1.35`. These results
+verify the entire automatic runtime-to-app publication/registration path, including
+a runtime change without a desktop change. Swift cache restoration remains a
+measured native-job cost; no Wine compilation or cross-workflow polling occurred.
+
+**Remaining acceptance limits:** the app's Developer ID/notarization result does
+not establish Developer ID signing of the separately downloaded Wine/runtime
+Mach-O files. Rendered interactive Steam acceptance and customer installation of
+this release remain unvalidated. No everyday prefix or installed runtime was used
+as a validation fixture.
 
 ## Executive assessment
 

@@ -306,7 +306,7 @@ record its replacement and update related docs; do not silently restore old beha
 ## D18 — Publish each validated runtime through the automatic app release
 
 - **Date:** September 7, 2026; explicitly requested after the runtime-only release gap.
-- **Status:** Implemented but not end-to-end validated; see [STATUS](STATUS.md).
+- **Status:** Verified by runtime `34146313432`, automatic app release `34147014277` and public discovery of `0.1.35`; graphical acceptance remains separate in [STATUS](STATUS.md).
 - **Decision:** Use actual successful CI and runtime assembly/publication for the
   same source as the release gate. Remove the separate desktop/packaging filter
   over only the final commit. Runtime component filters continue to control
