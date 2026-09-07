@@ -330,6 +330,21 @@ controls passed. Real host bootstrap completed in 14.567 seconds with subsequent
 archive preserved its extracted contents. Hosted Linux preparation/native handoff
 remains pending at this snapshot.
 
+**Verified hosted Linux preparation and native consumption:**
+[runtime run 34144111927](https://github.com/andre-fig/portside/actions/runs/34144111927)
+for source `56fc8b66` published runtime `0.1.34` successfully. Linux preparation
+took 4 minutes 23 seconds; macOS host build/validation took 3 minutes 24 seconds
+(previously 11 minutes 5 seconds); Linux manifest signing/publication took
+35 seconds. The macOS job was allocated only after the prepared artifact was
+available. Its receipt verification passed, all 34 Mach-O files passed platform
+checks, engine commands returned 0/37/23, and actual host prefix bootstrap
+returned 0 in 63.015 seconds with subsequent 37/23 exits. Clean layout passed.
+CI and completion routing passed; desktop/application publication jobs were
+correctly skipped for these runtime-automation-only changes. No Wine build was
+triggered by this follow-up. Application/backend promotion and rendered Steam
+acceptance remain separate, unperformed steps; no everyday prefix or installed
+runtime was modified during these checks.
+
 ## Executive assessment
 
 The repository implements the native application/install/update pipeline, a

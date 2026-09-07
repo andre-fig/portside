@@ -289,7 +289,7 @@ record its replacement and update related docs; do not silently restore old beha
 ## D17 — Prepare versioned runtime engine archives on Linux
 
 - **Date:** September 7, 2026.
-- **Status:** Implemented; native consumer/hosted follow-up validation recorded in [STATUS](STATUS.md).
+- **Status:** Verified in local fixtures and hosted run `34144111927`; timings and graphical/distribution limits are recorded in [STATUS](STATUS.md).
 - **Decision:** Fetch, verify and repackage the published engine in Linux runtime
   preparation, using the existing archive format and metadata normalization.
   Transfer an archive/metadata receipt bound to source, workflow and runtime
