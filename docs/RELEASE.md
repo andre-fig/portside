@@ -34,7 +34,7 @@ the YAML's `environment: production` alone does not prove required reviewers.
 | [CI](../.github/workflows/ci.yml)                                                  | Push/PR to `main`, except landing-only paths; production-source policy and runtime source-binding tests plus backend dependency installation, Prisma schema validation and build.                           | No Swift tests, backend unit tests, lint or typecheck job. Local hooks carry broader checks.                                                  |
 | [Build Desktop Validation](../.github/workflows/build-desktop.yml)                 | Successful CI on `main` with relevant desktop/packaging paths, or dispatch; arm64 app ZIP, DMG, dSYM and checksums, retained 14 days.                                      | Development bundle, ad hoc by default; no notarization or GUI acceptance.                                                                     |
 | Railway connector                                                                  | Provider-side deployment of the Landing service from `main`; local pre-push runs Bun lint, typecheck and build before publication.                                         | External to GitHub Actions; service variables, domains and the deployed revision remain provider-side state.                                  |
-| [Build Portside Engine](../.github/workflows/build-engine.yml)                     | Relevant `main` changes or dispatch; Combined Linux detection/preflight, `macos-15` Wine build/validation, then Linux storage upload and 30-day evidence.                                                            | Independent source engine; no app release or runtime manifest.                                                                                |
+| [Build Portside Engine](../.github/workflows/build-engine.yml)                     | Relevant `main` changes or dispatch; Pre-push compiles locally; Linux verifies the uploaded input, macOS runs short execution checks, then Linux publishes with 30-day evidence.                                                            | Independent source engine; no app release or runtime manifest.                                                                                |
 | [Build Portside Runtime](../.github/workflows/build-runtime.yml)                   | Assembly changes or successful engine workflow; dispatch requires runtime version and artifact URL prefix. Combined Linux detection/preflight, macOS assembly/validation, then Linux manifest signing and storage upload.  | Uses existing engine; one-day assembly handoff, full and metadata-only evidence retained 30 days. No backend manifest registration here.                               |
 | [Release Portside](../.github/workflows/release-production.yml)                    | CI or runtime completion on `main` rechecks both prerequisites for the same source; existing app/runtime-host/packaging filter or explicit main dispatch applies.                                               | Configured app, signature, notarization, upload, then backend runtime and app registration. Automatic publication, not gated by GUI workflow. |
 | [Validate Clean Portside Runtime](../.github/workflows/validate-clean-install.yml) | Dispatch with selected current/optional previous runtime artifact; self-hosted macOS arm64 GUI session.                                                                    | Operator-assisted test. Script needs an interactive terminal to confirm checks; otherwise it exits 2 without accepting GUI success.           |
@@ -43,10 +43,11 @@ the YAML's `environment: production` alone does not prove required reviewers.
 
 Engine/assembly change decisions come from
 [changed-components.sh](../scripts/build-runtime/changed-components.sh), in
-addition to YAML path filters. Engine inputs trigger Wine compilation/cache reuse;
+addition to YAML path filters. Engine inputs trigger local pre-push Wine compilation/cache reuse;
 wrapper/winetricks and app changes assemble using the recipe-selected engine.
-The engine workflow's push paths exclude assembly-only scripts, so those pushes
-cannot cancel an unrelated ongoing Wine build through engine concurrency.
+The engine workflow never invokes the Wine compiler. Its push paths exclude
+assembly-only scripts. Missing local input fails on Linux before macOS allocation;
+there is no remote compilation or active waiting fallback.
 Release event routing and change-filter changes alone do not allocate native
 engine/runtime jobs; CI and local script tests validate that orchestration.
 
@@ -75,7 +76,10 @@ requires explicit manual dispatch. Read-only GitHub API checks use `actions: rea
 flowchart LR
     C[CI on Linux] --> D[Desktop validation on macOS]
     C --> Q[Check both prerequisites once on Linux]
-    E[Wine build and execution on macOS] --> P[Engine publication on Linux]
+    L[Local pre-push Wine build and cache] --> I[Unpublished build input upload]
+    I --> E[Linux source and checksum verification]
+    E --> V[Short native execution checks on macOS]
+    V --> P[Engine publication on Linux]
     P --> R[Runtime assembly and execution on macOS]
     R --> S[Manifest signing and runtime publication on Linux]
     S --> Q
@@ -84,7 +88,7 @@ flowchart LR
     A --> B[Backend registration on Linux]
 ```
 
-Native jobs upload only named archives, checksums and provenance/SBOM, excluding
+Artifact transfers include only named archives, checksums and provenance/SBOM, excluding
 `work/`, compiler objects, extracted trees and caches. Already-compressed archives
 use artifact compression level zero. The runtime handoff expires after one day;
 final runtime metadata/evidence and engine evidence expire after 30 days.
@@ -94,15 +98,48 @@ workflow run before Linux signing/upload. It does not replace native Wine
 execution, bootstrap/layout checks, manifest authentication or final Developer ID
 acceptance. The temporary manifest private key is removed on job completion.
 
-Engine cache keys include runner/target architecture, observed macOS/Xcode/Clang
-and Homebrew tool versions plus recipe/dependency hashes. There is no broad
-restore-key fallback to an incompatible installed tree. A cold build must finish
-before a reusable complete install cache exists; cancelled partial compilation
-is not retained. Runtime assembly installs only its missing storage client, not
-the Wine compilation toolchain. Ubuntu 24.04 supplies AWS CLI; jobs verify tools
-before publication. This changes runner allocation, not production destinations
-or the qualifying app-change filter. Apple notarization still uses `notarytool
---wait` inside the native app job; it is a separate service dependency.
+Wine compilation now runs locally through
+[prepare-engine-push.py](../scripts/build-runtime/prepare-engine-push.py), invoked
+by the pre-push hook only for engine-changing outgoing `main` commits. It exports
+the exact outgoing Git revision, builds in an owned disposable source tree and
+reuses the existing local source/toolchain-qualified Wine install cache. A
+completed input for the same commit is reused on push retries. Ordinary app,
+docs and routing-only changes do not compile Wine. GitHub-hosted engine cache
+restore/save and compiler-tool installation were removed.
+
+Before pushing, configure AWS CLI and the existing `PORTSIDE_PUBLIC_BUCKET`,
+`PORTSIDE_S3_ACCESS_KEY_ID`, `PORTSIDE_S3_SECRET_ACCESS_KEY`, `PORTSIDE_S3_REGION`
+and `PORTSIDE_S3_ENDPOINT` variables through an approved local secret provider.
+Only variable names belong in this repository. Missing transfer configuration
+blocks the push before expensive compilation. The hook uploads only unpublished
+input under `runtime/build-inputs/engines/<source-sha>/<engine-version>/` in the
+existing bucket; this is not a client download route or a new product channel.
+The validated engine storage key and production destinations remain unchanged.
+Build input retention is separate from installed runtimes; no user runtime or
+prefix is a cleanup target.
+
+[engine-input.py](../scripts/build-runtime/engine-input.py) rechecks exact Wine
+commit/snapshot, recipe-derived identity, producer source commit, SHA-256 and
+size on Linux. A macOS job with a ten-minute cap uses Python 3.12 safe tar
+extraction and executes the real x64/x86 controls in a disposable prefix. Its
+receipt binds this workflow run to both metadata files and the archive hash.
+Linux publication requires that receipt; locally claimed build provenance alone
+cannot publish through CI. Original local producer identity remains in metadata.
+Production keys are not passed into the local compilation subprocess.
+
+The compile-only review command below creates a local input without uploading
+or pushing; the normal pre-push invocation always requires a successful handoff:
+
+```sh
+python3 scripts/build-runtime/prepare-engine-push.py --build-only BASE_SHA OUTGOING_SHA
+```
+
+Runtime assembly installs only its missing storage client, not the Wine compiler
+toolchain. Ubuntu 24.04 supplies AWS CLI and jobs verify tools before publication.
+App signing/notarization and runtime assembly remain native jobs; Apple
+notarization still uses `notarytool --wait`. This change preserves the qualifying
+app-change filter and does not establish graphical Steam or Developer ID runtime
+acceptance.
 
 ## Application release sequence
 

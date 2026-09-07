@@ -45,7 +45,7 @@ def check_archive(root, name, metadata):
     require(digest.hexdigest() == metadata["sha256"], "Publication archive checksum mismatch")
 
 
-def validate_engine(root, sha, run_id):
+def validate_engine_metadata(root, sha, run_id):
     metadata = read_json(root, "engine-metadata.json")
     provenance = read_json(root, "engine-provenance.json")
     check_build(metadata["build"]["portsideCommit"], metadata["build"]["id"], sha, run_id)
@@ -61,6 +61,34 @@ def validate_engine(root, sha, run_id):
     require(provenance["artifact"] == {key: artifact[key] for key in ("fileName", "size", "sha256")},
             "Engine archive provenance mismatch")
     check_archive(root, name, artifact)
+
+
+def validate_local_engine(root, sha, expected):
+    validate_engine_metadata(root, sha, "local-" + sha)
+    metadata = read_json(root, "engine-metadata.json")
+    require(metadata["build"].get("producer") == "local-pre-push", "Expected a local source build")
+    require(metadata["engineVersion"] == expected["engineVersion"]
+            and metadata["source"]["commit"] == expected["sourceCommit"]
+            and metadata["source"]["snapshotChecksum"] == expected["sourceSnapshotChecksum"]
+            and metadata["artifact"]["fileName"] == expected["archiveName"]
+            and metadata["artifact"]["storageKey"] == expected["archiveKey"],
+            "Local engine does not match the checked-out Wine source and recipe")
+
+
+def validate_engine(root, sha, run_id):
+    metadata = read_json(root, "engine-metadata.json")
+    if metadata["build"].get("producer") != "local-pre-push":
+        validate_engine_metadata(root, sha, run_id)
+        return
+    validate_engine_metadata(root, sha, "local-" + sha)
+    receipt = read_json(root, "engine-validation.json")
+    check_build(receipt["portsideCommit"], receipt["buildId"], sha, run_id)
+    require(receipt["kind"] == "PortsideEngineNativeValidation"
+            and receipt["engineVersion"] == metadata["engineVersion"]
+            and receipt["archiveSha256"] == metadata["artifact"]["sha256"]
+            and receipt["engineMetadataSha256"] == hashlib.sha256((root / "engine-metadata.json").read_bytes()).hexdigest()
+            and receipt["engineProvenanceSha256"] == hashlib.sha256((root / "engine-provenance.json").read_bytes()).hexdigest(),
+            "Local engine lacks matching native validation from this workflow run")
 
 
 def validate_runtime(root, sha, run_id):

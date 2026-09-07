@@ -42,8 +42,9 @@ jq -n \
     --arg macOS "$macos_version" \
     --arg xcode "$xcode_version" \
     --arg clang "$clang_version" \
+    --arg producer "${PORTSIDE_ENGINE_PRODUCER:-github-actions}" \
     --argjson freetype "$freetype_source" \
-    '{schemaVersion: 1, kind: "PortsideRuntimeEngine", engineVersion: $engineVersion, source: {repository: "https://github.com/Sikarugir-App/wine", commit: $sourceCommit, snapshotChecksum: $sourceSnapshotChecksum}, dependencies: [$freetype], artifact: {fileName: $archiveName, storageKey: $archiveKey, sha256: $archiveSHA256, size: ($archiveSize|tonumber)}, build: {id: $buildId, portsideCommit: $portsideCommit, targetArchitecture: "x86_64", macOS: $macOS, xcode: $xcode, clang: $clang}}' \
+    '{schemaVersion: 1, kind: "PortsideRuntimeEngine", engineVersion: $engineVersion, source: {repository: "https://github.com/Sikarugir-App/wine", commit: $sourceCommit, snapshotChecksum: $sourceSnapshotChecksum}, dependencies: [$freetype], artifact: {fileName: $archiveName, storageKey: $archiveKey, sha256: $archiveSHA256, size: ($archiveSize|tonumber)}, build: {id: $buildId, producer: $producer, portsideCommit: $portsideCommit, targetArchitecture: "x86_64", macOS: $macOS, xcode: $xcode, clang: $clang}}' \
     > "$BUILD_DIR/engine-metadata.json"
 
 jq -n \

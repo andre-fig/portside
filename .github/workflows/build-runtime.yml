@@ -77,7 +77,7 @@ jobs:
             if [ "$WORKFLOW_RUN_BRANCH" = main ] && [ "$WORKFLOW_RUN_CONCLUSION" = success ]; then
               # A real build, not a skipped change-filter run. This also handles
               # recipes changed before the final commit of a multi-commit push.
-              assemble_runtime="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ENGINE_RUN_ID}/jobs?filter=latest&per_page=100" --jq '[.jobs[] | select((.name == "Build and validate persistent Wine engine" or .name == "Build and publish persistent Wine engine") and .conclusion == "success")] | length == 1')"
+              assemble_runtime="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ENGINE_RUN_ID}/jobs?filter=latest&per_page=100" --jq '[.jobs[] | select((.name == "Validate locally built Wine engine" or .name == "Build and validate persistent Wine engine" or .name == "Build and publish persistent Wine engine") and .conclusion == "success")] | length == 1')"
             fi
           else
             runtime_changed=false

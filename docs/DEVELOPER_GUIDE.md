@@ -11,7 +11,7 @@ boundaries; [PROJECT_GUIDE](PROJECT_GUIDE.md) maps scripts and configuration.
 | Desktop and runtime host | macOS 13+, Swift tools 6.0 packages; supported runtime target is Apple silicon                           |
 | Backend                  | Node 22 in Docker/CI, npm with committed package-lock                                                    |
 | Landing                  | Bun 1.2.21 in local pre-push and Railway build, committed bun.lock                                      |
-| Wine                     | macOS/Xcode, Homebrew dependencies described by upstream/dependencies.json; record actual build versions |
+| Wine                     | Local macOS/Xcode build before engine-changing pushes, Homebrew compiler dependencies and AWS CLI for input handoff; record actual build versions |
 | Source/policy checks     | POSIX shell, Git, ripgrep, jq; actionlint for workflows                                                  |
 
 These are source configuration facts, not claims about tools installed on a
@@ -34,7 +34,10 @@ forbids configuration changes. Hook behavior and the complete check matrix are
 in [TESTING](TESTING.md). Workflow edits require local `actionlint`; the hooks
 check staged shell/JSON/Python/workflow syntax before commit and select both Swift
 suites/builds, script regressions or web checks before push. Production trust
-checks still run independently on Linux.
+checks still run independently on Linux. Engine-changing pushes also prepare
+and transfer the source-built engine locally; [RELEASE](RELEASE.md) lists the
+required storage variable names. Keep their values in an approved secret provider,
+not shell scripts, Git, logs or artifacts.
 
 ## Local application entry points
 

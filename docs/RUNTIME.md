@@ -60,13 +60,15 @@ An explicit arm64 target is rejected. Wine's upstream tests are disabled, but
 [validate-engine-execution.py](../scripts/build-runtime/validate-engine-execution.py)
 must execute both PE architectures in a disposable symlinked prefix before
 packaging and again after archive extraction. `wine --version` alone is insufficient.
-A local
-cache can reuse an install tree; a matching cache is an optimization, not the
-durable engine source. GitHub cache identity includes runner/target architecture,
-observed macOS/Xcode/Clang/Homebrew versions and recipe/dependency hashes, without
-broad restore-key fallback. The recipe also checks its own cache signature. This
-is a complete install cache, not resumable partial compilation. Native jobs retain
-only archives/checksums/provenance, excluding temporary build and extraction trees.
+The pre-push hook builds engine-changing outgoing `main` commits locally from a
+clean Git export. Its persistent Wine install cache retains the existing recipe,
+dependency, architecture, build flags and observed macOS/Xcode/Clang checks.
+A successful input for the same outgoing commit can be reused on retry. This is
+a complete install cache, not resumable partial compilation. GitHub does not
+compile Wine or restore a compiler cache; it verifies the local input and runs
+short x64/x86 execution controls after safe extraction, before Linux publication.
+See [RELEASE](RELEASE.md) for local storage configuration and the unpublished
+build-input namespace. No generated binaries enter Git.
 
 [build-freetype.sh](../scripts/build-runtime/build-freetype.sh) builds the pinned,
 SHA-256-verified FreeType source for x86_64. The engine includes its dylib and
@@ -137,9 +139,12 @@ manifest signing and upload to the single configured production bucket.
 [validate-publication.py](../scripts/build-runtime/validate-publication.py)
 rechecks source/run identity, SHA-256 and size before signing transferred bytes.
 The temporary assembly artifact expires after one day; final evidence after 30.
-Only the native engine build installs Wine compiler dependencies; assembly needs
-the storage client and tools already supplied by the macOS image. The engine
-workflow likewise publishes its validated archives from Linux. Manifest
+Only the developer's local engine build needs the Wine compiler dependencies;
+assembly needs the storage client and tools supplied by the macOS image. The engine
+workflow likewise publishes from Linux after a native receipt binds the local
+archive/metadata to the validating workflow run. Producer metadata retains
+`local-pre-push` and its outgoing source revision; it is not relabeled as a
+GitHub-compiled binary. Manifest
 URLs use `/v1/runtime/artifacts/production/<fileName>` on the Portside API,
 which validates the production channel and filename before returning a temporary
 signed storage URL. This runtime route is public and does not check license

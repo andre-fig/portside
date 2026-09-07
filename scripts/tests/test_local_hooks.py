@@ -74,6 +74,10 @@ esac
     def test_docs_and_deleted_json_do_not_start_component_builds(self):
         self.assertEqual(self.push(["docs/RELEASE.md", "deleted.json"]), "")
 
+    def test_engine_recipe_push_prepares_source_locally(self):
+        calls = self.push(["scripts/build-runtime/build-wine-engine.sh"])
+        self.assertIn("python3 scripts/build-runtime/prepare-engine-push.py " + "b" * 40 + " " + "a" * 40, calls)
+
 
 if __name__ == "__main__":
     unittest.main()

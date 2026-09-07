@@ -266,3 +266,22 @@ record its replacement and update related docs; do not silently restore old beha
   both gates. A cold native build remains necessary and Apple notarization still
   waits within its native job. No new production destination or app-change
   trigger is introduced. See [RELEASE](RELEASE.md) and [TESTING](TESTING.md).
+
+## D16 — Compile Wine locally before engine-changing pushes
+
+- **Date:** September 7, 2026; explicit user correction after observing the cold hosted build.
+- **Status:** Implemented but not end-to-end validated; local handoff configuration is required.
+- **Decision:** Move Wine compilation/cache reuse into pre-push for outgoing main
+  revisions. Export committed source into a disposable build tree; upload only
+  unpublished build inputs to the existing bucket. GitHub verifies source/hash
+  identity on Linux, performs short native execution checks on macOS and publishes
+  from Linux only after matching native proof. No remote compiler fallback exists.
+- **Reason:** Removing an idle runner did not address the long hosted Wine compile.
+  The sole developer explicitly requested that expensive work occur locally.
+- **Consequences:** This supersedes D15's hosted Wine compilation placement.
+  Local compute/toolchain and storage credentials become pre-push prerequisites;
+  missing credentials fail before compilation, and missing input fails promptly
+  in CI. Build provenance preserves the local producer and exact source SHA;
+  the CI receipt separately records validation. Ordinary app changes reuse the
+  validated engine. Production manifest signing and publication remain in CI.
+  No user prefix/runtime data or system trust setting is modified.

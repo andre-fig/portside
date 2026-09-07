@@ -208,6 +208,42 @@ changes no longer allocate a native runtime assembly, avoiding an extra build
 while the already-authorized engine is compiling. Remote confirmation of this
 follow-up and engine/runtime completion remains pending at this snapshot.
 
+## Local Wine compilation correction — 2026-09-07 UTC
+
+**Verified, scoped:** after approximately 30 minutes in the engine build stage,
+user feedback explicitly required local compilation before push. Run
+`34127517724` was cancelled by this task and confirmed completed/cancelled. Its
+follow-up runtime run `34130805583` skipped native assembly; release routing
+completed successfully. No engine or runtime was published by that cancelled
+build. The previous optimization removed idle waiting but did not remove the
+long hosted compile; it was insufficient for the user's cost/time requirement.
+
+**Implemented but not end-to-end validated:** the revised pre-push exports the
+outgoing committed source, builds/caches Wine locally and uploads unpublished
+inputs to the existing bucket. GitHub engine automation contains no Wine compiler
+invocation or compiler/cache setup. Linux checks exact source/recipe, size and
+checksum; a ten-minute native job performs safe extraction and x64/x86 execution;
+Linux publication requires its receipt bound to the archive and metadata bytes.
+Missing input fails immediately instead of waiting or compiling remotely.
+Ordinary app/docs/routing changes do not compile Wine locally.
+
+**Local checks:** 46 Python script tests passed with Python 3.14, including missing
+transfer configuration before compilation, local input without native CI proof,
+wrong recipe/source, tampered proof/metadata, unsafe archive extraction and local
+hook routing. AWS CLI was installed locally for the input handoff. Existing local
+Wine cache and the previously compiled x86_64 engine remain preserved. No everyday
+prefix, installed runtime, game, save or credential was changed. Gatekeeper and
+quarantine checks remain intact; the local AWS CLI installation added its Homebrew
+dependencies and upgraded OpenSSL as required by that package.
+
+**Pending configuration/validation at this snapshot:** no local storage variables,
+AWS profile, backend environment file or release-secret directory was configured
+when inspected. The user was asked only for the secret provider/location, not to
+paste secret values. Actual local input upload and the revised GitHub consumer
+cannot complete until that configuration is available. Local source preparation,
+full workflow/static review and documentation remain subject to the final checks
+recorded in the subsequent completion message; no remote compile will be restarted.
+
 ## Executive assessment
 
 The repository implements the native application/install/update pipeline, a

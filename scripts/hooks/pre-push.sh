@@ -5,12 +5,17 @@ ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 changed_files=""
+engine_pushes=""
 has_push=false
 
 while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
     [ -n "${local_ref:-}" ] || continue
     [ "$local_ref" = delete ] && continue
     has_push=true
+    if [ "$remote_ref" = refs/heads/main ]; then
+        engine_pushes="$engine_pushes
+$remote_sha $local_sha"
+    fi
 
     if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
         files="$(git ls-tree -r --name-only "$local_sha")"
@@ -124,6 +129,13 @@ fi
 
 if has_path '^(\.github/workflows/|apps/backend/|apps/desktop/|apps/runtime-host/|runtime/|vendor/|upstream/|scripts/)'; then
     ./scripts/validate-production-policy.sh
+fi
+
+if has_path '^(vendor/wine/|upstream/(lock|dependencies)\.json$|upstream/patches/|scripts/build-runtime/|scripts/publish_engine\.sh$|\.github/workflows/build-engine\.yml$)'; then
+    printf '%s\n' "$engine_pushes" | while IFS=' ' read -r engine_base engine_head; do
+        [ -n "${engine_head:-}" ] || continue
+        python3 scripts/build-runtime/prepare-engine-push.py "$engine_base" "$engine_head"
+    done
 fi
 
 echo "Targeted pre-push checks passed."

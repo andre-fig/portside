@@ -31,6 +31,11 @@ skipped engine-dependent assembly, expired artifacts, wrong source/run provenanc
 and disagreeing manifests. They also cover both completion orders, duplicate
 publication suppression, separate native/Linux runtime jobs, archive corruption,
 wrong workflow/source evidence, symlinks and local hook selection/index behavior.
+Local producer tests additionally reject missing native CI receipts, mismatched
+recipe/source inputs and changed metadata after validation. They check that
+ordinary pushes need no transfer configuration and missing configuration fails
+before compilation. Safe tar extraction tests require `tarfile.data_filter`;
+use Python 3.12+ locally for the full suite (the native CI job pins Python 3.12).
 `actionlint .github/workflows/*.yml` checks wiring;
 no workflow dispatch is required for these local checks.
 
@@ -108,6 +113,7 @@ when committing/pushing workflows; missing tools fail with setup guidance.
 | --- | --- |
 | Desktop, runtime host, wrapper template or wrapper build script | Both Swift suites and builds |
 | Workflows or scripts | Release/publication/hook regression tests; workflow lint and shell/Python syntax when relevant |
+| Engine inputs pushed to `main` | Build exact committed sources locally with compatible Wine cache; validate and upload unpublished input before Git sends the commit |
 | Backend | Prisma schema, typecheck, lint, tests and build |
 | Landing | Lint, typecheck and build |
 | Runtime, application, backend, upstream, scripts or workflows | Production source policy |
@@ -122,8 +128,10 @@ replace release trust checks.
 
 Current [CI](../.github/workflows/ci.yml) retains production policy, these Python
 regressions and backend schema/build on Linux. Swift tests, backend unit tests and
-the whole local matrix are not GitHub release gates. Native packaging, Wine
-execution, signing and notarization remain macOS jobs; completing a dependency
+the whole local matrix are not GitHub release gates. Wine compilation happens
+locally before engine-changing pushes. CI's native
+engine job only checks extracted x64/x86 execution and has a ten-minute cap;
+packaging, signing and notarization remain macOS jobs; completing a dependency
 is handled by GitHub events/`needs`, without an allocated runner polling another
 workflow. [RELEASE](RELEASE.md) describes exact ordering and remaining Apple wait.
 
