@@ -50,7 +50,10 @@ for tool in clang clang++ make tar shasum; do
 done
 
 native_arch="$(uname -m)"
-target_arch="${PORTSIDE_WINE_ARCH:-$native_arch}"
+# This source tree's Darwin loader uses a low-address, 4 KiB layout. It is
+# not an arm64 macOS CPU-emulation backend for Windows x86 Steam. Build the
+# Unix engine for x86_64 (Rosetta on Apple silicon); native build tools stay native.
+target_arch="${PORTSIDE_WINE_ARCH:-x86_64}"
 jobs="${PORTSIDE_BUILD_JOBS:-$(sysctl -n hw.ncpu)}"
 wine_version="$(tr -d '[:space:]' < "$SOURCE_DIR/VERSION")"
 host="${target_arch}-apple-darwin"
@@ -64,7 +67,7 @@ target_cxxflags="${PORTSIDE_WINE_CXXFLAGS:--O2 -arch $target_arch}"
 target_ldflags="${PORTSIDE_WINE_LDFLAGS:--arch $target_arch}"
 
 case "$native_arch:$target_arch" in
-    arm64:arm64|x86_64:x86_64|arm64:x86_64) ;;
+    x86_64:x86_64|arm64:x86_64) ;;
     *) echo "unsupported Portside Wine architecture pair: $native_arch -> $target_arch" >&2; exit 1 ;;
 esac
 
@@ -72,7 +75,8 @@ wine_snapshot_checksum="$(jq -r '.repositories[] | select(.name == "wine") | .sn
 macos_version="$(sw_vers -productVersion 2>/dev/null || uname -s)"
 xcode_version="$(xcodebuild -version 2>/dev/null | tr '\n' ';' || true)"
 clang_version="$(clang --version | head -n 1)"
-cache_signature="$wine_version|$wine_snapshot_checksum|$native_arch|$target_arch|$native_cflags|$native_cxxflags|$native_ldflags|$target_cflags|$target_cxxflags|$target_ldflags|$macos_version|$xcode_version|$clang_version"
+recipe_checksum="$(cat "$0" "$ROOT_DIR/scripts/build-runtime/build-freetype.sh" "$ROOT_DIR/upstream/dependencies.json" | shasum -a 256 | awk '{print $1}')"
+cache_signature="$recipe_checksum|$wine_version|$wine_snapshot_checksum|$native_arch|$target_arch|$native_cflags|$native_cxxflags|$native_ldflags|$target_cflags|$target_cxxflags|$target_ldflags|$macos_version|$xcode_version|$clang_version"
 
 package_engine() {
     ENGINE_STAGE="$WORK_DIR/PortsideWineEngine-$VERSION"
@@ -80,6 +84,7 @@ package_engine() {
     cp -R "$INSTALL_ROOT/bin" "$ENGINE_STAGE/"
     cp -R "$INSTALL_ROOT/lib" "$ENGINE_STAGE/"
     cp -R "$INSTALL_ROOT/share/wine" "$ENGINE_STAGE/share-wine"
+    "$ROOT_DIR/scripts/build-runtime/validate-engine-execution.py" "$INSTALL_ROOT"
     printf 'Wine %s\nPortside build target: %s\nWoW64 PE architectures: i386,x86_64\n' "$wine_version" "$target_arch" > "$ENGINE_STAGE/version"
     rm -f "$ARCHIVE"
     "$ROOT_DIR/scripts/build-runtime/create-archive.sh" "$ARCHIVE" "$WORK_DIR" "PortsideWineEngine-$VERSION"
@@ -134,9 +139,13 @@ make -j"$jobs" \
 rm -rf "$BUILD_TREE"
 mkdir -p "$BUILD_TREE"
 cd "$BUILD_TREE"
-export CFLAGS="$target_cflags ${FREETYPE_CPPFLAGS:-}"
-export CXXFLAGS="$target_cxxflags ${FREETYPE_CPPFLAGS:-}"
-export LDFLAGS="$target_ldflags ${FREETYPE_LDFLAGS:-}"
+"$ROOT_DIR/scripts/build-runtime/build-freetype.sh"
+target_freetype="$BUILD_DIR/work/freetype/install"
+export FREETYPE_CFLAGS="-I$target_freetype/include/freetype2"
+export FREETYPE_LIBS="-L$target_freetype/lib -lfreetype"
+export CFLAGS="$target_cflags"
+export CXXFLAGS="$target_cxxflags"
+export LDFLAGS="$target_ldflags"
 "$SOURCE_COPY/configure" \
     --build="$(uname -m)-apple-darwin" \
     --host="$host" \
@@ -147,6 +156,10 @@ export LDFLAGS="$target_ldflags ${FREETYPE_LDFLAGS:-}"
     --disable-tests
 make -j"$jobs"
 make install
+cp -L "$target_freetype/lib/libfreetype.6.dylib" "$INSTALL_ROOT/lib/wine/x86_64-unix/"
+install_name_tool -id '@rpath/libfreetype.6.dylib' "$INSTALL_ROOT/lib/wine/x86_64-unix/libfreetype.6.dylib"
+mkdir -p "$INSTALL_ROOT/share/wine/licenses/freetype"
+cp "$target_freetype/licenses/"* "$INSTALL_ROOT/share/wine/licenses/freetype/"
 
 [ -x "$INSTALL_ROOT/bin/wine" ] || { echo "Wine build did not produce bin/wine" >&2; exit 1; }
 [ -x "$INSTALL_ROOT/bin/wineserver" ] || { echo "Wine build did not produce bin/wineserver" >&2; exit 1; }

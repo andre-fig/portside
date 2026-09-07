@@ -27,6 +27,7 @@ build_id="${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}"
 macos_version="$(sw_vers -productVersion 2>/dev/null || uname -s)"
 xcode_version="$(xcodebuild -version 2>/dev/null | tr '\n' ';' || true)"
 clang_version="$(clang --version | head -n 1)"
+freetype_source="$(jq -c '.dependencies[] | select(.name == "freetype") | {name, version, origin, sha256, license}' "$ROOT_DIR/upstream/dependencies.json")"
 
 jq -n \
     --arg engineVersion "$ENGINE_VERSION" \
@@ -41,7 +42,8 @@ jq -n \
     --arg macOS "$macos_version" \
     --arg xcode "$xcode_version" \
     --arg clang "$clang_version" \
-    '{schemaVersion: 1, kind: "PortsideRuntimeEngine", engineVersion: $engineVersion, source: {repository: "https://github.com/Sikarugir-App/wine", commit: $sourceCommit, snapshotChecksum: $sourceSnapshotChecksum}, artifact: {fileName: $archiveName, storageKey: $archiveKey, sha256: $archiveSHA256, size: ($archiveSize|tonumber)}, build: {id: $buildId, portsideCommit: $portsideCommit, macOS: $macOS, xcode: $xcode, clang: $clang}}' \
+    --argjson freetype "$freetype_source" \
+    '{schemaVersion: 1, kind: "PortsideRuntimeEngine", engineVersion: $engineVersion, source: {repository: "https://github.com/Sikarugir-App/wine", commit: $sourceCommit, snapshotChecksum: $sourceSnapshotChecksum}, dependencies: [$freetype], artifact: {fileName: $archiveName, storageKey: $archiveKey, sha256: $archiveSHA256, size: ($archiveSize|tonumber)}, build: {id: $buildId, portsideCommit: $portsideCommit, targetArchitecture: "x86_64", macOS: $macOS, xcode: $xcode, clang: $clang}}' \
     > "$BUILD_DIR/engine-metadata.json"
 
 jq -n \
@@ -53,7 +55,8 @@ jq -n \
     --arg archiveSize "$archive_size" \
     --arg buildId "$build_id" \
     --arg portsideCommit "$PORTSIDE_COMMIT" \
-    '{schemaVersion: 1, kind: "PortsideRuntimeEngine", sourcePolicy: "checked-in vendor/wine only; no compiled upstream input", engineVersion: $engineVersion, buildId: $buildId, portsideCommit: $portsideCommit, source: {repository: "https://github.com/Sikarugir-App/wine", commit: $sourceCommit, snapshotChecksum: $sourceSnapshotChecksum}, artifact: {fileName: $archiveName, sha256: $archiveSHA256, size: ($archiveSize|tonumber)}}' \
+    --argjson freetype "$freetype_source" \
+    '{schemaVersion: 1, kind: "PortsideRuntimeEngine", sourcePolicy: "Wine from checked-in vendor/wine; checksum-pinned FreeType source; no compiled upstream input", engineVersion: $engineVersion, buildId: $buildId, portsideCommit: $portsideCommit, dependencies: [$freetype], source: {repository: "https://github.com/Sikarugir-App/wine", commit: $sourceCommit, snapshotChecksum: $sourceSnapshotChecksum}, artifact: {fileName: $archiveName, sha256: $archiveSHA256, size: ($archiveSize|tonumber)}}' \
     > "$BUILD_DIR/engine-provenance.json"
 
 printf '%s\n' "$archive_sha256  $ARCHIVE_NAME" > "$BUILD_DIR/$ARCHIVE_NAME.sha256"

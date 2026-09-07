@@ -46,17 +46,29 @@ Rosetta and Steam therefore remain external installation dependencies.
 
 [build-engine.sh](../scripts/build-runtime/build-engine.sh) produces a persistent
 engine using the local Wine snapshot. [resolve-engine.sh](../scripts/build-runtime/resolve-engine.sh)
-derives `wine-<WineVersion>-<first-12-commit-characters>` and storage prefix
+derives `wine-<WineVersion>-<first-12-commit-characters>-x86_64-<recipe-hash>` and storage prefix
 `runtime/engines/validated/<engine-version>/`. Metadata binds the archive name,
 storage key, size, SHA-256, Wine commit/snapshot checksum, Portside commit,
 build ID and observed compiler/Xcode/macOS information.
 
-The Wine recipe builds native tools first, then a macOS engine with i386 and
-x86_64 PE support. Supported host/target pairs in the script are arm64/arm64,
-x86_64/x86_64 and arm64/x86_64; the workflow uses `macos-15` and defaults to the
-host architecture. Wine's upstream tests are explicitly disabled. A local
+The Wine recipe builds native tools first, then an **x86_64** macOS engine with
+i386 and x86_64 PE support. Supported host/target pairs are x86_64/x86_64 and
+arm64/x86_64; the workflow uses `macos-15`. Apple silicon runs the engine through
+Rosetta. The tracked Wine Darwin loader's low-address layout cannot execute as
+arm64 on the tested macOS; see [the first-launch investigation](STEAM_FIRST_LAUNCH_FIX.md).
+An explicit arm64 target is rejected. Wine's upstream tests are disabled, but
+[validate-engine-execution.py](../scripts/build-runtime/validate-engine-execution.py)
+must execute both PE architectures in a disposable symlinked prefix before
+packaging and again after archive extraction. `wine --version` alone is insufficient.
+A local
 cache can reuse an install tree; a matching cache is an optimization, not the
-durable engine source.
+durable engine source. Its cache identity includes the recipe and dependency lock.
+
+[build-freetype.sh](../scripts/build-runtime/build-freetype.sh) builds the pinned,
+SHA-256-verified FreeType source for x86_64. The engine includes its dylib and
+license notices. It uses FreeType's internal gzip inflater; optional PNG,
+Brotli, bzip2 and HarfBuzz integrations are not included. Homebrew supplies
+native build tools, not a host-architecture font library for the target engine.
 
 [build.sh](../scripts/build-runtime/build.sh) audits input presence, builds the
 wrapper, fetches the engine matching the lockfile from Portside storage,
@@ -70,14 +82,16 @@ Build outputs include unsigned manifest, archive checksums,
 both the persistent engine checksum and the repackaged runtime checksum.
 [create-archive.sh](../scripts/build-runtime/create-archive.sh) normalizes
 staged timestamps, ownership and macOS metadata; byte-identical reproducibility
-has not been demonstrated by this audit. The SPDX document inventories three
-main packages; it is not evidence of a complete transitive dependency audit.
+has not been demonstrated by this audit. The SPDX document inventories the
+wrapper, Wine, winetricks and bundled FreeType; it is not evidence of a complete
+transitive dependency audit.
 
 Important limits visible in the code:
 
-- Homebrew workflow steps install available formulas and print versions; they
-  do not enforce the versions or source checksums in the dependency JSON.
-- The persistent key omits architecture, toolchain and patch identity.
+- Homebrew workflow steps install available native tools and print versions;
+  only the newly source-built FreeType dependency enforces its archive checksum.
+- The persistent key includes target architecture and recipe/dependency identity,
+  but not the observed compiler version or a future applied patch set.
   [publish_engine.sh](../scripts/publish_engine.sh) uses ordinary `aws s3 cp`,
   without a conditional write preventing replacement of an existing key.
   Versioned naming alone does not prove immutable storage.
@@ -149,7 +163,15 @@ It applies the baseline and moves the previous wrapper into a rollback folder
 before moving the candidate into place. The installed wrapper's
 `Contents/SharedSupport/prefix` symlinks to the persistent managed prefix.
 Existing managed prefixes are reused; new ones use `wineboot -u` through the
-host. Source does not establish migration of arbitrary legacy in-wrapper or
+host. During that subprocess only, `mscoree`/`mshtml` registration is deferred:
+without bundled Mono/Gecko, Wine would display optional-addon dialogs before
+finishing WoW64 initialization. No DLL override is written to the prefix or
+applied to Steam/game launches. Mono/.NET and Gecko-dependent applications still
+need separate component installation and acceptance; Steam bootstrap does not
+claim those capabilities. The official Steam verb runs as `--winetricks -q steam`
+so Valve's installer uses its supported silent mode, with normal checksums and
+no extra Steam launch flags.
+Source does not establish migration of arbitrary legacy in-wrapper or
 native macOS Steam data; never improvise that migration by copying credentials.
 
 The baseline [runtime configuration](../runtime/wrapper-template/Contents/Resources/portside-runtime.json)
@@ -177,6 +199,33 @@ and Agent permit activity after the primary UI closes. Lease/handoff logic
 serializes foreground bootstrap and the Agent's update worker; see
 [UPDATE_ARCHITECTURE.md](UPDATE_ARCHITECTURE.md). These process relationships
 are implemented; real interactive continuity remains a separate GUI test.
+
+New wrappers advertise `launchDiagnosticsVersion: 1`. The desktop passes a fresh
+`--launch-id <UUID>` only to those hosts; older hosts receive no new flags. The
+host consumes this argument and atomically writes a per-launch JSON receipt in
+`Logs/RuntimeLaunches/<UUID>.json` outside the prefix. It reports running,
+execution failure or termination with the child PID, status, `exit` versus
+`uncaughtSignal`, signal number and monotonic duration. Command diagnostics use
+fixed executable labels and redact arbitrary arguments. Captured child output
+is bounded to 64 KiB and sanitized. Dispatch read events and process termination
+notifications replace polling. After the terminal receipt, collection ends at
+EOF or a two-second grace deadline. The inherited socket uses `SO_NOSIGPIPE`:
+later writes fail with `EPIPE`, without signalling a detached Steam process.
+Output after this deadline is intentionally not collected. Receipt maintenance
+retains 100 historical UUID JSON files for at most seven days; the current UUID
+and files younger than five minutes are protected for concurrent readiness
+readers. Symlinks, directories and non-receipt files are excluded. The separate
+host text log still has no rotation.
+
+Readiness checks the receipt and the LaunchServices application lifetime, the
+wrapper and canonical external prefix, descendants and file-backed ownership.
+It does not adopt unrelated newly observed Wine processes. After a terminal
+launch and one second with no managed runtime children, it returns a process
+failure instead of waiting for the 90-second graphical deadline. Execution
+failure, signal, nonzero exit, no Steam process, Steam closing before readiness,
+running without a window, and a window without webhelper have separate errors.
+Only a currently detected window with webhelper yields `visibleButUnverified`;
+this is still not evidence of rendered interaction.
 
 ## Update, preservation and rollback limits
 

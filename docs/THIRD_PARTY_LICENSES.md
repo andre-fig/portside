@@ -10,6 +10,7 @@ ship required notices with Portside.
 | Sentry Cocoa                       | pinned Swift package                     | MIT and package notices                         |
 | Sparkle 2                          | `sparkle-project/Sparkle`                | Sparkle license and embedded notices            |
 | WineD3D/Wine                       | selected approved engine/source revision | LGPL-2.1-or-later and included notices          |
+| FreeType                          | source archive pinned in `upstream/dependencies.json` | FreeType License; engine includes `share/wine/licenses/freetype` notices |
 | winetricks                         | selected approved source revision        | LGPL-2.1-or-later                               |
 | Wrapper/template and native host   | Portside source                          | `runtime/wrapper-template`, `apps/runtime-host` |
 | Steam for Windows                  | Valve official distribution              | Valve terms; not bundled by Portside            |

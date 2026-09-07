@@ -45,6 +45,78 @@ selection, not startup execution of the revised maintenance code. Validation
 passed 121 desktop tests with one explicitly unconfigured signed-app probe
 skipped, the desktop build, production source policy and `git diff --check`.
 
+## Steam first-launch follow-up — 2026-09-07 UTC
+
+**Verified, scoped:** [the 0.1.28 investigation](STEAM_FIRST_LAUNCH_FIX.md) on
+macOS 26.6.2 reproduced SIGKILL 9 using installed Wine 11.17/runtime 0.1.26 and
+disposable direct/symlinked prefixes. `wine --version` succeeds, but the nested
+arm64 loader fails. A minimal program with the same low-address 4 KiB layout
+also receives SIGKILL, including with a valid Developer ID signature; its
+standard arm64 and x86_64 controls execute. The cause is the recipe's arm64
+Darwin loader layout, not an inference from AMFI messages or a prefix problem.
+The corrected host, exercised with the installed engine in a disposable wrapper,
+records `uncaughtSignal`, signal 9 and 97 ms, returning 137 to its caller.
+
+**Implemented but not end-to-end validated:** source now selects x86_64
+Wine/WoW64 via Rosetta, builds the pinned font dependency for that target, changes
+engine identity to include architecture/recipe, and gates packaging/extraction
+on real Windows command execution. Host receipts and desktop readiness separate
+execution errors, signals, normal exits, absent Steam, missing window and absent
+webhelper, and end early after termination with no managed children. New flags
+are negotiated, so old hosts do not forward them to Steam. The everyday prefix,
+installed runtime, native Steam, games, saves and credentials were preserved.
+
+**Verified build and automated checks:** the source-built x86_64 engine archive
+completed successfully (336,989,260 bytes, SHA-256
+`d024d10dede017f62718773fe25bef358164fb57751c78f5ed6ab9fbf8877b2b`).
+Both the install tree and an archive extracted outside the build tree executed
+x64 `cmd` with expected exit 37 and x86 `cmd` with expected exit 23. The extracted
+first-prefix probe took approximately 14 seconds. Wrapper and winetricks builds,
+source audit, Wine/winetricks snapshot validation, JSON/shell/Python syntax,
+production policy and diff whitespace checks passed. Final Swift test/build
+results after review: 15 host tests passed; 132 desktop tests completed with one optional
+signed-app probe skipped and no failures. Both Swift builds passed.
+
+**Verified local bootstrap and official Steam installation after review:** a
+fresh control reproduced Wine's modal optional Mono installer blocking before
+WoW64 kernel32 files were complete. The production host now defers Mono/Gecko
+registration only during prefix creation; no DLL override is persisted or used
+for Steam/game launches. Desktop uses the official quiet winetricks Steam verb.
+Two new fixtures completed host bootstrap in 15.126/17.760 seconds, both command
+architectures in expected exits 37/23, and official Steam installation in
+75.904/69.124 seconds with exit 0 and `steam.exe` present. The extracted-layout
+gate now exercises the real host without test-only DLL overrides. Mono/.NET and
+Gecko-dependent applications remain outside this bootstrap validation.
+Final local `0.1.28-local` archives were rebuilt from the wrapper/winetricks source
+and compiled-engine cache. `validate-clean-layout.sh` passed after extraction:
+the engine checks succeeded, and actual host bootstrap completed in 16.686
+seconds with both subsequent Windows commands returning expected exits 37/23.
+
+**Implemented and locally tested production-blocker fixes:** release waits for
+runtime assembly of its `target_sha`, checks source/build provenance and manifest
+agreement, and fails closed on missing/failed/cancelled/expired matching evidence.
+App-only changes reuse the recipe-selected engine in a fresh runtime assembly.
+Thirteen release regression tests and actionlint pass; GitHub execution was not run.
+Host capture now uses read events and termination notifications, ending at EOF
+or two seconds after termination without SIGPIPE to descendants. UUID receipts
+have seven-day/100-file historical retention with a five-minute reader grace;
+fixture tests cover late writes, retention and preservation. Text-log rotation
+remains a separate gap.
+
+**Graphical Steam acceptance remains unvalidated:** during a 120-second probe
+in the second fixture, managed Steam and steamwebhelper processes appeared after
+normal loader exit 42. Scoped CoreGraphics returned no owned on-screen window;
+screen-capture access was unavailable. No rendered login window or interaction
+was verified. The fixture's processes were stopped and its temporary data removed.
+
+**Unknown for final distribution:** no signed/notarized corrected runtime or
+rendered interactive Steam acceptance is established. Of 35 installed Mach-O
+files, all have ad hoc signatures; 34 Wine components verify, while the host's
+resource seal fails strict verification. This separate packaging gap is not the
+proved SIGKILL cause. The newly compiled x86_64 loader, ntdll and FreeType are
+unsigned local outputs, not final distribution candidates. No security settings or installed artifacts were changed;
+no publication, manifest update, commit, push or deploy occurred.
+
 ## Executive assessment
 
 The repository implements the native application/install/update pipeline, a
@@ -105,8 +177,9 @@ qualifies external/historical evidence; it is not a sixth operational state.
    though newer publication supersedes it; an old signed payload does not create
    new downgrade authorization. Superseded appcast entries can fail download
    routes that require production records. See [RELEASE](RELEASE.md).
-3. **Build/release evidence:** toolchain locks are descriptive, engine keys omit
-   architecture/toolchain/patch identity, uploads have no enforced immutability,
+3. **Build/release evidence:** most toolchain locks are descriptive; the follow-up
+   enforces FreeType's source checksum and adds architecture/recipe to engine keys.
+   Keys still omit observed toolchain/applied-patch identity, uploads have no enforced immutability,
    and the recipe does not apply the referenced patch directory. Current CI
    does not run Swift/backend unit suites; runtime registration records
    `cleanInstall: not_verified` and GUI acceptance is not a release gate.

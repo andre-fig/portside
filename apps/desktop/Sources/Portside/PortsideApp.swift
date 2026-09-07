@@ -411,14 +411,17 @@ final class PortsideModel: ObservableObject {
                 message = "Starting Steam…"
                 diagnostics.breadcrumb("steam_launch_requested", context: context(stage: "steam_launch"))
                 state.phase = .steamLaunching
+                state.lastReadiness = nil
+                state.lastExitCode = nil
                 persist()
                 let baselinePIDs = Set(readinessMonitor.captureProcessSnapshot().map(\.pid))
-                _ = try await steamLauncher.launch(wrapper: installed.validation.wrapper)
-                let report = await readinessMonitor.waitForSteamWindow(wrapper: installed.validation.wrapper, baselinePIDs: baselinePIDs)
+                let launch = try await steamLauncher.launch(wrapper: installed.validation.wrapper)
+                let launchID = launch.id
+                let report = await readinessMonitor.waitForSteamWindow(wrapper: installed.validation.wrapper, baselinePIDs: baselinePIDs,
+                    launchReceipt: { RuntimeLaunchReceipt.read(launchID: launchID) }, hostTerminated: { await launch.hasTerminated })
                 state.lastReadiness = report
-                guard report.windowDetected && report.webHelperStarted else {
-                    throw PortsideError.processLaunchFailed("Steam processes started without a managed graphical window.")
-                }
+                state.lastExitCode = report.runtimeTermination?.terminationStatus
+                if let failure = report.failure { throw failure }
                 agentLauncher.start(wrapper: installed.validation.wrapper, prefix: installed.validation.prefix)
                 state.setupCompleted = true
                 state.phase = .steamReady
@@ -468,13 +471,18 @@ final class PortsideModel: ObservableObject {
         guard advanceBootstrap(to: .launchingSteam) else { return }
         isWorking = true
         message = "Starting Steam…"
+        state.lastReadiness = nil
+        state.lastExitCode = nil
         Task { @MainActor in
             do {
                 let baselinePIDs = Set(readinessMonitor.captureProcessSnapshot().map(\.pid))
-                _ = try await steamLauncher.launch(wrapper: wrapper)
-                let report = await readinessMonitor.waitForSteamWindow(wrapper: wrapper, baselinePIDs: baselinePIDs)
+                let launch = try await steamLauncher.launch(wrapper: wrapper)
+                let launchID = launch.id
+                let report = await readinessMonitor.waitForSteamWindow(wrapper: wrapper, baselinePIDs: baselinePIDs,
+                    launchReceipt: { RuntimeLaunchReceipt.read(launchID: launchID) }, hostTerminated: { await launch.hasTerminated })
                 state.lastReadiness = report
-                guard report.windowDetected && report.webHelperStarted else { throw PortsideError.processLaunchFailed("Steam opened without a managed graphical window.") }
+                state.lastExitCode = report.runtimeTermination?.terminationStatus
+                if let failure = report.failure { throw failure }
                 agentLauncher.start(wrapper: wrapper, prefix: URL(fileURLWithPath: state.prefixPath ?? PortsidePaths.steamPrefix.path))
                 state.setupCompleted = true
                 state.phase = .steamReady
@@ -537,6 +545,7 @@ final class PortsideModel: ObservableObject {
 
     private func context(stage: String, errorCode: String? = nil, report: SteamReadinessReport? = nil) -> DiagnosticContext {
         let bundle = Bundle.main
+        let readiness = report ?? state.lastReadiness
         return DiagnosticContext(
             stage: stage,
             errorCode: errorCode,
@@ -549,16 +558,17 @@ final class PortsideModel: ObservableObject {
             engineVersion: "Portside Wine source build",
             renderer: "wineD3D",
             exitCode: state.lastExitCode,
-            windowDetected: report?.windowDetected,
-            processStarted: report?.processStarted,
-            webHelperStarted: report?.webHelperStarted,
-            interfaceVerification: report?.interfaceVerification.rawValue,
+            windowDetected: readiness?.windowDetected,
+            processStarted: readiness?.processStarted,
+            webHelperStarted: readiness?.webHelperStarted,
+            interfaceVerification: readiness?.interfaceVerification.rawValue,
             msyncEnabled: true,
             esyncEnabled: true
         )
     }
 
     private func errorCode(_ error: Error) -> String {
+        if let failure = error as? SteamLaunchFailure { return failure.code }
         if isFileConflict(error) { return "runtime_installation_conflict" }
         switch error {
         case PortsideError.unsupportedArchitecture: return "unsupported_architecture"
@@ -570,7 +580,7 @@ final class PortsideModel: ObservableObject {
         case PortsideError.checksumMismatch: return "runtime_artifact_checksum_failed"
         case PortsideError.processTimedOut: return "runtime_process_timeout"
         case PortsideError.processFailed: return "runtime_process_failed"
-        case PortsideError.processLaunchFailed: return "steam_window_failed"
+        case PortsideError.processLaunchFailed: return "runtime_launch_failed"
         case PortsideError.invalidPath: return "invalid_runtime_path"
         case PortsideCommercialError.backendUnavailable: return "runtime_service_unavailable"
         case PortsideCommercialError.invalidManifest: return "runtime_manifest_invalid"
@@ -601,6 +611,7 @@ final class PortsideModel: ObservableObject {
     }
 
     private func userFacingSetupFailure(_ error: Error) -> String {
+        if let failure = error as? SteamLaunchFailure { return failure.localizedDescription }
         if isFileConflict(error) {
             return "Portside found an incomplete previous setup and is ready to try again."
         }
@@ -630,7 +641,7 @@ final class PortsideModel: ObservableObject {
         case PortsideError.processFailed:
             return "Steam could not finish preparing. Please try again."
         case PortsideError.processLaunchFailed:
-            return "Steam started, but its window could not be opened. Please try again."
+            return "Portside could not start the Steam environment. Please try again."
         default:
             return "Something interrupted the Portside setup. Please try again."
         }

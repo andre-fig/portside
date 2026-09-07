@@ -1,4 +1,5 @@
 name: Build Portside Runtime
+run-name: Runtime production ${{ github.event.workflow_run.head_sha || github.sha }}
 
 on:
   push:
@@ -7,10 +8,17 @@ on:
       - "vendor/**"
       - "upstream/**"
       - "apps/runtime-host/**"
+      - "apps/desktop/**"
       - "runtime/wrapper-template/**"
       - "scripts/build-runtime/**"
       - "scripts/generate_manifest.sh"
       - "scripts/publish_runtime.sh"
+      - "scripts/*release*.sh"
+      - "scripts/package_app.sh"
+      - "scripts/create_dmg.sh"
+      - "scripts/generate_appcast.sh"
+      - "scripts/wait_for_runtime.py"
+      - ".github/workflows/release-production.yml"
       - ".github/workflows/build-runtime.yml"
   workflow_dispatch:
     inputs:
@@ -28,10 +36,11 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  group: build-runtime-${{ github.ref }}
-  cancel-in-progress: true
+  group: build-runtime-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: false
 
 jobs:
   changes:
@@ -52,11 +61,12 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BEFORE_SHA: ${{ github.event.before }}
           HEAD_SHA: ${{ github.sha }}
-          WORKFLOW_RUN_EVENT: ${{ github.event.workflow_run.event }}
           WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
           WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
           REF_NAME: ${{ github.ref }}
+          GH_TOKEN: ${{ github.token }}
+          ENGINE_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           set -eu
           assemble_runtime=false
@@ -64,11 +74,9 @@ jobs:
             assemble_runtime=true
           elif [ "$EVENT_NAME" = workflow_run ]; then
             if [ "$WORKFLOW_RUN_BRANCH" = main ] && [ "$WORKFLOW_RUN_CONCLUSION" = success ]; then
-              if [ "$WORKFLOW_RUN_EVENT" = workflow_dispatch ]; then
-                assemble_runtime=true
-              elif ./scripts/build-runtime/changed-components.sh engine "$WORKFLOW_RUN_SHA^" "$WORKFLOW_RUN_SHA"; then
-                assemble_runtime=true
-              fi
+              # A real build, not a skipped change-filter run. This also handles
+              # recipes changed before the final commit of a multi-commit push.
+              assemble_runtime="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ENGINE_RUN_ID}/jobs?filter=latest&per_page=100" --jq '[.jobs[] | select(.name == "Build and publish persistent Wine engine" and .conclusion == "success")] | length == 1')"
             fi
           else
             runtime_changed=false
@@ -90,6 +98,8 @@ jobs:
     steps:
       - name: Check out Portside sources
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Validate sources, snapshots and build inputs
         run: |

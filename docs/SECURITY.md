@@ -147,9 +147,11 @@ wrappers, but this separation alone is not proof of every interrupted migration.
 Never remove a prefix, game, save, installed Steam session or license key to
 repair an update. Never copy native macOS Steam account files. Scope process
 termination to managed wrapper/prefix ownership, never a global name match.
-The Steam readiness monitor also considers newly observed likely Wine/Steam
-processes; this heuristic reinforces why window/process evidence needs manual
-confirmation and is not a security identity check.
+Steam readiness corroborates runtime ownership through wrapper/canonical-prefix
+paths, descendants and open files; unrelated newly observed Wine processes do
+not count. Its per-launch receipt is diagnostic IPC, not an authentication gate.
+Window/process evidence still needs manual confirmation and is not a security
+identity check.
 
 ## Licensing and service access
 
@@ -187,8 +189,14 @@ Never log passwords, purchase keys, bearer tokens, cookies, Steam IDs, Apple IDs
 private keys, account files, full environment dumps or window contents.
 [PortsideLogger](../apps/desktop/Sources/PortsideCore/PortsideCore.swift) redacts the
 current home path, Windows user paths and selected credential patterns, and
-rotates its own text logs. RuntimeHost has a separate, narrower regex sanitizer;
-its captured output is truncated per message but its log has no rotation.
+rotates its own text logs. RuntimeHost has a separate sanitizer with fixed
+command labels and redacted arbitrary arguments. Its child-output buffer is
+bounded to 64 KiB, credential lines are discarded, and launch receipts contain
+no argv/environment/paths. UUID receipt retention is seven days/100 historical
+files, with a five-minute concurrent-reader grace and current-launch protection;
+symlinks and unrelated entries are excluded. The host text log still lacks
+rotation. Output collection ends two seconds after child termination; its socket
+suppresses SIGPIPE on later descendant writes without changing process security.
 Regex redaction is not proof that arbitrary third-party output is safe to share.
 
 [`SentryDiagnosticsService`](../apps/desktop/Sources/Portside/SentryDiagnosticsService.swift)

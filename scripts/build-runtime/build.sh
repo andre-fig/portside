@@ -37,6 +37,8 @@ engine_storage_key="$(jq -r '.artifact.storageKey' "$engine_input")"
 engine_source_archive_checksum="$(jq -r '.artifact.sha256' "$engine_input")"
 winetricks_commit="$(jq -r '.repositories[] | select(.name == "winetricks") | .commit' "$ROOT_DIR/upstream/lock.json")"
 winetricks_checksum="$(jq -r '.repositories[] | select(.name == "winetricks") | .snapshotChecksum' "$ROOT_DIR/upstream/lock.json")"
+freetype_version="$(jq -r '.dependencies[] | select(.name == "freetype") | .version' "$ROOT_DIR/upstream/dependencies.json")"
+freetype_checksum="$(jq -r '.dependencies[] | select(.name == "freetype") | .sha256' "$ROOT_DIR/upstream/dependencies.json")"
 wrapper_source_root="$BUILD_DIR/source-checksums"
 rm -rf "$wrapper_source_root"
 mkdir -p "$wrapper_source_root"
@@ -60,7 +62,7 @@ cat > "$BUILD_DIR/provenance.json" <<EOF
   "portsideCommit": "$PORTSIDE_COMMIT",
   "channel": "$CHANNEL",
   "version": "$VERSION",
-  "sourcePolicy": "checked-in vendor sources only; no compiled upstream input",
+  "sourcePolicy": "checked-in Wine/winetricks sources and checksum-pinned FreeType source; no compiled upstream input",
   "sourceCommits": {"portside": "$PORTSIDE_COMMIT", "wine": "$wine_commit", "winetricks": "$winetricks_commit"},
   "sourceSnapshotChecksums": {"portsideWrapper": "$wrapper_source_checksum", "wine": "$wine_checksum", "winetricks": "$winetricks_checksum"},
   "engine": {"version": "$engine_version", "buildId": "$engine_build_id", "storageKey": "$engine_storage_key", "sourceArchiveSha256": "$engine_source_archive_checksum", "runtimeArchiveSha256": "$engine_checksum"},
@@ -95,11 +97,12 @@ jq -n \
   > "$BUILD_DIR/runtime-manifest-unsigned.json"
 
 jq -n \
-  --arg version "$VERSION" --arg engineVersion "$engine_version" --arg wineCommit "$wine_commit" --arg wineChecksum "$wine_checksum" --arg winetricksCommit "$winetricks_commit" --arg winetricksChecksum "$winetricks_checksum" --arg wrapperSHA "$wrapper_checksum" --arg engineSHA "$engine_checksum" --arg winetricksSHA "$winetricks_artifact_checksum" \
+  --arg version "$VERSION" --arg engineVersion "$engine_version" --arg wineCommit "$wine_commit" --arg wineChecksum "$wine_checksum" --arg winetricksCommit "$winetricks_commit" --arg winetricksChecksum "$winetricks_checksum" --arg wrapperSHA "$wrapper_checksum" --arg engineSHA "$engine_checksum" --arg winetricksSHA "$winetricks_artifact_checksum" --arg freetypeVersion "$freetype_version" --arg freetypeSHA "$freetype_checksum" \
   '{spdxVersion: "SPDX-2.3", dataLicense: "CC0-1.0", SPDXID: "SPDXRef-DOCUMENT", name: ("Portside runtime " + $version), documentNamespace: ("https://portside.invalid/sbom/" + $version), packages: [
     {SPDXID: "SPDXRef-wrapper", name: "Portside wrapper", versionInfo: $version, downloadLocation: "NOASSERTION", licenseConcluded: "NOASSERTION", supplier: "Portside", checksums: [{algorithm: "SHA256", checksumValue: $wrapperSHA}]},
     {SPDXID: "SPDXRef-wine", name: "Wine", versionInfo: $engineVersion, downloadLocation: "NOASSERTION", licenseConcluded: "LGPL-2.1-or-later", supplier: "Portside", checksums: [{algorithm: "SHA256", checksumValue: $engineSHA}], externalRefs: [{referenceType: "source-commit", referenceLocator: $wineCommit}, {referenceType: "source-snapshot-sha256", referenceLocator: $wineChecksum}]},
-    {SPDXID: "SPDXRef-winetricks", name: "Winetricks", versionInfo: $version, downloadLocation: "NOASSERTION", licenseConcluded: "LGPL-2.1-or-later", supplier: "Portside", checksums: [{algorithm: "SHA256", checksumValue: $winetricksSHA}], externalRefs: [{referenceType: "source-commit", referenceLocator: $winetricksCommit}, {referenceType: "source-snapshot-sha256", referenceLocator: $winetricksChecksum}]}
+    {SPDXID: "SPDXRef-winetricks", name: "Winetricks", versionInfo: $version, downloadLocation: "NOASSERTION", licenseConcluded: "LGPL-2.1-or-later", supplier: "Portside", checksums: [{algorithm: "SHA256", checksumValue: $winetricksSHA}], externalRefs: [{referenceType: "source-commit", referenceLocator: $winetricksCommit}, {referenceType: "source-snapshot-sha256", referenceLocator: $winetricksChecksum}]},
+    {SPDXID: "SPDXRef-freetype", name: "FreeType", versionInfo: $freetypeVersion, downloadLocation: "NOASSERTION", licenseConcluded: "FTL", supplier: "Portside", externalRefs: [{referenceType: "source-archive-sha256", referenceLocator: $freetypeSHA}]}
   ]}' > "$BUILD_DIR/sbom.spdx.json"
 
 if [ -z "$DOWNLOAD_URL_PREFIX" ]; then

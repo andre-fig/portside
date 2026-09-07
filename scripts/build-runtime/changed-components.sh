@@ -22,7 +22,11 @@ assembly_changed=0
 while IFS= read -r path; do
     [ -n "$path" ] || continue
     case "$path" in
-        vendor/wine/*|upstream/dependencies.json|upstream/patches/*|scripts/build-runtime/build-wine-engine.sh|scripts/build-runtime/build-engine.sh|scripts/publish_engine.sh|.github/workflows/build-engine.yml)
+        scripts/build-runtime/validate-steam-bootstrap.py)
+            assembly_changed=1 ;;
+        apps/desktop/*|scripts/*release*.sh|scripts/package_app.sh|scripts/create_dmg.sh|scripts/generate_appcast.sh|scripts/wait_for_runtime.py|.github/workflows/release-production.yml)
+            assembly_changed=1 ;;
+        vendor/wine/*|upstream/dependencies.json|upstream/patches/*|scripts/build-runtime/build-wine-engine.sh|scripts/build-runtime/build-freetype.sh|scripts/build-runtime/build-engine.sh|scripts/build-runtime/resolve-engine.sh|scripts/build-runtime/validate-engine-execution.py|scripts/publish_engine.sh|.github/workflows/build-engine.yml)
             engine_changed=1 ;;
         vendor/winetricks/*|apps/runtime-host/*|runtime/wrapper-template/*|scripts/build-runtime/build.sh|scripts/build-runtime/build-wrapper.sh|scripts/build-runtime/build-winetricks.sh|scripts/build-runtime/fetch-engine.sh|scripts/build-runtime/resolve-engine.sh|scripts/build-runtime/changed-components.sh|scripts/build-runtime/validate-clean-layout.sh|scripts/build-runtime/validate-manifest.sh|scripts/generate_manifest.sh|scripts/publish_runtime.sh|.github/workflows/build-runtime.yml)
             assembly_changed=1 ;;

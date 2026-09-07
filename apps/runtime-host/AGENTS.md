@@ -22,7 +22,8 @@ Inherit the [root rules](../../AGENTS.md). Read
   require desktop tests/build and `./scripts/validate-production-policy.sh`.
   Use [RUNTIME.md](../../docs/RUNTIME.md) for the complete source/assembly checks.
 - **Known traps:** tests run the compiled host with dummy Wine in a disposable
-  bundle/home, proving bundle discovery only. Signature diagnostics are not a
+  bundle/home, proving bundle discovery, termination diagnostics and output
+  handling, not Steam execution. Signature diagnostics are not a
   host authorization gate. `Resources/entitlements.plist` is not applied by the
   current wrapper build. Child output redaction is heuristic. Do not claim
   hardened runtime, Steam UI or game compatibility without matching evidence.

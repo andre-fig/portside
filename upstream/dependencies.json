@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "purpose": "Pinned build dependencies for the Portside source runtime build",
-  "platform": "macOS arm64 runner; target architecture defaults to the host",
+  "platform": "macOS runner; native build tools and x86_64 Wine/FreeType target (Rosetta on Apple silicon)",
   "dependencies": [
     {
       "name": "bison",

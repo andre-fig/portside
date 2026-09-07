@@ -419,7 +419,7 @@ public enum PortsideSteamFlow {
     public static func installationSpec(wrapper: URL) throws -> ProcessLaunchSpec {
         let host = try PortsideBundleComponents.runtimeHost(in: wrapper)
         guard FileManager.default.isExecutableFile(atPath: host.path) else { throw PortsideError.runtimeUnavailable }
-        return ProcessLaunchSpec(executable: host, arguments: ["--winetricks", "steam"], environment: processEnvironment, currentDirectory: wrapper, timeout: 3_600)
+        return ProcessLaunchSpec(executable: host, arguments: ["--winetricks", "-q", "steam"], environment: processEnvironment, currentDirectory: wrapper, timeout: 3_600)
     }
 
     public static func prefixCreationSpec(wrapper: URL) throws -> ProcessLaunchSpec {

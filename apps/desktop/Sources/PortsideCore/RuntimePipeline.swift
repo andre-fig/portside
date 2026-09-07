@@ -83,7 +83,7 @@ public enum SafeArchiveExtractor {
 }
 
 public enum SteamReadinessState: String, Codable, Sendable {
-    case processStarted, webHelperStarted, windowDetected, visibleButUnverified, uiReady, processRunningWithoutWindow, failed
+    case processStarted, webHelperStarted, windowDetected, visibleButUnverified, uiReady, processRunningWithoutWindow, windowWithoutWebHelper, failed
 }
 
 public enum SteamInterfaceVerification: String, Codable, Sendable {
@@ -101,8 +101,10 @@ public struct SteamReadinessReport: Codable, Equatable, Sendable {
     public let interfaceVerification: SteamInterfaceVerification
     public let webHelperProcessCount: Int
     public let duration: TimeInterval
+    public let failure: SteamLaunchFailure?
+    public let runtimeTermination: RuntimeLaunchReceipt?
 
-    public init(state: SteamReadinessState, processStarted: Bool, webHelperStarted: Bool, windowDetected: Bool, visibleButUnverified: Bool = false, uiReady: Bool = false, processRunningWithoutWindow: Bool = false, interfaceVerification: SteamInterfaceVerification = .notVerified, webHelperProcessCount: Int = 0, duration: TimeInterval = 0) {
+    public init(state: SteamReadinessState, processStarted: Bool, webHelperStarted: Bool, windowDetected: Bool, visibleButUnverified: Bool = false, uiReady: Bool = false, processRunningWithoutWindow: Bool = false, interfaceVerification: SteamInterfaceVerification = .notVerified, webHelperProcessCount: Int = 0, duration: TimeInterval = 0, failure: SteamLaunchFailure? = nil, runtimeTermination: RuntimeLaunchReceipt? = nil) {
         self.state = state
         self.processStarted = processStarted
         self.webHelperStarted = webHelperStarted
@@ -113,6 +115,8 @@ public struct SteamReadinessReport: Codable, Equatable, Sendable {
         self.interfaceVerification = interfaceVerification
         self.webHelperProcessCount = webHelperProcessCount
         self.duration = duration
+        self.failure = failure
+        self.runtimeTermination = runtimeTermination
     }
 }
 
@@ -141,6 +145,7 @@ public enum SteamProcessOwnership {
     public static func managedPIDs(in snapshots: [ManagedProcessSnapshot], wrapper: URL, prefix: URL) -> Set<Int32> {
         var managed = Set(snapshots.filter {
             isManaged(snapshotLine: $0.command, wrapper: wrapper) || isManaged(snapshotLine: $0.command, prefix: prefix)
+                || isManaged(snapshotLine: $0.command, prefix: prefix.resolvingSymlinksInPath())
         }.map(\.pid))
         var changed = true
         while changed {
@@ -163,7 +168,7 @@ public enum SteamProcessOwnership {
             do { try process.run() } catch { return nil }
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
-            guard let output = String(data: data, encoding: .utf8), output.contains(wrapper.path) || output.contains(prefix.path) else { return nil }
+            guard let output = String(data: data, encoding: .utf8), output.contains(wrapper.path) || output.contains(prefix.path) || output.contains(prefix.resolvingSymlinksInPath().path) else { return nil }
             return snapshot.pid
         })
     }
@@ -171,9 +176,16 @@ public enum SteamProcessOwnership {
 
 public final class SteamReadinessMonitor: @unchecked Sendable {
     private let logger: PortsideLogger
-    public init(logger: PortsideLogger = PortsideLogger(logFileName: "steam-readiness.log")) { self.logger = logger }
+    private let snapshots: (@Sendable () -> [ManagedProcessSnapshot])?
+    private let windowProbe: @Sendable (Set<Int32>) -> Bool
+    public init(logger: PortsideLogger = PortsideLogger(logFileName: "steam-readiness.log"), snapshots: (@Sendable () -> [ManagedProcessSnapshot])? = nil, windowProbe: @escaping @Sendable (Set<Int32>) -> Bool = SteamReadinessMonitor.detectManagedWindow) {
+        self.logger = logger
+        self.snapshots = snapshots
+        self.windowProbe = windowProbe
+    }
 
     public func captureProcessSnapshot() -> [ManagedProcessSnapshot] {
+        if let snapshots { return snapshots() }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/ps")
         process.arguments = ["-axo", "pid=,ppid=,command="]
@@ -191,31 +203,75 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
         }
     }
 
-    public func waitForSteamWindow(wrapper: URL, baselinePIDs: Set<Int32> = [], timeout: TimeInterval = 90, poll: TimeInterval = 0.5) async -> SteamReadinessReport {
-        let started = Date()
+    public func waitForSteamWindow(wrapper: URL, baselinePIDs: Set<Int32> = [], timeout: TimeInterval = 90, poll: TimeInterval = 0.5,
+                                   launchReceipt: @escaping @Sendable () -> RuntimeLaunchReceipt? = { nil },
+                                   hostTerminated: @escaping @Sendable () async -> Bool = { false }) async -> SteamReadinessReport {
+        let started = ProcessInfo.processInfo.systemUptime
         var processStarted = false
         var helperStarted = false
         var count = 0
         var windowDetected = false
-        while Date().timeIntervalSince(started) < timeout {
+        var steamRunning = false
+        var receipt: RuntimeLaunchReceipt?
+        var failure: SteamLaunchFailure?
+        var previousManaged: [Int32: String] = [:]
+        var emptySince: TimeInterval?
+        while !Task.isCancelled {
+            receipt = launchReceipt()
             let allSnapshots = captureProcessSnapshot()
             var managedPIDs = SteamProcessOwnership.managedPIDs(in: allSnapshots, wrapper: wrapper, prefix: wrapper.appendingPathComponent("Contents/SharedSupport/prefix"))
-            let newRuntimePIDs = allSnapshots.filter { !baselinePIDs.contains($0.pid) && SteamProcessOwnership.isLikelySteamRuntime($0.command) }.map(\.pid)
-            managedPIDs.formUnion(newRuntimePIDs)
+            // Retain observed ownership across reparenting, and corroborate
+            // detached processes by open runtime/prefix files. A newly appearing
+            // unrelated Wine process must not hide a failed Portside launch.
+            managedPIDs.formUnion(allSnapshots.filter { previousManaged[$0.pid] == $0.command }.map(\.pid))
+            if receipt?.phase == "running", let pid = receipt?.childPID { managedPIDs.insert(pid) }
+            var changed = true
+            while changed {
+                changed = false
+                for item in allSnapshots where managedPIDs.contains(item.parentPID) {
+                    if managedPIDs.insert(item.pid).inserted { changed = true }
+                }
+            }
+            let unowned = allSnapshots.filter { !managedPIDs.contains($0.pid) && !baselinePIDs.contains($0.pid) }
+            if snapshots == nil {
+                managedPIDs.formUnion(SteamProcessOwnership.fileBackedManagedPIDs(in: unowned, wrapper: wrapper, prefix: wrapper.appendingPathComponent("Contents/SharedSupport/prefix")))
+            }
             let snapshot = allSnapshots.filter { managedPIDs.contains($0.pid) }
-            processStarted = snapshot.contains { $0.command.localizedCaseInsensitiveContains("steam.exe") }
+            previousManaged = Dictionary(uniqueKeysWithValues: snapshot.map { ($0.pid, $0.command) })
+            steamRunning = snapshot.contains { $0.command.localizedCaseInsensitiveContains("steam.exe") }
             count = snapshot.filter { $0.command.localizedCaseInsensitiveContains("steamwebhelper") }.count
             helperStarted = count > 0
-            windowDetected = windowDetected || Self.detectManagedWindow(managedPIDs: managedPIDs)
+            steamRunning = steamRunning || helperStarted
+            processStarted = processStarted || steamRunning
+            windowDetected = windowProbe(managedPIDs)
             if windowDetected && helperStarted {
-                let report = SteamReadinessReport(state: .visibleButUnverified, processStarted: processStarted, webHelperStarted: helperStarted, windowDetected: true, visibleButUnverified: true, webHelperProcessCount: count, duration: Date().timeIntervalSince(started))
+                let report = SteamReadinessReport(state: .visibleButUnverified, processStarted: processStarted, webHelperStarted: helperStarted, windowDetected: true, visibleButUnverified: true, webHelperProcessCount: count, duration: ProcessInfo.processInfo.systemUptime - started)
                 logger.write("Steam window detected; visual interaction remains a manual acceptance check")
                 return report
             }
+            let runtimeAlive = snapshot.contains { SteamProcessOwnership.isLikelySteamRuntime($0.command) || $0.command.localizedCaseInsensitiveContains(".exe") }
+            let applicationEnded = await hostTerminated()
+            let ended = receipt?.isTerminal == true || applicationEnded
+            let now = ProcessInfo.processInfo.systemUptime
+            if ended && !runtimeAlive {
+                emptySince = emptySince ?? now
+                // A short grace covers exec/reparent/snapshot races, not the
+                // full graphical deadline. Keep checking for detached children.
+                if now - emptySince! >= min(1, timeout) {
+                    if receipt?.phase == "executionFailed" { failure = .wineExecutionFailed }
+                    else if receipt?.terminationReason == "uncaughtSignal", let signal = receipt?.signal { failure = .wineSignaled(signal) }
+                    else if let status = receipt?.terminationStatus, status != 0 { failure = .wineExited(status) }
+                    else { failure = processStarted ? .steamExitedBeforeReady : .steamNotStarted }
+                    break
+                }
+            } else { emptySince = nil }
+            if now - started >= timeout { break }
             try? await Task.sleep(for: .milliseconds(Int(poll * 1_000)))
         }
-        let state: SteamReadinessState = windowDetected ? .visibleButUnverified : processStarted ? .processRunningWithoutWindow : .failed
-        return SteamReadinessReport(state: state, processStarted: processStarted, webHelperStarted: helperStarted, windowDetected: windowDetected, visibleButUnverified: windowDetected, processRunningWithoutWindow: processStarted && !windowDetected, webHelperProcessCount: count, duration: Date().timeIntervalSince(started))
+        failure = failure ?? (windowDetected ? .windowWithoutWebHelper : steamRunning ? .processWithoutWindow : processStarted ? .steamExitedBeforeReady : .steamNotStarted)
+        let state: SteamReadinessState = failure == .windowWithoutWebHelper ? .windowWithoutWebHelper : failure == .processWithoutWindow ? .processRunningWithoutWindow : .failed
+        logger.write("Steam readiness failed code=\(failure!.code) processStarted=\(processStarted) webHelperStarted=\(helperStarted) windowDetected=\(windowDetected)")
+        return SteamReadinessReport(state: state, processStarted: processStarted, webHelperStarted: helperStarted, windowDetected: windowDetected, visibleButUnverified: windowDetected, processRunningWithoutWindow: failure == .processWithoutWindow, webHelperProcessCount: count, duration: ProcessInfo.processInfo.systemUptime - started, failure: failure, runtimeTermination: receipt)
     }
 
     public static func detectManagedWindow(managedPIDs: Set<Int32>) -> Bool {

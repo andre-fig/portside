@@ -13,6 +13,36 @@ A check proves its observed behavior only. Use these operational states:
 [STATUS](STATUS.md) owns results from this audit. Historical results in
 [BOOTSTRAP_VALIDATION](BOOTSTRAP_VALIDATION.md) are not new executions.
 
+The [0.1.28 first-launch follow-up](STEAM_FIRST_LAUNCH_FIX.md) adds actual-host
+tests for immediate exit, SIGKILL, exec failure, redaction and inherited output,
+and desktop readiness tests for early termination, detached children, unrelated
+Wine, canonical prefix ownership and missing window/webhelper. The engine build
+now runs `scripts/build-runtime/validate-engine-execution.py` before packaging;
+layout validation repeats it after extraction. It executes x64 and x86 Windows
+commands in a fresh symlinked prefix, with cleanup restricted to that fixture.
+`scripts/build-runtime/test-loader-layout.py` independently compares minimal
+Darwin loader layouts, optionally with Developer ID. These checks still do not
+establish graphical Steam acceptance or final distribution signing.
+
+The release binding tests run with
+`python3 -B -m unittest discover -s scripts/tests -v` and are included in CI's
+production source policy job. They cover pending/failed/cancelled runtime builds,
+skipped engine-dependent assembly, expired artifacts, wrong source/run provenance
+and disagreeing manifests. `actionlint .github/workflows/*.yml` checks wiring;
+no workflow dispatch is required for these local checks.
+
+Extracted-layout validation also invokes
+`python3 scripts/build-runtime/validate-steam-bootstrap.py WRAPPER ENGINE WINETRICKS`.
+This uses a fresh wrapper/home/symlinked prefix and the actual host, without
+test-only DLL overrides; both system32 and syswow64 kernel32 must exist and both
+Windows commands must return their expected nonzero statuses. Paths must refer
+to an unassembled build wrapper, installed-layout engine and winetricks source
+root. Adding `--install-steam` downloads and verifies Valve's installer via the
+official quiet winetricks verb. Adding `--observe-steam` then opens Steam without
+flags for a 120-second manual observation interval. Neither installation nor
+the observation timer proves a rendered, interactive window. Cleanup only stops
+the newly-created fixture's Wine server and removes that temporary fixture.
+
 ## Automated check matrix
 
 Commands run from the repository root unless the row names another directory.

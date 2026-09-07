@@ -25,9 +25,13 @@ for executable in wine wineboot wineserver; do
     [ -x "$engine/bin/$executable" ] || { echo "engine executable is missing: $executable" >&2; exit 1; }
 done
 [ -d "$engine/share-wine" ] || { echo "engine share-wine directory is missing" >&2; exit 1; }
+mkdir -p "$engine/share"
+mv "$engine/share-wine" "$engine/share/wine"
+"$ROOT_DIR/scripts/build-runtime/validate-engine-execution.py" "$engine"
 
 winetricks="$TEMP_ROOT/PortsideWinetricks-$VERSION"
 [ -x "$winetricks/src/winetricks" ] || { echo "winetricks source is missing" >&2; exit 1; }
+python3 "$ROOT_DIR/scripts/build-runtime/validate-steam-bootstrap.py" "$wrapper" "$engine" "$winetricks"
 
 if find "$TEMP_ROOT" -type f \( -iname '*Sikarugir*' -o -iname 'Template-*' \) -print -quit | grep -q .; then
     echo "legacy runtime artifact found in clean layout" >&2

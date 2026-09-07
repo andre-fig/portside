@@ -5,6 +5,25 @@ of operational success. Dates are approximate commit periods (timezone can shift
 a day). [STATUS](STATUS.md) owns validation evidence. Revisit a decision explicitly,
 record its replacement and update related docs; do not silently restore old behavior.
 
+## D13 — Use x86_64 Wine/WoW64 for Windows Steam on Apple silicon
+
+- **Date:** 2026-09-07 UTC, first-launch investigation of app 0.1.28/runtime 0.1.26.
+- **Status:** Adopted in source; complete signed Steam acceptance remains separate.
+- **Decision:** Keep the native Swift host and build tools, but compile the Darwin
+  Wine engine and bundled FreeType for x86_64, using Rosetta on Apple silicon.
+  Reject an arm64 engine target for this source recipe. Bind persistent engine
+  selection to target architecture and recipe/dependency hash, and require real
+  x64 and x86 Windows execution in disposable prefixes before packaging and
+  after archive extraction.
+- **Reason:** The tracked Darwin loader has a low-address, 4 KiB layout that
+  receives SIGKILL when compiled arm64 on the tested macOS, including with valid
+  Developer ID signing. WoW64 PE outputs alone do not supply a native arm64 CPU
+  emulator for Windows x86 Steam. `wine --version` avoids the failing re-exec.
+- **Consequences:** Existing arm64 engine keys cannot satisfy the new recipe.
+  Native arm64 Wine would need a separately validated loader/emulation design;
+  signing exceptions or security-policy changes cannot substitute for it.
+  [Evidence and limits](STEAM_FIRST_LAUNCH_FIX.md).
+
 ## D1 — Portside produces the runtime from tracked sources
 
 - **Date:** August 2026, commit `ea7fdab`.
@@ -193,3 +212,36 @@ record its replacement and update related docs; do not silently restore old beha
   [maintenance](../apps/desktop/Sources/PortsideCore/PortsideStorageMaintenance.swift),
   [runtime installer](../apps/desktop/Sources/PortsideCore/PortsideRuntimePipeline.swift),
   [RUNTIME](RUNTIME.md).
+
+## D13 — Bind app publication to runtime assembly of the tested commit
+
+- **Date:** September 7, 2026.
+- **Status:** Implemented and locally tested; GitHub execution remains unvalidated.
+- **Decision:** App publication waits for successful runtime assembly of its
+  `target_sha`, then checks provenance, wrapper source commit, workflow build ID
+  and signed/unsigned manifest agreement. App-only changes assemble a new wrapper
+  and reuse the recipe-selected persistent engine; they do not rebuild Wine.
+- **Reason:** CI can finish before a new engine, so selecting the latest older
+  runtime could publish a new app with the original defective engine.
+- **Consequences:** Missing, failed, cancelled or expired matching evidence blocks
+  release. Waiting occurs on Linux before the macOS publication job. Existing
+  production publication triggers remain; this change authorizes no agent push,
+  dispatch or promotion. See [RELEASE](RELEASE.md).
+
+## D14 — Defer optional Wine addons during Steam prefix bootstrap
+
+- **Date:** September 7, 2026.
+- **Status:** Verified for local prefix creation and official Steam installation;
+  final distribution and graphical Steam acceptance remain unvalidated.
+- **Decision:** Only `--create-prefix` temporarily excludes `mscoree`/`mshtml`
+  registration, deferring optional Mono/Gecko installers. Steam/game subprocesses
+  receive normal DLL loading; no registry DLL override is written. Install Steam
+  through the official `winetricks -q steam` verb and its pinned checksums.
+- **Reason:** Wine's addon registration opens a modal installer before WoW64 files
+  finish initialization. Interrupting that bootstrap leaves a partial prefix;
+  subsequently starting Valve's PE32 installer can fail to load `kernel32.dll`.
+- **Consequences:** This baseline prepares Steam without addon dialogs. It does
+  not claim Mono/.NET or Gecko availability; applications needing them require
+  separate component installation and acceptance. The production-host bootstrap
+  probe exercises the same policy, without test-only overrides. See
+  [the investigation](STEAM_FIRST_LAUNCH_FIX.md) and [RUNTIME](RUNTIME.md).

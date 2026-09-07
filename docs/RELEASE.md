@@ -31,7 +31,7 @@ the YAML's `environment: production` alone does not prove required reviewers.
 
 | Workflow                                                                           | Trigger and output                                                                                                                                                         | Boundary                                                                                                                                      |
 | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| [CI](../.github/workflows/ci.yml)                                                  | Push/PR to `main`, except landing-only paths; production-source policy plus backend dependency installation, Prisma schema validation and build.                           | No Swift tests, backend unit tests, lint or typecheck job. Local hooks carry broader checks.                                                  |
+| [CI](../.github/workflows/ci.yml)                                                  | Push/PR to `main`, except landing-only paths; production-source policy and runtime source-binding tests plus backend dependency installation, Prisma schema validation and build.                           | No Swift tests, backend unit tests, lint or typecheck job. Local hooks carry broader checks.                                                  |
 | [Build Desktop Validation](../.github/workflows/build-desktop.yml)                 | Successful CI on `main` with relevant desktop/packaging paths, or dispatch; arm64 app ZIP, DMG, dSYM and checksums, retained 14 days.                                      | Development bundle, ad hoc by default; no notarization or GUI acceptance.                                                                     |
 | Railway connector                                                                  | Provider-side deployment of the Landing service from `main`; local pre-push runs Bun lint, typecheck and build before publication.                                         | External to GitHub Actions; service variables, domains and the deployed revision remain provider-side state.                                  |
 | [Build Portside Engine](../.github/workflows/build-engine.yml)                     | Relevant `main` changes or dispatch; Linux preflight, `macos-15` Wine build, engine upload and 30-day evidence.                                                            | Independent source engine; no app release or runtime manifest.                                                                                |
@@ -44,19 +44,29 @@ the YAML's `environment: production` alone does not prove required reviewers.
 Engine/assembly change decisions come from
 [changed-components.sh](../scripts/build-runtime/changed-components.sh), in
 addition to YAML path filters. Wine/toolchain/patch changes wait for the engine
-workflow; wrapper/winetricks changes reuse an available engine. These pipelines
-are separate from app CI. Release chooses the most recent successful `main`
-runtime workflow with an unexpired metadata/full artifact among the last 50
-successful runs; it does not require that runtime to share the app's commit.
+workflow; wrapper/winetricks and app changes reuse the recipe-selected engine.
+Every app release requires a runtime assembly of the same `target_sha`, even
+when the engine is unchanged. The Linux `wait-runtime` job waits up to five hours
+for that assembly, ignoring successful change-filter runs whose build was
+skipped. Failed/cancelled builds, expired evidence and timeout block publication;
+there is no fallback to an older commit. Runtime runs carry their actual checkout
+SHA in `run-name`, because a `workflow_run` event can have a different default
+branch head. Both runtime preflight and assembly check out the engine event SHA.
+Runtime concurrency is per source SHA and does not cancel another revision's
+assembly. Reading the engine job result adds `actions: read`, not write access.
+For manual app releases, matching runtime evidence must already exist or be
+produced by a separately authorized runtime build of that revision. The waiter
+does not dispatch workflows or promote any artifacts.
 
 ```mermaid
 flowchart LR
     C[CI on main] --> D[Desktop validation]
-    C --> A[App release: sign and notarize]
+    C --> W[Wait for runtime of tested commit]
     E[Engine build] --> R[Runtime assembly and signature]
     R --> S[Single production bucket]
     R --> M[Retained runtime metadata]
-    M --> A
+    M --> W
+    W --> A[App release: sign and notarize]
     A --> S
     A --> B[Backend runtime and app registration]
     S --> G[Separate operator GUI acceptance]
@@ -66,8 +76,10 @@ flowchart LR
 
 The [release workflow](../.github/workflows/release-production.yml) checks the
 selected commit has successful CI jobs named `Production source policy` and
-`Backend schema and build`. It restores Swift caches, selects prior runtime
-metadata, validates basic runtime structure, and uses that runtime version as
+`Backend schema and build`. After runtime assembly, it binds downloaded
+provenance and wrapper `sourceCommit` to `target_sha`, binds `buildId` to the
+selected workflow run, and requires signed/unsigned manifest payload agreement.
+Existing manifest and layout checks still apply. It uses that runtime version as
 the base app version. When the current API appcast already has that or a later
 version, it increments the latest app patch number. If that lookup fails, the
 base version can be reused; do not treat this as an unconditional no-overwrite
@@ -109,6 +121,15 @@ runner; the app receives public keys only. The mutable Wine wrapper is not
 signed by the desktop Developer ID signing script; its distribution trust is
 the runtime manifest. Hardened Runtime options on the app do not establish
 that the wrapper or Wine has been independently notarized.
+
+The [0.1.28 first-launch investigation](STEAM_FIRST_LAUNCH_FIX.md) proved a
+Darwin loader architecture/layout failure that persists with Developer ID.
+The corrected engine recipe targets x86_64 and requires real x64/x86 Windows
+command execution in disposable prefixes before packaging and after extraction.
+Its new architecture/recipe storage key prevents reuse of the earlier arm64
+engine for the same Wine commit. This changes engine selection, not publication
+authority. Final runtime Developer ID/notarization remains a separate acceptance
+requirement; the engine execution checks do not replace signing.
 
 The backend [runtime service](../apps/backend/src/modules/runtime/runtime.service.ts)
 serves `/v1/appcast.xml` from registered production/superseded app releases

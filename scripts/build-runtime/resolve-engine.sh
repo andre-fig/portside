@@ -22,7 +22,12 @@ case "$wine_version" in
 esac
 
 short_commit="$(printf '%s' "$wine_commit" | cut -c 1-12)"
-engine_version="wine-${wine_version}-${short_commit}"
+target_arch="${PORTSIDE_WINE_ARCH:-x86_64}"
+[ "$target_arch" = x86_64 ] || { echo "the Steam engine requires x86_64 Wine with WoW64" >&2; exit 1; }
+# Architecture and recipe are part of storage identity: never reuse the broken
+# arm64 engine merely because the Wine source commit has not changed.
+recipe_checksum="$(cat "$ROOT_DIR/scripts/build-runtime/build-wine-engine.sh" "$ROOT_DIR/scripts/build-runtime/build-freetype.sh" "$ROOT_DIR/scripts/build-runtime/validate-engine-execution.py" "$ROOT_DIR/upstream/dependencies.json" | shasum -a 256 | awk '{print substr($1,1,12)}')"
+engine_version="wine-${wine_version}-${short_commit}-${target_arch}-${recipe_checksum}"
 archive_name="PortsideWineEngine-${engine_version}.tar.xz"
 archive_key="runtime/engines/validated/${engine_version}/${archive_name}"
 

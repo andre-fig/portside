@@ -300,9 +300,13 @@ public final class PortsideLogger: @unchecked Sendable {
     private let logURL: URL
     private let lock = NSLock()
 
-    public init(fileManager: FileManager = .default, logFileName: String = "portside.log") {
+    public convenience init(fileManager: FileManager = .default, logFileName: String = "portside.log") {
+        self.init(fileManager: fileManager, logFileName: logFileName, logDirectory: PortsidePaths.logs)
+    }
+
+    public init(fileManager: FileManager = .default, logFileName: String = "portside.log", logDirectory: URL) {
         self.fileManager = fileManager
-        self.logURL = PortsidePaths.logs.appendingPathComponent(logFileName)
+        self.logURL = logDirectory.appendingPathComponent(logFileName)
     }
 
     public func write(_ message: String, level: Level = .info) {
@@ -310,7 +314,7 @@ public final class PortsideLogger: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         do {
-            try fileManager.createDirectory(at: PortsidePaths.logs, withIntermediateDirectories: true)
+            try fileManager.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             if let size = try? fileManager.attributesOfItem(atPath: logURL.path)[.size] as? NSNumber, size.int64Value > 4 * 1024 * 1024 {
                 let rotated = logURL.appendingPathExtension("1")
                 try? fileManager.removeItem(at: rotated)

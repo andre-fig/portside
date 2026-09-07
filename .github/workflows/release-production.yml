@@ -113,16 +113,38 @@ jobs:
           }
           echo "Using successful CI run $ci_run_id for commit ${TARGET_SHA}."
 
+  wait-runtime:
+    name: Wait for runtime from this commit
+    needs: [changes, verify-ci]
+    if: needs.changes.outputs.should_release == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 310
+    outputs:
+      runtime_run_id: ${{ steps.runtime.outputs.runtime_run_id }}
+      runtime_artifact_name: ${{ steps.runtime.outputs.runtime_artifact_name }}
+      runtime_artifact_kind: ${{ steps.runtime.outputs.runtime_artifact_kind }}
+    steps:
+      - name: Check out tested sources
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.changes.outputs.target_sha }}
+      - name: Await validated runtime assembly
+        id: runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ needs.changes.outputs.target_sha }}
+        run: python3 scripts/wait_for_runtime.py
+
   build-and-publish-production:
     name: Build, notarize and publish production release
-    needs: [changes, verify-ci]
+    needs: [changes, verify-ci, wait-runtime]
     if: needs.changes.outputs.should_release == 'true'
     runs-on: macos-15
     timeout-minutes: 90
     environment: production
     outputs:
       version: ${{ steps.release-version.outputs.version }}
-      runtime_run_id: ${{ steps.runtime.outputs.runtime_run_id }}
+      runtime_run_id: ${{ needs.wait-runtime.outputs.runtime_run_id }}
     env:
       PORTSIDE_UPDATE_CHANNEL: production
       PORTSIDE_API_BASE_URL: ${{ secrets.PORTSIDE_API_BASE_URL }}
@@ -166,65 +188,28 @@ jobs:
           set -eu
           command -v aws >/dev/null 2>&1 || brew install awscli
 
-      - name: Select validated runtime artifact
-        id: runtime
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -eu
-          run_id=""
-          metadata_artifact_name=""
-          full_artifact_name=""
-          for candidate in $(gh run list --workflow build-runtime.yml --branch main --status success --limit 50 --json databaseId --jq '.[].databaseId'); do
-            metadata_candidate="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${candidate}/artifacts" --jq '.artifacts[] | select(.expired == false and (.name | startswith("portside-runtime-metadata-production-"))) | .name' | head -n 1)"
-            full_candidate="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${candidate}/artifacts" --jq '.artifacts[] | select(.expired == false and (.name | startswith("portside-runtime-production-"))) | .name' | head -n 1)"
-            if [ -n "$metadata_candidate" ] || [ -n "$full_candidate" ]; then
-              run_id="$candidate"
-              metadata_artifact_name="$metadata_candidate"
-              full_artifact_name="$full_candidate"
-              break
-            fi
-          done
-          test -n "$run_id"
-          gh run view "$run_id" --json workflowName,status,conclusion,headBranch \
-            | jq -e '(.workflowName == "Build Portside Runtime" and .status == "completed" and .conclusion == "success" and .headBranch == "main")' >/dev/null
-          if [ -n "$metadata_artifact_name" ]; then
-            artifact_name="$metadata_artifact_name"
-            artifact_kind=metadata
-          else
-            artifact_name="$full_artifact_name"
-            artifact_kind=full
-          fi
-          test -n "$artifact_name"
-          case "$artifact_name" in
-            portside-runtime-metadata-production-*|portside-runtime-production-*) ;;
-            *) echo "selected artifact is not a production runtime artifact" >&2; exit 1 ;;
-          esac
-          {
-            printf 'runtime_run_id=%s\n' "$run_id"
-            printf 'runtime_artifact_name=%s\n' "$artifact_name"
-            printf 'runtime_artifact_kind=%s\n' "$artifact_kind"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Download previously validated runtime artifact
+      - name: Download runtime validated for this commit
         uses: actions/download-artifact@v7
         with:
           github-token: ${{ github.token }}
-          run-id: ${{ steps.runtime.outputs.runtime_run_id }}
-          name: ${{ steps.runtime.outputs.runtime_artifact_name }}
+          run-id: ${{ needs.wait-runtime.outputs.runtime_run_id }}
+          name: ${{ needs.wait-runtime.outputs.runtime_artifact_name }}
           path: ${{ runner.temp }}/portside-release
 
-      - name: Validate reused production runtime evidence
+      - name: Validate production runtime source binding
         id: runtime-evidence
         env:
           PORTSIDE_RUNTIME_BUILD_DIR: ${{ runner.temp }}/portside-release
-          PORTSIDE_RUNTIME_ARTIFACT_KIND: ${{ steps.runtime.outputs.runtime_artifact_kind }}
+          PORTSIDE_RUNTIME_ARTIFACT_KIND: ${{ needs.wait-runtime.outputs.runtime_artifact_kind }}
+          TARGET_SHA: ${{ needs.changes.outputs.target_sha }}
+          RUNTIME_RUN_ID: ${{ needs.wait-runtime.outputs.runtime_run_id }}
         run: |
           set -eu
           test -s "$PORTSIDE_RUNTIME_BUILD_DIR/runtime-manifest-unsigned.json"
           test -s "$PORTSIDE_RUNTIME_BUILD_DIR/runtime-manifest.json"
           test -s "$PORTSIDE_RUNTIME_BUILD_DIR/provenance.json"
           test -s "$PORTSIDE_RUNTIME_BUILD_DIR/sbom.spdx.json"
+          python3 scripts/wait_for_runtime.py --validate-evidence "$PORTSIDE_RUNTIME_BUILD_DIR"
           ./scripts/build-runtime/validate-manifest.sh "$PORTSIDE_RUNTIME_BUILD_DIR/runtime-manifest.json"
           runtime_version="$(jq -r '.manifestVersion' "$PORTSIDE_RUNTIME_BUILD_DIR/runtime-manifest-unsigned.json")"
           test -n "$runtime_version" && test "$runtime_version" != null

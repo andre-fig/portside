@@ -47,7 +47,7 @@ final class PortsideCoreTests: XCTestCase {
         try PropertyListSerialization.data(fromPropertyList: ["CFBundleExecutable": "PortsideRuntimeHost", "CFBundleIdentifier": "com.portside.runtime", "CFBundlePackageType": "APPL"], format: .xml, options: 0).write(to: root.appendingPathComponent("Contents/Info.plist"))
         defer { try? FileManager.default.removeItem(at: root) }
         let spec = try PortsideSteamFlow.installationSpec(wrapper: root)
-        XCTAssertEqual(spec.arguments, ["--winetricks", "steam"])
+        XCTAssertEqual(spec.arguments, ["--winetricks", "-q", "steam"])
         XCTAssertFalse(spec.arguments.joined(separator: " ").contains("cef"))
         XCTAssertFalse(spec.arguments.contains { $0.contains("noreactlogin") || $0.contains("allosarches") })
     }
