@@ -110,6 +110,20 @@ restore/save and compiler-tool installation were removed.
 Before pushing, configure AWS CLI and the existing `PORTSIDE_PUBLIC_BUCKET`,
 `PORTSIDE_S3_ACCESS_KEY_ID`, `PORTSIDE_S3_SECRET_ACCESS_KEY`, `PORTSIDE_S3_REGION`
 and `PORTSIDE_S3_ENDPOINT` variables through an approved local secret provider.
+Alternatively, a developer already authenticated to the linked Railway project
+can select its production API as the local provider:
+
+```sh
+git config portside.engineStorageProvider railway
+```
+
+The helper checks the linked API's repository against Git origin, requires the
+production environment and reads only the five storage values into memory. It
+maps the backend's `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`,
+`S3_REGION` and `S3_ENDPOINT` names to the publisher names above. It does not
+write variables, deploy Railway services or store secret values in Git/config/logs.
+A complete explicitly supplied environment takes precedence; incomplete values
+cannot be combined with another provider. GitHub continues using its existing secrets.
 Only variable names belong in this repository. Missing transfer configuration
 blocks the push before expensive compilation. The hook uploads only unpublished
 input under `runtime/build-inputs/engines/<source-sha>/<engine-version>/` in the
@@ -129,6 +143,9 @@ Production keys are not passed into the local compilation subprocess. Compiler
 output is retained in a sanitized local `build.log`; a failed build blocks push. Native/PE
 prefix maps and a virtual Wine installation prefix avoid embedded developer
 paths; both packaging and CI extraction audit the produced tree before publication.
+Both source recipes set the macOS 13.0 deployment floor, and native validation
+checks all nested Mach-O architectures and minimum OS versions. The local SDK
+version must not silently raise the app's supported OS requirement.
 
 The compile-only review command below creates a local input without uploading
 or pushing; the normal pre-push invocation always requires a successful handoff:

@@ -50,6 +50,41 @@ def proof(root, expected):
 
 
 class LocalEngineTests(unittest.TestCase):
+    def test_railway_provider_reads_only_matching_production_api_storage(self):
+        service = {"serviceName": "api", "serviceId": "fixture-api", "source": {"repo": "fixture/portside"}}
+        environment = {"name": "production", "canAccess": True, "id": "fixture-production",
+                       "serviceInstances": {"edges": [{"node": service}]}}
+        project = {"id": "fixture-project", "environments": {"edges": [{"node": environment}]}}
+        values = {name: "fixture-value" for name in ("S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "S3_REGION", "S3_ENDPOINT")}
+        values["UNRELATED_SECRET"] = "must-not-be-forwarded"
+        replies = [subprocess.CompletedProcess([], 0, value) for value in
+                   ("https://github.com/fixture/portside.git\n", json.dumps(project), json.dumps(values))]
+        with patch.object(engine_input.subprocess, "run", side_effect=replies) as run:
+            selected = engine_input.railway_storage()
+        self.assertEqual(len(selected), 5)
+        self.assertNotIn("UNRELATED_SECRET", selected)
+        self.assertEqual(run.call_args_list[-1].args[0], ["railway", "variable", "list", "--project", "fixture-project",
+                                                        "--environment", "fixture-production", "--service", "fixture-api", "--json"])
+
+    def test_railway_provider_rejects_other_repository_or_environment_before_reading_secrets(self):
+        for name, repo in [("development", "fixture/portside"), ("production", "fixture/unrelated")]:
+            project = {"id": "fixture-project", "environments": {"edges": [{"node": {
+                "name": name, "canAccess": True, "id": "fixture-environment", "serviceInstances": {"edges": [{"node": {
+                    "serviceName": "api", "serviceId": "fixture-api", "source": {"repo": repo}}}]}}}]}}
+            replies = [subprocess.CompletedProcess([], 0, value) for value in
+                       ("git@github.com:fixture/portside.git\n", json.dumps(project))]
+            with self.subTest(name=name, repo=repo), patch.object(engine_input.subprocess, "run", side_effect=replies) as run:
+                with self.assertRaisesRegex(RuntimeError, "exactly one production API"):
+                    engine_input.railway_storage()
+                self.assertEqual(run.call_count, 2)
+
+    def test_partial_storage_environment_cannot_mix_with_another_provider(self):
+        with patch.dict(os.environ, {"PORTSIDE_PUBLIC_BUCKET": "fixture"}, clear=True), \
+                patch.object(engine_input, "railway_storage") as provider:
+            with self.assertRaisesRegex(RuntimeError, "configuration is missing"):
+                engine_input.storage_environment()
+            provider.assert_not_called()
+
     def test_failed_compilation_preserves_a_sanitized_log_and_blocks_push(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -135,7 +170,7 @@ class LocalEngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             expected = local_fixture(root)
-            with patch.object(engine_input, "storage_environment", return_value={}), \
+            with patch.object(engine_input, "storage_environment", return_value={"PORTSIDE_PUBLIC_BUCKET": "fixture-bucket"}), \
                     patch.dict(engine_input.os.environ, {"PORTSIDE_PUBLIC_BUCKET": "fixture-bucket"}), \
                     patch.object(engine_input.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
                 engine_input.transfer("upload", root, SHA, expected)
@@ -148,7 +183,7 @@ class LocalEngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             expected = local_fixture(root)
-            with patch.object(engine_input, "storage_environment", return_value={}), \
+            with patch.object(engine_input, "storage_environment", return_value={"PORTSIDE_PUBLIC_BUCKET": "fixture-bucket"}), \
                     patch.dict(engine_input.os.environ, {"PORTSIDE_PUBLIC_BUCKET": "fixture-bucket"}), \
                     patch.object(engine_input.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)) as run:
                 with self.assertRaisesRegex(RuntimeError, "no runner will wait or compile"):

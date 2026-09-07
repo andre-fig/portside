@@ -34,8 +34,10 @@ wrong workflow/source evidence, symlinks and local hook selection/index behavior
 Local producer tests additionally reject missing native CI receipts, mismatched
 recipe/source inputs and changed metadata after validation. They check that
 ordinary pushes need no transfer configuration and missing configuration fails
-before compilation. Safe tar extraction tests require `tarfile.data_filter`;
-use Python 3.12+ locally for the full suite (the native CI job pins Python 3.12).
+before compilation. Provider tests reject a Railway API from another repository/environment and
+prevent partial environment values from mixing with provider credentials.
+Safe tar extraction tests require `tarfile.data_filter`; use Python 3.12+ locally
+for the full suite (the native CI job pins Python 3.12).
 `actionlint .github/workflows/*.yml` checks wiring;
 no workflow dispatch is required for these local checks.
 

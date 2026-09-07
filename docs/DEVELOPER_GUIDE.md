@@ -36,7 +36,8 @@ check staged shell/JSON/Python/workflow syntax before commit and select both Swi
 suites/builds, script regressions or web checks before push. Production trust
 checks still run independently on Linux. Engine-changing pushes also prepare
 and transfer the source-built engine locally; [RELEASE](RELEASE.md) lists the
-required storage variable names. Keep their values in an approved secret provider,
+environment variables and the optional authenticated Railway provider.
+Keep their values in an approved secret provider,
 not shell scripts, Git, logs or artifacts.
 
 ## Local application entry points

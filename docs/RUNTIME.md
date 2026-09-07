@@ -71,6 +71,10 @@ Native and PE compiler prefix maps replace the developer checkout path, and
 Wine uses a virtual `/opt/portside-wine` install prefix with disposable DESTDIR
 installation. The packaged and extracted engine must pass a personal-path audit;
 local build paths cannot be shipped in binaries or debug data.
+The Wine and FreeType recipes explicitly target macOS 13.0, matching the app and
+wrapper floor even when the developer runs a newer SDK. Native checks inspect
+every Mach-O's architecture and deployment metadata before execution; a locally
+built library that requires a newer macOS cannot qualify for publication.
 See [RELEASE](RELEASE.md) for local storage configuration and the unpublished
 build-input namespace. No generated binaries enter Git.
 

@@ -249,14 +249,40 @@ The first exact-commit local build completed in approximately 14 minutes and
 returned expected version/x64/x86 statuses 0/37/23; this preceded the path-clean
 recipe and is not a publishable candidate. Local compiler logs now redact source,
 checkout and home paths, with a regression proving failure still blocks push.
+Actionlint, source audit, shell syntax, production policy, documentation file
+links and diff whitespace checks passed. Invoking the actual pre-push hook with
+the outgoing refs ran 49 tests (the system Python skipped the safe-extraction
+test; Python 3.14 ran all 49) and policy, then failed on missing local storage
+configuration before compilation or upload. No hook was bypassed.
 
-**Pending configuration/validation at this snapshot:** no local storage variables,
-AWS profile, backend environment file or release-secret directory was configured
-when inspected. The user was asked only for the secret provider/location, not to
-paste secret values. Actual local input upload and the revised GitHub consumer
-cannot complete until that configuration is available. Local source preparation,
-full workflow/static review and documentation remain subject to the final checks
-recorded in the subsequent completion message; no remote compile will be restarted.
+**Verified corrected local engine:** the exact-commit build at `ba445037` finished
+in 1,488.7 seconds with status 0. Version/x64/x86 controls returned 0/37/23 and
+the complete personal-path audit passed. A newly built host/winetricks fixture
+created its disposable symlinked prefix in 23.238 seconds (status 0), executed
+x64/x86 commands with expected statuses 37/23, and installed official Steam in
+71.408 seconds (status 0). No Steam authentication or graphical acceptance was attempted.
+The local invocation of the CI consumer safely extracted the final archive,
+passed its path audit and returned 0/37/23 (x64: 13.391 seconds). The publication
+validator accepted its matching local-review receipt and checksums; this is a
+local consumer test, not proof of a hosted run or storage publication.
+
+**Verified provider discovery:** local storage environment/profile files were
+absent, but the existing authenticated Railway CLI has the linked Portside
+production API's five storage variables. The optional local provider reads those
+values only into memory after matching repository and environment; no variable
+write, deployment or secret export occurred. Fifty-two Python 3.14 tests passed,
+including wrong-project/environment rejection and prevention of mixed providers.
+Actual input upload, revised hosted consumer/publication and final signed/graphical
+acceptance remain pending at this snapshot; hosted Wine compilation will not restart.
+
+**Additional distribution blocker found before upload:** the first path-clean
+engine inherited macOS 26.0 as its minimum OS from the local SDK; Wine, its nested
+loader/ntdll and FreeType all reported that floor through `vtool`. This conflicts
+with the app/wrapper's macOS 13+ contract and the macOS 15 native consumer. The
+Wine/FreeType recipes now explicitly target 13.0, the compilation cache includes
+that target, and every engine Mach-O must pass architecture/deployment checks.
+Fifty-five Python 3.14 tests passed. The earlier local archive is not eligible
+for upload; this source correction requires a new local build.
 
 ## Executive assessment
 

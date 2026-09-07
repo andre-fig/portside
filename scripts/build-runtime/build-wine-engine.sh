@@ -54,6 +54,8 @@ native_arch="$(uname -m)"
 # not an arm64 macOS CPU-emulation backend for Windows x86 Steam. Build the
 # Unix engine for x86_64 (Rosetta on Apple silicon); native build tools stay native.
 target_arch="${PORTSIDE_WINE_ARCH:-x86_64}"
+# Match the app/wrapper contract independently of the developer's installed SDK.
+export MACOSX_DEPLOYMENT_TARGET=13.0
 jobs="${PORTSIDE_BUILD_JOBS:-$(sysctl -n hw.ncpu)}"
 wine_version="$(tr -d '[:space:]' < "$SOURCE_DIR/VERSION")"
 host="${target_arch}-apple-darwin"
@@ -77,7 +79,7 @@ macos_version="$(sw_vers -productVersion 2>/dev/null || uname -s)"
 xcode_version="$(xcodebuild -version 2>/dev/null | tr '\n' ';' || true)"
 clang_version="$(clang --version | head -n 1)"
 recipe_checksum="$(cat "$0" "$ROOT_DIR/scripts/build-runtime/build-freetype.sh" "$ROOT_DIR/upstream/dependencies.json" | shasum -a 256 | awk '{print $1}')"
-cache_signature="$recipe_checksum|$wine_version|$wine_snapshot_checksum|$native_arch|$target_arch|$native_cflags|$native_cxxflags|$native_ldflags|$target_cflags|$target_cxxflags|$target_ldflags|$cross_cflags|$macos_version|$xcode_version|$clang_version"
+cache_signature="$recipe_checksum|$wine_version|$wine_snapshot_checksum|$native_arch|$target_arch|$MACOSX_DEPLOYMENT_TARGET|$native_cflags|$native_cxxflags|$native_ldflags|$target_cflags|$target_cxxflags|$target_ldflags|$cross_cflags|$macos_version|$xcode_version|$clang_version"
 # Keep developer checkout paths out of native/PE debug data and __FILE__.
 # The virtual destination is stable; the disposable source directory is not a
 # cache input because its actual location must not affect the resulting bytes.

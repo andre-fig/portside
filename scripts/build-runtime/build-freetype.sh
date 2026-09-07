@@ -2,6 +2,7 @@
 # Build the pinned font library for the Wine target, independently of Homebrew's
 # host architecture. No compiled upstream runtime is downloaded.
 set -eu
+export MACOSX_DEPLOYMENT_TARGET=13.0
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 BUILD_DIR="${PORTSIDE_RUNTIME_BUILD_DIR:-$ROOT_DIR/build/runtime}"
 case "$BUILD_DIR" in "$ROOT_DIR"/*) ;; *) echo "build directory must be inside the checkout" >&2; exit 1 ;; esac

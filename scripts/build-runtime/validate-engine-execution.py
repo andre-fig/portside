@@ -7,11 +7,41 @@ Version output alone does not execute Wine's nested Darwin loader.
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
 import tempfile
 import time
+
+
+def check_deployment(output):
+    versions = re.findall(r"\bminos\s+(\d+(?:\.\d+){0,2})", output)
+    versions += re.findall(r"cmd LC_VERSION_MIN_MACOSX\s+cmdsize\s+\d+\s+version\s+(\d+(?:\.\d+){0,2})", output)
+    if not versions or any(tuple(map(int, value.split("."))) + (0,) * (3 - len(value.split("."))) > (13, 0, 0) for value in versions):
+        raise RuntimeError("Engine Mach-O requires a newer macOS than the supported 13.0 floor or lacks deployment metadata")
+
+
+def check_platform(engine):
+    magics = {bytes.fromhex(value) for value in ("feedface", "feedfacf", "cefaedfe", "cffaedfe", "cafebabe", "bebafeca", "cafebabf", "bfbafeca")}
+    inspected = 0
+    for binary in engine.rglob("*"):
+        if binary.is_symlink() or not binary.is_file():
+            continue
+        with binary.open("rb") as handle:
+            if handle.read(4) not in magics:
+                continue
+        architecture = subprocess.run(["/usr/bin/lipo", "-archs", str(binary)], capture_output=True, text=True)
+        if architecture.returncode or architecture.stdout.strip() != "x86_64":
+            raise RuntimeError("Every engine Mach-O must target x86_64, including nested libraries")
+        deployment = subprocess.run(["xcrun", "vtool", "-show-build", str(binary)], capture_output=True, text=True)
+        if deployment.returncode:
+            raise RuntimeError("Cannot inspect engine Mach-O deployment metadata")
+        check_deployment(deployment.stdout)
+        inspected += 1
+    if not inspected:
+        raise RuntimeError("Engine contains no Mach-O binaries")
+    print(json.dumps({"probe": "macho-platform", "files": inspected, "architecture": "x86_64", "maximumMinimumMacOS": "13.0"}), flush=True)
 
 
 def validate(engine):
@@ -21,6 +51,7 @@ def validate(engine):
         result = subprocess.run(["/usr/bin/lipo", "-archs", str(binary)], capture_output=True, text=True)
         if result.returncode or result.stdout.strip() != "x86_64":
             raise RuntimeError("Steam requires an x86_64 Darwin engine, including its nested loader and ntdll")
+    check_platform(engine)
     with tempfile.TemporaryDirectory(prefix="portside-engine-probe-") as temporary:
         root = Path(temporary)
         (root / "home").mkdir()

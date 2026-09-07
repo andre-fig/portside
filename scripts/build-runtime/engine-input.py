@@ -22,26 +22,69 @@ def engine_info():
     return json.loads(subprocess.check_output([str(ROOT / "scripts/build-runtime/resolve-engine.sh")], text=True))
 
 
+def railway_storage():
+    """Read only the linked repository's production API storage configuration."""
+    def read(arguments, cwd=ROOT):
+        result = subprocess.run(arguments, cwd=cwd, capture_output=True, text=True, timeout=30)
+        if result.returncode:
+            raise RuntimeError("Cannot read the configured Railway storage provider; push blocked")
+        return result.stdout
+
+    origin = read(["git", "remote", "get-url", "origin"]).strip()
+    match = re.fullmatch(r"(?:https://github\.com/|git@github\.com:)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?", origin)
+    if not match:
+        raise RuntimeError("Railway storage requires an identifiable GitHub origin")
+    project = json.loads(read(["railway", "status", "--json"], ROOT / "apps/backend"))
+    candidates = []
+    for edge in project["environments"]["edges"]:
+        environment = edge["node"]
+        if environment["name"] != "production" or not environment["canAccess"]:
+            continue
+        for service_edge in environment["serviceInstances"]["edges"]:
+            service = service_edge["node"]
+            if service["serviceName"] == "api" and (service.get("source") or {}).get("repo") == match[1]:
+                candidates.append((environment["id"], service["serviceId"]))
+    if len(candidates) != 1:
+        raise RuntimeError("Railway storage must match exactly one production API for this repository")
+    environment_id, service_id = candidates[0]
+    values = json.loads(read(["railway", "variable", "list", "--project", project["id"],
+                             "--environment", environment_id, "--service", service_id, "--json"], ROOT / "apps/backend"))
+    mapping = {"PORTSIDE_PUBLIC_BUCKET": "S3_BUCKET", "PORTSIDE_S3_ACCESS_KEY_ID": "S3_ACCESS_KEY_ID",
+               "PORTSIDE_S3_SECRET_ACCESS_KEY": "S3_SECRET_ACCESS_KEY", "PORTSIDE_S3_REGION": "S3_REGION",
+               "PORTSIDE_S3_ENDPOINT": "S3_ENDPOINT"}
+    if any(not isinstance(values.get(key), str) or not values[key] for key in mapping.values()):
+        raise RuntimeError("Railway production API storage configuration is incomplete")
+    return {destination: values[source] for destination, source in mapping.items()}
+
+
 def storage_environment():
     required = ("PORTSIDE_PUBLIC_BUCKET", "PORTSIDE_S3_ACCESS_KEY_ID", "PORTSIDE_S3_SECRET_ACCESS_KEY",
                 "PORTSIDE_S3_REGION", "PORTSIDE_S3_ENDPOINT")
-    missing = [name for name in required if not os.environ.get(name)]
+    environment = dict(os.environ)
+    missing = [name for name in required if not environment.get(name)]
+    if len(missing) == len(required) and sys.platform == "darwin":
+        provider = subprocess.run(["git", "-C", str(ROOT), "config", "--get", "portside.engineStorageProvider"],
+                                  capture_output=True, text=True, timeout=5)
+        if provider.returncode == 0 and provider.stdout.strip() == "railway":
+            environment.update(railway_storage())
+            missing = []
     if missing:
         raise RuntimeError("Local engine transfer configuration is missing: " + ", ".join(missing))
     if not shutil.which("aws"):
         raise RuntimeError("AWS CLI is required for local engine transfer; install awscli before pushing")
-    environment = dict(os.environ)
+    for name in ("AWS_PROFILE", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN"):
+        environment.pop(name, None)
     for destination, source in {
         "AWS_ACCESS_KEY_ID": "PORTSIDE_S3_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY": "PORTSIDE_S3_SECRET_ACCESS_KEY",
         "AWS_REGION": "PORTSIDE_S3_REGION", "AWS_DEFAULT_REGION": "PORTSIDE_S3_REGION", "AWS_ENDPOINT_URL": "PORTSIDE_S3_ENDPOINT",
     }.items():
-        environment[destination] = os.environ[source]
+        environment[destination] = environment[source]
     return environment
 
 
 def transfer(operation, directory, sha, expected):
     environment = storage_environment()
-    bucket = os.environ["PORTSIDE_PUBLIC_BUCKET"]
+    bucket = environment["PORTSIDE_PUBLIC_BUCKET"]
     prefix = f"runtime/build-inputs/engines/{sha}/{expected['engineVersion']}"
     # Metadata is written last. This namespace is never a client download route
     # or a validated engine key; upload is not production publication.
