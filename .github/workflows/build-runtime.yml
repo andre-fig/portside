@@ -33,6 +33,7 @@ on:
   workflow_run:
     workflows: ["Build Portside Engine"]
     types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
@@ -45,6 +46,8 @@ concurrency:
 jobs:
   changes:
     name: Prepare runtime engine on Linux
+    # Failed engine completions have no artifact to assemble or release.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: production

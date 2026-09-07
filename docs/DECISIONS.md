@@ -302,3 +302,23 @@ record its replacement and update related docs; do not silently restore old beha
   download/repackaging fallback. Local runtime builds without prepared mode retain
   their explicit fetch path. Archive roots, manifests, production destinations and
   app-release triggers are preserved; no additional Wine compilation is required.
+
+## D18 — Publish each validated runtime through the automatic app release
+
+- **Date:** September 7, 2026; explicitly requested after the runtime-only release gap.
+- **Status:** Implemented but not end-to-end validated; see [STATUS](STATUS.md).
+- **Decision:** Use actual successful CI and runtime assembly/publication for the
+  same source as the release gate. Remove the separate desktop/packaging filter
+  over only the final commit. Runtime component filters continue to control
+  builds across the outgoing push. Keep one-shot Linux checks, native allocation
+  only when ready, duplicate publication suppression and retained source/run
+  evidence. Backend registration uses the same checkout as the validated build.
+- **Reason:** Runtime `0.1.34` passed and uploaded but remained undiscoverable
+  because the last commit changed runtime packaging rather than desktop files.
+  A multi-commit push ending in docs could similarly hide a product change.
+- **Consequences:** Wine-only and runtime-only fixes automatically produce the
+  configured app release and discovery registration. This supersedes D15/D17's
+  preservation of the old app-only filter. Docs-only and skipped-runtime runs
+  still cannot publish or allocate a native app job. Engine failures do not
+  allocate runtime runners. No Wine compilation is needed for this routing fix;
+  final signing/notarization and graphical acceptance retain their own checks.

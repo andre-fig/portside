@@ -27,7 +27,6 @@ jobs:
       runtime_run_id: ${{ steps.runtime.outputs.runtime_run_id }}
       runtime_artifact_name: ${{ steps.runtime.outputs.runtime_artifact_name }}
       runtime_artifact_kind: ${{ steps.runtime.outputs.runtime_artifact_kind }}
-      should_release: ${{ steps.filter.outputs.should_release }}
       target_sha: ${{ steps.target.outputs.sha }}
       target_ref: ${{ steps.target.outputs.ref }}
     steps:
@@ -42,36 +41,11 @@ jobs:
         id: target
         run: python3 scripts/wait_for_runtime.py --resolve-target
 
-      - name: Check for app or packaging changes
-        id: filter
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET_SHA: ${{ steps.target.outputs.sha }}
-          EVENT_NAME: ${{ github.event_name }}
-        shell: bash
-        run: |
-          set -eu
-          if [ "$EVENT_NAME" = workflow_dispatch ]; then
-            echo "Manual dispatch requested; running production release."
-            echo "should_release=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          files="$(gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/commits/${TARGET_SHA}" \
-            --jq '.files[].filename')"
-          if printf '%s\n' "$files" | grep -Eq \
-            '^(apps/desktop/|apps/runtime-host/|scripts/(package_app|create_dmg|build_release|sign_release|notarize_release|validate_release_bundle|generate_appcast|publish_release|register_runtime_release)\.sh$)'; then
-            echo "App or packaging files changed; running production release."
-            echo "should_release=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No app or packaging files changed; skipping production release."
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
-          fi
-
+      # Runtime build filters already select relevant changes across the push.
+      # Require actual assembly/publication, not another last-commit path filter:
+      # Wine-only fixes and pushes ending in a docs commit must also reach users.
       - name: Check CI and matching runtime once
         id: runtime
-        if: steps.filter.outputs.should_release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TARGET_SHA: ${{ steps.target.outputs.sha }}
@@ -88,6 +62,7 @@ jobs:
     outputs:
       version: ${{ steps.release-version.outputs.version }}
       runtime_run_id: ${{ needs.changes.outputs.runtime_run_id }}
+      target_sha: ${{ needs.changes.outputs.target_sha }}
     env:
       PORTSIDE_UPDATE_CHANNEL: production
       PORTSIDE_API_BASE_URL: ${{ secrets.PORTSIDE_API_BASE_URL }}
@@ -412,6 +387,8 @@ jobs:
     steps:
       - name: Check out release metadata
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.build-and-publish-production.outputs.target_sha }}
 
       - name: Download production release record
         uses: actions/download-artifact@v7

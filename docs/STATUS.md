@@ -340,10 +340,39 @@ available. Its receipt verification passed, all 34 Mach-O files passed platform
 checks, engine commands returned 0/37/23, and actual host prefix bootstrap
 returned 0 in 63.015 seconds with subsequent 37/23 exits. Clean layout passed.
 CI and completion routing passed; desktop/application publication jobs were
-correctly skipped for these runtime-automation-only changes. No Wine build was
-triggered by this follow-up. Application/backend promotion and rendered Steam
+skipped under the former desktop-only release filter for these runtime changes.
+That filter left the validated runtime undiscoverable; see the correction below.
+No Wine build was triggered by this follow-up. Application/backend promotion and rendered Steam
 acceptance remain separate, unperformed steps; no everyday prefix or installed
 runtime was modified during these checks.
+
+## Automatic runtime release follow-up — 2026-09-07 UTC
+
+**Implemented but not end-to-end validated:** user-authorized automatic runtime
+publication now uses successful same-source runtime assembly/publication and CI
+as its gate. The duplicate last-commit desktop/packaging filter is removed.
+Wine/wrapper/winetricks/packaging changes and multi-commit pushes ending in docs
+can reach app publication and backend registration. Docs-only or skipped-runtime
+runs still cannot allocate a native app release. Completion checks remain one-shot
+Linux jobs; duplicate publication suppression and source/run/artifact validation
+remain intact. Failed engine completions are rejected before runtime allocation.
+Registration now checks out the validated source instead of a later main revision.
+
+The observed gap was [release run 34144747392](https://github.com/andre-fig/portside/actions/runs/34144747392):
+its log said `No app or packaging files changed; skipping production release`
+after runtime `0.1.34` passed and uploaded. Neither app publication nor backend
+registration ran. This follow-up changes that automatic trigger explicitly; it
+does not treat a storage upload as customer availability or graphical acceptance.
+
+**Verified local checks:** 65 Python 3.14 script tests passed, including execution
+of the workflow gate against strict fake Actions evidence. Actionlint, shell
+syntax, runtime source audit, Wine/winetricks snapshot checks, lock/dependency
+JSON, production policy, documentation links and `git diff --check` passed.
+Swift/application code did not change; the earlier Swift test/build results
+remain scoped to the first-launch correction. The authorized push is pending.
+Hosted app signing/notarization, backend registration and rendered interactive
+Steam acceptance remain unverified at this snapshot. No everyday prefix or
+installed runtime is a validation fixture.
 
 ## Executive assessment
 

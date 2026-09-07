@@ -36,7 +36,7 @@ the YAML's `environment: production` alone does not prove required reviewers.
 | Railway connector                                                                  | Provider-side deployment of the Landing service from `main`; local pre-push runs Bun lint, typecheck and build before publication.                                         | External to GitHub Actions; service variables, domains and the deployed revision remain provider-side state.                                  |
 | [Build Portside Engine](../.github/workflows/build-engine.yml)                     | Relevant `main` changes or dispatch; Pre-push compiles locally; Linux verifies the uploaded input, macOS runs short execution checks, then Linux publishes with 30-day evidence.                                                            | Independent source engine; no app release or runtime manifest.                                                                                |
 | [Build Portside Runtime](../.github/workflows/build-runtime.yml)                   | Assembly changes or successful engine workflow; dispatch requires runtime version and artifact URL prefix. Linux detection/preflight and engine repackaging, macOS host build/validation, then Linux manifest signing and storage upload.  | Uses existing engine; one-day assembly handoff, full and metadata-only evidence retained 30 days. No backend manifest registration here.                               |
-| [Release Portside](../.github/workflows/release-production.yml)                    | CI or runtime completion on `main` rechecks both prerequisites for the same source; existing app/runtime-host/packaging filter or explicit main dispatch applies.                                               | Configured app, signature, notarization, upload, then backend runtime and app registration. Automatic publication, not gated by GUI workflow. |
+| [Release Portside](../.github/workflows/release-production.yml)                    | CI or runtime completion on `main` rechecks both prerequisites for the same source; every validated/published runtime qualifies, including runtime-only changes.                                               | Configured app, signature, notarization, upload, then backend runtime and app registration. Automatic publication, not gated by GUI workflow. |
 | [Validate Clean Portside Runtime](../.github/workflows/validate-clean-install.yml) | Dispatch with selected current/optional previous runtime artifact; self-hosted macOS arm64 GUI session.                                                                    | Operator-assisted test. Script needs an interactive terminal to confirm checks; otherwise it exits 2 without accepting GUI success.           |
 | Railway connector                                                                  | Provider-side deployment of the API, Worker and Cron services using the three `apps/backend/railway.*.json` configurations.                                                | External to GitHub Actions; service variables, domains and the deployed revision remain provider-side state.                                  |
 | [Sync Upstreams](../.github/workflows/sync-upstreams.yml)                          | Daily 03:17 UTC or dispatch; syncs sources and maintains a PR with the scoped `PORTSIDE_UPSTREAM_SYNC_TOKEN`, allowing PR checks to start without `GITHUB_TOKEN` approval. | May commit/push its automation branch and close obsolete PRs. Never merges or publishes runtime artifacts.                                    |
@@ -49,11 +49,20 @@ The engine workflow never invokes the Wine compiler. Its push paths exclude
 assembly-only scripts. Missing local input fails on Linux before macOS allocation;
 there is no remote compilation or active waiting fallback.
 Release event routing and change-filter changes alone do not allocate native
-engine/runtime jobs; CI and local script tests validate that orchestration.
+engine/runtime jobs; CI and local script tests validate that orchestration. Failed
+engine completion events do not allocate runtime runners; other branches do not
+trigger the runtime completion path.
 
-Every app release requires successful CI and runtime assembly of the same
-`target_sha`. Completion of **either** CI or runtime starts a short Linux
-prerequisite check. If the other is unfinished, the check exits successfully
+Every app release requires successful CI and runtime assembly/publication of the
+same `target_sha`. The runtime workflow's push-wide component decisions are the
+single change filter: a Wine, wrapper, winetricks or runtime packaging fix must
+reach app release and backend registration even when no desktop file changed.
+There is no second last-commit file filter in the release workflow, so a
+multi-commit push ending in documentation does not hide earlier product changes.
+Docs-only changes and successful runs with skipped assembly have no qualifying
+runtime and cannot allocate the macOS app job. No older runtime is borrowed to
+make such a push releasable. Completion of **either** CI or runtime starts a short
+Linux prerequisite check. If the other is unfinished, the check exits successfully
 with `ready=false`; its completion event rechecks later. There is no polling
 loop, five-hour waiter, or allocated runner between workflows. Only `ready=true`
 starts the macOS app job. Failed/cancelled builds, skipped assembly and expired
@@ -66,7 +75,8 @@ actual checkout SHA because a `workflow_run`
 event can report a different default-branch head. Runtime detection, assembly
 and publication check out the engine event SHA. The release prerequisite job
 checks out its workflow's orchestration revision, resolves the source from the
-trigger, and the native app build checks out that `target_sha`. Runtime
+trigger, and both the native app build and backend registration check out that
+`target_sha`, including its scripts and upstream lockfile. Runtime
 concurrency remains per source SHA. Release concurrency serializes completion
 events; a successful app storage publication for the same source suppresses
 another automatic publication, even if later registration failed. Such recovery

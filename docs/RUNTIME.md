@@ -161,6 +161,11 @@ signed storage URL. This runtime route is public and does not check license
 entitlement or a published artifact record in the database.
 Storage upload does not publish the backend's discovery record: the app release
 workflow separately calls [register_runtime_release.sh](../scripts/register_runtime_release.sh).
+A successful runtime publication automatically rechecks release prerequisites;
+CI success for the same source allows app publication and then discovery
+registration, including changes confined to Wine or runtime packaging. A skipped
+runtime job is not publication evidence. The release workflow has no additional
+desktop-only file filter.
 [RELEASE.md](RELEASE.md) documents that distinction and the absence of staging.
 
 ## Installation, prefix and launch

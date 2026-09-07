@@ -31,6 +31,11 @@ skipped engine-dependent assembly, expired artifacts, wrong source/run provenanc
 and disagreeing manifests. They also cover both completion orders, duplicate
 publication suppression, separate native/Linux runtime jobs, archive corruption,
 wrong workflow/source evidence, symlinks and local hook selection/index behavior.
+Workflow regression tests check that all completion events reach the prerequisite
+gate without a last-commit path filter and execute its actual command against a
+strict fake GitHub API. Runtime-only/multi-commit releases need only matching
+Actions evidence; absent/skipped runtime assembly cannot allocate an app release.
+Registration must check out the same source even when main advances.
 Local producer tests additionally reject missing native CI receipts, mismatched
 recipe/source inputs and changed metadata after validation. They check that
 ordinary pushes need no transfer configuration and missing configuration fails

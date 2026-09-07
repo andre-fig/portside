@@ -2,7 +2,9 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -226,6 +228,79 @@ class RuntimeChangeFilterTests(unittest.TestCase):
 
     def test_publication_validator_checks_both_pipelines(self):
         self.assertEqual(self.decisions(["scripts/build-runtime/validate-publication.py"]), (0, 0))
+
+
+class ReleaseWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(__file__).parents[2]
+        self.workflow = (self.root / ".github/workflows/release-production.yml").read_text()
+        self.prerequisites = self.workflow.split("  changes:\n", 1)[1].split("  build-and-publish-production:\n", 1)[0]
+
+    def test_all_completion_events_reach_the_same_unconditional_gate(self):
+        # The previous per-step path filter hid valid Wine-only and multi-commit
+        # pushes before the well-tested prerequisite script could even run.
+        self.assertNotIn("\n        if:", self.prerequisites)
+        self.assertNotIn("/commits/", self.prerequisites)
+        self.assertNotIn("steps.filter.outputs", self.prerequisites)
+        self.assertIn("if: needs.changes.outputs.ready == 'true'", self.workflow)
+
+    def gate(self, assembly="success", missing_runtime=False):
+        # Execute the actual workflow's gate command against a strict fake gh.
+        # It only serves Actions evidence: commit files (including the final
+        # docs commit in a multi-commit push) must never decide publication.
+        command = re.search(r"^        run: (python3 scripts/wait_for_runtime.py)$", self.prerequisites, re.M)
+        self.assertIsNotNone(command)
+        pages = {
+            "actions/workflows/release-production.yml/runs?branch=main&per_page=100": {"workflow_runs": []},
+            f"actions/workflows/ci.yml/runs?head_sha={SHA}&per_page=100": {"workflow_runs": [run(id=1)]},
+            "actions/runs/1/jobs?filter=latest&per_page=100": {"jobs": [
+                {"name": name, "conclusion": "success"} for name in ("Production source policy", "Backend schema and build")]},
+            "actions/workflows/build-runtime.yml/runs?branch=main&per_page=100": {"workflow_runs": [] if missing_runtime else [run()]},
+            "actions/runs/2/jobs?filter=latest&per_page=100": {"jobs": [
+                {"name": "Assemble and validate production runtime", "conclusion": assembly},
+                {"name": "Sign and publish production runtime on Linux", "conclusion": assembly}]},
+            "actions/runs/2/artifacts?per_page=100": api("artifacts"),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Path(directory)
+            database = fixture / "responses.json"
+            database.write_text(json.dumps(pages))
+            gh = fixture / "gh"
+            gh.write_text("#!" + sys.executable + "\n" + '''import json, os, sys
+from pathlib import Path
+assert sys.argv[1:4] == ["api", "--paginate", "--slurp"]
+prefix = "repos/fixture/portside/"
+assert sys.argv[4].startswith(prefix)
+pages = json.loads(Path(os.environ["TEST_API_RESPONSES"]).read_text())
+print(json.dumps([pages[sys.argv[4][len(prefix):]]]))
+''')
+            gh.chmod(0o755)
+            output = fixture / "output"
+            env = dict(os.environ, PATH=directory + os.pathsep + os.environ["PATH"],
+                       TEST_API_RESPONSES=str(database), GITHUB_OUTPUT=str(output),
+                       GITHUB_REPOSITORY="fixture/portside", GITHUB_RUN_ID="3", GITHUB_EVENT_NAME="workflow_run",
+                       TARGET_SHA=SHA, TARGET_REF="refs/heads/main")
+            result = subprocess.run([sys.executable, *command[1].split()[1:]], cwd=self.root,
+                                    env=env, text=True, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return dict(line.split("=", 1) for line in output.read_text().splitlines())
+
+    def test_runtime_only_or_push_ending_in_docs_can_release_from_actions_evidence(self):
+        result = self.gate()
+        self.assertEqual(result["ready"], "true")
+        self.assertEqual(result["runtime_run_id"], "2")
+        self.assertEqual(result["ci_run_id"], "1")
+
+    def test_docs_only_or_skipped_assembly_cannot_allocate_native_release(self):
+        for options in ({"missing_runtime": True}, {"assembly": "skipped"}):
+            with self.subTest(options=options):
+                self.assertEqual(self.gate(**options), {"ready": "false", "reason": "runtime_not_ready"})
+
+    def test_registration_uses_validated_source_even_when_main_advances(self):
+        native = self.workflow.split("  build-and-publish-production:\n", 1)[1].split("  register-production:\n", 1)[0]
+        registration = self.workflow.split("  register-production:\n", 1)[1]
+        self.assertIn("target_sha: ${{ needs.changes.outputs.target_sha }}", native)
+        self.assertIn("ref: ${{ needs.build-and-publish-production.outputs.target_sha }}", registration)
 
 
 if __name__ == "__main__":
