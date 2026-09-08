@@ -1,8 +1,10 @@
 # Working on Portside
 
-Portside is a native English-language macOS app that prepares a private local
-Wine wrapper and opens the official Windows Steam client. Steam comes from
-Valve through winetricks; Portside does not distribute Steam, games, saves or
+Portside is a native English-language macOS app intended to automate Sikarugir
+installation, configuration and the official Windows Steam client. Its current
+custom Wine wrapper does not complete that integration; see
+[the integration boundary and blockers](docs/SIKARUGIR_INTEGRATION.md).
+Steam comes from Valve through winetricks; Portside does not distribute Steam, games, saves or
 DRM/anti-cheat bypasses.
 
 ## Start here

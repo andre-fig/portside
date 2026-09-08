@@ -57,6 +57,24 @@ final class LaunchDiagnosticsTests: XCTestCase {
         XCTAssertEqual(try runFixture(script: script, arguments: ["--program", "cmd"]).status, 0)
     }
 
+    func testPrefixPreparationConfiguresOnlyCEFWithoutInheritingAddonDeferral() throws {
+        let script = #"""
+        #!/bin/sh
+        if [ "$1" = "-u" ]; then
+            [ "$2" = "-r" ] || exit 13
+            case "$WINEDLLOVERRIDES" in *mscoree,mshtml=*) exit 0 ;; *) exit 8 ;; esac
+        fi
+        [ -z "$WINEDLLOVERRIDES" ] || exit 9
+        [ "$1" = reg ] && [ "$2" = add ] || exit 10
+        [ "$3" = 'HKCU\Software\Wine\AppDefaults\steamwebhelper.exe\DllOverrides' ] || exit 11
+        [ "$5" = vulkan-1 ] && [ "$9" = native,builtin ] || exit 12
+        exit 0
+        """#
+        XCTAssertEqual(try runFixture(script: script, arguments: ["--create-prefix"]).status, 0)
+        let failing = "#!/bin/sh\n[ \"$1\" = -u ] && exit 0\nexit 7\n"
+        XCTAssertEqual(try runFixture(script: failing, arguments: ["--create-prefix"]).status, 7)
+    }
+
     func testTerminalReceiptDoesNotWaitForInheritedOutputEOF() throws {
         let result = try runFixture(script: "#!/bin/sh\n(/bin/sleep 1; echo child-output-preserved) &\nexit 9\n", inspectReceiptBeforeExit: true)
         XCTAssertEqual(result.status, 9)

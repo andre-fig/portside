@@ -6,6 +6,10 @@ date, commit, actual checks and unverified operations.
 
 ## Canonical task references
 
+The accepted runtime direction and missing source inputs are recorded in
+[Sikarugir integration](SIKARUGIR_INTEGRATION.md). The current direct-Wine
+implementation must not be confused with a completed Sikarugir integration.
+
 | Task                                                       | Read                                  | Purpose                                                              |
 | ---------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------- |
 | Understand the system or locate entry points               | [ARCHITECTURE](ARCHITECTURE.md)       | Applications, bootstrap, data ownership and service relationships    |
@@ -46,6 +50,7 @@ fit the consolidated layer.
 | [VALIDATION](VALIDATION.md)                                                                                                                     | Manual clean-install/Steam/game acceptance protocol                                              |
 | [BOOTSTRAP_VALIDATION](BOOTSTRAP_VALIDATION.md)                                                                                                 | Installation/update scenarios and explicitly historical local evidence                           |
 | [STEAM_FIRST_LAUNCH_FIX](STEAM_FIRST_LAUNCH_FIX.md) | 0.1.28 SIGKILL reproduction, loader architecture controls, launch diagnostics and acceptance limits |
+| [STEAM_GRAPHICS_FIX](STEAM_GRAPHICS_FIX.md) | 0.1.35 prefix upgrade, CEF/ANGLE loader controls, software rendering evidence and interactive acceptance limits |
 | [ROLLBACK](ROLLBACK.md)                                                                                                                         | Operator checklist and boundaries; exact endpoint/script contract in RELEASE                     |
 | [KEY_ROTATION](KEY_ROTATION.md)                                                                                                                 | Planned operator rotation procedure and implemented key-ring limits                              |
 | [PRIVACY](PRIVACY.md)                                                                                                                           | Data ownership, diagnostics and incomplete retention controls                                    |

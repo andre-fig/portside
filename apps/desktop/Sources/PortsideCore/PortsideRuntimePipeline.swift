@@ -217,19 +217,9 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
         }
         try AtomicInstaller.installDirectory(from: wrapperPending, to: destination, fileManager: fileManager)
 
-        let wrapperPrefix = destination.appendingPathComponent("Contents/SharedSupport/prefix", isDirectory: true)
         let managedPrefix = PortsidePaths.steamPrefix
         try fileManager.createDirectory(at: PortsidePaths.prefixes, withIntermediateDirectories: true)
-        if fileManager.fileExists(atPath: managedPrefix.path) {
-            if fileManager.fileExists(atPath: wrapperPrefix.path) { try fileManager.removeItem(at: wrapperPrefix) }
-            try fileManager.createSymbolicLink(at: wrapperPrefix, withDestinationURL: managedPrefix)
-        } else {
-            try fileManager.createDirectory(at: managedPrefix, withIntermediateDirectories: true)
-            if fileManager.fileExists(atPath: wrapperPrefix.path) { try fileManager.removeItem(at: wrapperPrefix) }
-            try fileManager.createSymbolicLink(at: wrapperPrefix, withDestinationURL: managedPrefix)
-            let prefixResult = try await runner.run(PortsideSteamFlow.prefixCreationSpec(wrapper: destination), logger: logger)
-            guard prefixResult.status == 0 else { throw PortsideError.processFailed("Portside prefix creation", prefixResult.status) }
-        }
+        try await preparePrefix(wrapper: destination, prefix: managedPrefix)
 
         let validation = try PortsideRuntimeValidator.validate(wrapper: destination, configuration: configuration, fileManager: fileManager)
         let canonical = PortsideWrapperValidation(wrapper: validation.wrapper, prefix: managedPrefix, launcher: validation.launcher, engineVersion: validation.engineVersion, configuration: validation.configuration)
@@ -243,6 +233,24 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
         }
         logger.write("Installed Portside runtime wrapper with WineD3D")
         return PortsideRuntimeInstallResult(validation: canonical, runtimeRecord: record)
+    }
+
+    /// Run once per installation/repair, including an existing or interrupted
+    /// prefix. The host executes wineboot -u -r with optional addons deferred only
+    /// in that subprocess. Ordinary Steam/game launches never repeat this work.
+    func preparePrefix(wrapper: URL, prefix: URL) async throws {
+        let link = wrapper.appendingPathComponent("Contents/SharedSupport/prefix")
+        try fileManager.createDirectory(at: prefix, withIntermediateDirectories: true)
+        // Remove the wrapper entry itself, including a dangling old symlink;
+        // never resolve it when removing and never remove the managed prefix.
+        if (try? fileManager.attributesOfItem(atPath: link.path)) != nil {
+            try fileManager.removeItem(at: link)
+        }
+        try fileManager.createSymbolicLink(at: link, withDestinationURL: prefix)
+        let result = try await runner.run(PortsideSteamFlow.prefixCreationSpec(wrapper: wrapper), logger: logger)
+        guard result.status == 0 else {
+            throw PortsideError.processFailed("Portside prefix preparation", result.status)
+        }
     }
 
     @discardableResult

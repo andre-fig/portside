@@ -14,8 +14,11 @@ Inherit the [root rules](../../AGENTS.md). Read
   program. Preserve bundle identity and resolved executable containment.
 - **Invariants:** use `Process` executable URLs and argument arrays, not shell
   command strings. The host does not fetch a prebuilt engine; the approved
-  winetricks Steam verb obtains Steam from Valve. Keep baseline WineD3D,
-  alternative renderer flags disabled, and runtime output sanitized. Preserve
+  winetricks Steam verb obtains Steam from Valve. The existing direct-Wine host
+  is a legacy implementation, not the intended substitute for Sikarugir.
+  Follow [the integration contract](../../docs/SIKARUGIR_INTEGRATION.md);
+  do not invent launcher arguments or enable renderer flags without the actual
+  upstream components and validation. Keep runtime output sanitized. Preserve
   existing prefixes, games, credentials and user data; never copy native Steam.
 - **Validation:** from repository root, `swift test --package-path apps/runtime-host`
   and `swift build --package-path apps/runtime-host`; host/interface changes also

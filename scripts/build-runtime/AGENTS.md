@@ -26,8 +26,12 @@ back to native storage download or repackaging.
 - Do not manually edit `vendor/` snapshots. Use the authorized sync process or
   document patches in `upstream/patches/`; verify that a patch is actually applied
   by the recipe. Do not weaken checksums, source binding, manifest or layout checks.
-- Preserve Steam's Valve download through the `steam` verb and the WineD3D
-  baseline. Keep user-facing host output in English.
+- Preserve Steam's Valve download through the `steam` verb. The intended runtime
+  integrates Sikarugir's launcher/SDK and component composition; WineD3D-only is
+  the current legacy implementation, not a permanent architectural requirement.
+  See [integration evidence and blockers](../../docs/SIKARUGIR_INTEGRATION.md).
+  An inspected upstream binary is a reference, never a commercial build input.
+  Keep user-facing host output in English.
 - Keep private keys outside checkout/bundles. Log only sanitized provenance,
   version and validation outcomes, never secrets or account data.
 - Current channel is production only. Do not invent staging, mix environments,

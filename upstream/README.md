@@ -22,17 +22,30 @@ the deterministic checksum of the imported snapshot.
 
 ## Build inputs and recorded limitations
 
+The project target is to automate Sikarugir, including its launcher/SDK and
+component composition. The existing custom wrapper is an incomplete substitute;
+see [SIKARUGIR_INTEGRATION](../docs/SIKARUGIR_INTEGRATION.md). Public source access
+was checked again on 2026-09-08; missing wrapper sources must not be inferred
+from a repository name or GitHub's automatically generated source archive.
+
 The pinned Wrapper repository contains only `README.md` and
 `NewestVersion.txt`. The pinned Engines repository contains
 `EngineList.txt`, `README.md`, `index.html` and a static-site workflow. Neither
 snapshot contains the source or
-build recipe for `Template-1.0.11` or `WS12WineSikarugir10.0_6`.
+build recipe for `Template-1.0.15` or `WS12WineSikarugir10.0_6`.
 
 Portside does not use those metadata-only snapshots as executable build input.
 The wrapper/template and native host are implemented in Portside source, and
 the engine recipe builds from `vendor/wine`. The build still stops on missing
 toolchain or library inputs and never falls back silently to a compiled
 external release.
+
+[sikarugir-reference.json](sikarugir-reference.json) pins a public wrapper asset
+for **inspection only**. It is separate from the build lock and dependencies;
+no build/fetch/publication script consumes it as executable input. The associated
+inspector verifies bytes and inventories selected components without extracting
+or executing them. It does not authenticate a Portside manifest or prove a
+source build, graphical compatibility or distribution acceptance.
 
 ## Synchronization rules
 

@@ -104,6 +104,10 @@ public struct SteamReadinessReport: Codable, Equatable, Sendable {
     public let failure: SteamLaunchFailure?
     public let runtimeTermination: RuntimeLaunchReceipt?
 
+    public var canCompleteGraphicalHandoff: Bool {
+        failure == nil && windowDetected && webHelperStarted && uiReady && interfaceVerification == .manualConfirmed
+    }
+
     public init(state: SteamReadinessState, processStarted: Bool, webHelperStarted: Bool, windowDetected: Bool, visibleButUnverified: Bool = false, uiReady: Bool = false, processRunningWithoutWindow: Bool = false, interfaceVerification: SteamInterfaceVerification = .notVerified, webHelperProcessCount: Int = 0, duration: TimeInterval = 0, failure: SteamLaunchFailure? = nil, runtimeTermination: RuntimeLaunchReceipt? = nil) {
         self.state = state
         self.processStarted = processStarted
@@ -205,6 +209,7 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
 
     public func waitForSteamWindow(wrapper: URL, baselinePIDs: Set<Int32> = [], timeout: TimeInterval = 90, poll: TimeInterval = 0.5,
                                    launchReceipt: @escaping @Sendable () -> RuntimeLaunchReceipt? = { nil },
+                                   rendererFailure: @escaping @Sendable () -> SteamLaunchFailure? = { nil },
                                    hostTerminated: @escaping @Sendable () async -> Bool = { false }) async -> SteamReadinessReport {
         let started = ProcessInfo.processInfo.systemUptime
         var processStarted = false
@@ -244,6 +249,7 @@ public final class SteamReadinessMonitor: @unchecked Sendable {
             steamRunning = steamRunning || helperStarted
             processStarted = processStarted || steamRunning
             windowDetected = windowProbe(managedPIDs)
+            if let rendererError = rendererFailure() { failure = rendererError; break }
             if windowDetected && helperStarted {
                 let report = SteamReadinessReport(state: .visibleButUnverified, processStarted: processStarted, webHelperStarted: helperStarted, windowDetected: true, visibleButUnverified: true, webHelperProcessCount: count, duration: ProcessInfo.processInfo.systemUptime - started)
                 logger.write("Steam window detected; visual interaction remains a manual acceptance check")

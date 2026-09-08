@@ -142,7 +142,7 @@ struct PortsideRuntimeHost {
         let request = try command(arguments: arguments, engine: engine, winetricks: winetricks, configuration: configuration)
         var environment = runtimeEnvironment(engine: engine, prefix: prefix, configuration: configuration)
         if arguments.first == "--create-prefix" {
-            // Wine registers these DLLs during prefix creation. With no bundled
+            // Wine registers these DLLs during prefix creation and upgrade. With no bundled
             // Mono/Gecko, registration opens modal optional-addon installers
             // before WoW64 prefix files are complete. Defer only those addons
             // for this bootstrap subprocess; Steam and game launches retain
@@ -150,6 +150,28 @@ struct PortsideRuntimeHost {
             environment["WINEDLLOVERRIDES"] = [environment["WINEDLLOVERRIDES"], "mscoree,mshtml="].compactMap { $0 }.joined(separator: ";")
             writeLog("prefix_setup optional_addons=deferred scope=bootstrap_process")
         }
+        let status = try await execute(request, environment: environment, bundle: bundle,
+                                       configuration: configuration, launchID: launchID)
+        guard arguments.first == "--create-prefix", status == 0 else { return status }
+        // Wine's builtin Vulkan loader cannot expose Valve's bundled SwiftShader
+        // ICD in this OpenGL engine. Let only CEF's executable load Valve's
+        // native loader. Games keep Wine's default; no inherited DLL override,
+        // renderer flags, sandbox changes, or third-party DLL downloads.
+        let compatibility = try steamWebHelperCompatibilityCommand(engine: engine)
+        return try await execute(compatibility,
+                                 environment: runtimeEnvironment(engine: engine, prefix: prefix, configuration: configuration),
+                                 bundle: bundle, configuration: configuration, launchID: launchID)
+    }
+
+    static func steamWebHelperCompatibilityCommand(engine: URL) throws -> Command {
+        Command(label: "Steam web helper configuration",
+                executable: try executable(in: engine, names: ["wine64", "wine"]),
+                arguments: ["reg", "add", #"HKCU\Software\Wine\AppDefaults\steamwebhelper.exe\DllOverrides"#,
+                            "/v", "vulkan-1", "/t", "REG_SZ", "/d", "native,builtin", "/f"])
+    }
+
+    static func execute(_ request: Command, environment: [String: String], bundle: URL,
+                        configuration: Configuration, launchID: UUID?) async throws -> Int32 {
         let commandDescription = diagnosticCommand(request)
         let version = configuration.version.range(of: #"^[0-9]+(?:\.[0-9]+){1,3}$"#, options: .regularExpression) != nil ? configuration.version : "unknown"
         writeLog("starting \(request.label) version=\(version) renderer=WineD3D \(commandDescription)")
@@ -260,7 +282,7 @@ struct PortsideRuntimeHost {
         let arguments: [String]
         switch command.label {
         case "version": arguments = ["--version"]
-        case "prefix setup": arguments = ["-u"]
+        case "prefix setup": arguments = ["-u", "-r"]
         case "Steam": arguments = ["$STEAM_EXECUTABLE"] + command.arguments.dropFirst().map { _ in "<redacted>" }
         default: arguments = command.arguments.map { _ in "<redacted>" }
         }
@@ -280,7 +302,10 @@ struct PortsideRuntimeHost {
         }
         if arguments.first == "--create-prefix" {
             let wineboot = try executable(in: engine, names: ["wineboot", "wineboot.exe"])
-            return Command(label: "prefix setup", executable: wineboot, arguments: ["-u"])
+            // -r skips Run/Startup programs, without killing processes. An
+            // existing prefix may register Steam for autostart; it must not
+            // launch under the temporary Mono/Gecko suppression before setup.
+            return Command(label: "prefix setup", executable: wineboot, arguments: ["-u", "-r"])
         }
         if arguments.first == "--winetricks" {
             guard FileManager.default.isExecutableFile(atPath: winetricks.path), arguments.count > 1 else {

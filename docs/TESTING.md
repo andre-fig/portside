@@ -1,5 +1,13 @@
 # Testing and evidence
 
+The [Sikarugir reference inspector](../scripts/build-runtime/inspect-sikarugir-template.py)
+reads a separately pinned upstream archive without extracting or running it.
+Its tests run with `python3 -B -m unittest discover -s scripts/tests -p test_inspect_sikarugir_template.py -v`.
+They cover tampered bytes,
+missing payloads and unsafe/ambiguous members; neither a successful inspection
+nor the existing source-presence audit proves an integrated Sikarugir build.
+See [the integration blocker and acceptance plan](SIKARUGIR_INTEGRATION.md).
+
 A check proves its observed behavior only. Use these operational states:
 
 | State                                    | Meaning                                                                      |
@@ -23,6 +31,16 @@ commands in a fresh symlinked prefix, with cleanup restricted to that fixture.
 `scripts/build-runtime/test-loader-layout.py` independently compares minimal
 Darwin loader layouts, optionally with Developer ID. These checks still do not
 establish graphical Steam acceptance or final distribution signing.
+
+The [0.1.35 graphics investigation](STEAM_GRAPHICS_FIX.md) adds installer tests
+for new/existing/interrupted prefixes and preservation, host tests for scoped
+CEF configuration and temporary addon suppression, and desktop tests for fresh,
+old, rotated, partial and recovered renderer records. Window/process detection
+cannot authorize graphical handoff without user confirmation. The real
+`validate-steam-bootstrap.py` additionally repeats prefix preparation with a
+synthetic preservation marker and a synthetic Run entry: upgrades must preserve
+the marker without launching the startup command. It queries the CEF loader
+policy and rechecks both Windows command architectures.
 
 The release binding tests run with
 `python3 -B -m unittest discover -s scripts/tests -v` and are included in CI's

@@ -5,6 +5,47 @@ of operational success. Dates are approximate commit periods (timezone can shift
 a day). [STATUS](STATUS.md) owns validation evidence. Revisit a decision explicitly,
 record its replacement and update related docs; do not silently restore old behavior.
 
+## D15 — Portside automates Sikarugir rather than replacing its integration
+
+- **Date:** 2026-09-08, explicit project-owner clarification.
+- **Status:** Target adopted; implementation blocked on launcher/SDK source and
+  matching build inputs. See [SIKARUGIR_INTEGRATION](SIKARUGIR_INTEGRATION.md).
+- **Decision:** Preserve Portside's native installation/update/trust UI, and
+  integrate Sikarugir's launcher, SDK, configuration and supported component
+  composition underneath it. A custom host directly invoking Sikarugir's Wine
+  fork does not satisfy this requirement.
+- **Supersedes:** D1/D2's choice of an independent Portside wrapper as the final
+  runtime architecture. Their source provenance, Portside build, Valve download,
+  manifest authentication and data-preservation requirements still apply.
+- **Consequences:** Obtain the missing sources and matching build recipe; audit
+  native/Windows architectures, renderer dependencies, macOS minimum and prefix
+  semantics before implementing the adapter. Do not assume that the public Wine
+  branch is the source recipe of a packaged Sikarugir engine. Do not substitute
+  precompiled upstream inputs or relabel the current runtime as Sikarugir.
+- **Acceptance:** Comparable disposable-prefix controls, Steam update/relaunch,
+  visible rendered content and real interaction. Upstream release notes and
+  successful offscreen rendering do not replace those controls.
+
+## D14 — Experimental Valve Vulkan loader fallback for the Steam web helper
+
+- **Date:** 2026-09-07 UTC, 0.1.35 graphics investigation.
+- **Status:** Experimental local implementation; offscreen rendering verified,
+  but the user confirmed Steam still remained black. Not an accepted graphical
+  fix or a replacement for the Sikarugir integration in D15.
+- **Decision:** During controlled prefix preparation, configure only Wine's
+  `AppDefaults\steamwebhelper.exe\DllOverrides` entry `vulkan-1=native,builtin`.
+  Keep WineD3D and normal loader selection for games. Run preparation on both
+  new and existing prefixes during installation/repair, not every opening.
+  Require manual interface confirmation before graphical handoff.
+- **Reason:** WineD3D exposes feature level 9_3 on the tested Mac; CEF needs
+  GLES 3. Wine's builtin Vulkan loader prevents Valve's working SwiftShader
+  fallback from loading. The native-loader control creates GLES 3 and renders
+  expected pixels using Valve's existing files, without sandbox-disabling flags.
+- **Consequences:** Software CEF rendering can increase CPU/power consumption.
+  No new runtime binary dependency or game Vulkan capability is introduced.
+  Steam updates can change its supplied loader/driver and require renewed
+  acceptance. See [evidence and limits](STEAM_GRAPHICS_FIX.md).
+
 ## D13 — Use x86_64 Wine/WoW64 for Windows Steam on Apple silicon
 
 - **Date:** 2026-09-07 UTC, first-launch investigation of app 0.1.28/runtime 0.1.26.

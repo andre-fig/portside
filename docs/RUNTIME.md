@@ -8,6 +8,14 @@ window.
 
 ## Components and source ownership
 
+The following describes the **current direct-Wine implementation**. The accepted
+target is an automated Sikarugir integration, including its launcher/SDK and
+matching runtime composition. That migration is blocked on missing launcher/SDK
+sources and a matching build recipe under the existing source-build requirement.
+See [SIKARUGIR_INTEGRATION](SIKARUGIR_INTEGRATION.md). The current three archives
+must not be described as an integrated Sikarugir runtime. Setting `DXMT=1` alone
+would not supply the omitted components or implement that migration.
+
 The runtime is downloaded separately from `Portside.app`. Three archives form
 one installed wrapper:
 
@@ -193,15 +201,24 @@ extracts archives into a temporary cache directory, combines components under
 It applies the baseline and moves the previous wrapper into a rollback folder
 before moving the candidate into place. The installed wrapper's
 `Contents/SharedSupport/prefix` symlinks to the persistent managed prefix.
-Existing managed prefixes are reused; new ones use `wineboot -u` through the
-host. During that subprocess only, `mscoree`/`mshtml` registration is deferred:
+Both new and existing managed prefixes use `wineboot -u -r` through the host once
+per runtime installation/repair. The `-r` skips Run/Startup programs without
+killing processes. Ordinary openings do not repeat preparation.
+During that subprocess only, `mscoree`/`mshtml` registration is deferred:
 without bundled Mono/Gecko, Wine would display optional-addon dialogs before
-finishing WoW64 initialization. No DLL override is written to the prefix or
+finishing WoW64 initialization. No Mono/Gecko DLL override is written to the prefix or
 applied to Steam/game launches. Mono/.NET and Gecko-dependent applications still
 need separate component installation and acceptance; Steam bootstrap does not
 claim those capabilities. The official Steam verb runs as `--winetricks -q steam`
 so Valve's installer uses its supported silent mode, with normal checksums and
-no extra Steam launch flags.
+no extra Steam launch flags. After successful prefix preparation the host sets
+the Wine app-specific `steamwebhelper.exe` override `vulkan-1=native,builtin`.
+This lets Valve's CEF load its bundled Vulkan loader and SwiftShader fallback;
+Wine's builtin loader in this engine has no Vulkan support. The policy applies
+only to that executable, without inherited environment overrides or changes to
+game rendering. Software UI rendering can increase CPU/power use and requires
+renewed acceptance after Steam updates. See [the graphics investigation](STEAM_GRAPHICS_FIX.md)
+for controls, provenance and the remaining interactive acceptance requirement.
 Source does not establish migration of arbitrary legacy in-wrapper or
 native macOS Steam data; never improvise that migration by copying credentials.
 
@@ -255,8 +272,12 @@ launch and one second with no managed runtime children, it returns a process
 failure instead of waiting for the 90-second graphical deadline. Execution
 failure, signal, nonzero exit, no Steam process, Steam closing before readiness,
 running without a window, and a window without webhelper have separate errors.
-Only a currently detected window with webhelper yields `visibleButUnverified`;
-this is still not evidence of rendered interaction.
+Only a currently detected window with webhelper yields `visibleButUnverified`.
+The desktop keeps a verification screen open until the user confirms rendered
+content and interaction. Current, explicit exhausted GPU initialization reports
+can fail the attempt; bounded log reads exclude prelaunch bytes and old
+timestamps, allow a recovery grace and clear failure after newer initialization.
+Neither the log monitor nor window detection positively verifies rendering.
 
 ## Update, preservation and rollback limits
 

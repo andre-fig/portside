@@ -1,5 +1,12 @@
 # Portside architecture
 
+**Target clarified on 2026-09-08:** Portside automates Sikarugir installation,
+configuration, updates and Steam launch. The direct-Wine implementation described
+below is an architectural gap, not completion of that target. Using Sikarugir's
+Wine fork alone does not integrate its launcher, SDK or renderer composition.
+See [SIKARUGIR_INTEGRATION](SIKARUGIR_INTEGRATION.md) for inspected evidence,
+the source-access blocker and the remaining implementation work.
+
 Portside is a native macOS launcher that prepares a private Windows Steam
 environment using a Portside-built Wine runtime. Valve supplies Steam and games;
 Portside does not redistribute them or bypass DRM or anti-cheat. The desktop
@@ -93,10 +100,11 @@ issuance connection. The diagram is a dependency map, not deployment evidence.
    Stop only processes attributed to this wrapper/prefix after setup, then open
    the wrapper through LaunchServices for a clean second launch.
 7. The readiness monitor requires a window-sized on-screen entry and a webhelper
-   process before the app marks setup complete. It reports
-   `visibleButUnverified`, not confirmed interaction. Launch the compatibility
-   agent and runtime updater, then hide and terminate `Portside.app`. Real rendered
-   login/game interaction is a separate [manual acceptance](VALIDATION.md).
+   process to report `visibleButUnverified`. The app keeps a verification screen
+   open and monitors current renderer failures/process lifetime. Only user
+   confirmation of visible content and interaction marks setup complete, starts
+   the compatibility agent/runtime updater and closes `Portside.app`.
+   Game acceptance remains a separate [manual validation](VALIDATION.md).
 
 ## Subsequent openings and process lifetime
 
@@ -106,9 +114,9 @@ including when the wrapper already exists. If managed Steam is stopped, it
 prepares and applies a pending runtime update. If Steam is running, runtime
 application is deferred. Missing `steam.exe` sends the user through repair.
 
-A ready existing installation shows **Open Steam**; clicking it launches the
-wrapper, waits for window/webhelper evidence, starts helpers and exits the main
-app. LaunchServices owns the wrapper launch independently; closing the launcher
+A prepared existing installation shows **Open Steam**; clicking it launches the
+wrapper, waits for window/webhelper evidence and asks for interface confirmation
+before starting helpers and exiting the main app. LaunchServices owns the wrapper launch independently; closing the launcher
 does not intentionally terminate Wine/Steam. This process model is implemented,
 but persistence of a real rendered Steam session remains an acceptance test.
 

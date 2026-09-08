@@ -410,6 +410,161 @@ Mach-O files. Rendered interactive Steam acceptance and customer installation of
 this release remain unvalidated. No everyday prefix or installed runtime was used
 as a validation fixture.
 
+## Live 0.1.35 installation follow-up — 2026-09-07 UTC
+
+**Verified installation and process readiness, scoped:** read-only observation of
+the user-initiated installation confirmed app `0.1.35` in `/Applications` and
+runtime wrapper/manifest `0.1.35`, bound to source `8b9c0a88`. App update/relaunch
+was verified at 18:36:06 UTC; runtime installation completed at 18:37:12. The
+wrapper's prefix link still points to the existing external managed prefix.
+The runtime host started Wine at 18:37:14; at 18:39:02 the desktop recorded
+`ready` and detected a managed window with webhelper. At 18:40:52, one Steam
+process, eight webhelpers and its runtime host remained alive. The launch
+receipt remained `running`; the former immediate SIGKILL 9 was not reproduced.
+No agent-initiated prefix changes, launches, termination or cleanup were used.
+
+**Verified remaining upgrade defect:** the live `wineboot` displayed the Wine
+Mono installer, corroborated by the user's screenshot and its accessibility
+window title. `PortsideRuntimeInstaller` runs the controlled `--create-prefix`
+bootstrap only for a nonexistent prefix; the existing-prefix branch only links
+it. The host's transient optional-addon deferral applies only to that bootstrap
+command. A subsequent Wine update during ordinary Steam launch can therefore
+show the modal addon installer on an existing prefix. New-prefix tests did not
+cover this path. The user confirmed choosing Cancel in the Mono dialog; Steam
+then reached process/window readiness.
+
+**Blocked graphical acceptance, user-confirmed:** the user reported that the
+Steam window was entirely black. Current-session `cef_log.txt` records ANGLE's
+D3D11/EGL context failure: requested GLES 3.0 exceeded the reported maximum 2.0.
+Fallback attempts required Vulkan 1.1 and returned an incompatible-driver error;
+the GPU subprocess repeatedly exited during initialization. `webhelper_gpu.txt`
+records that its GPU process could not boot after repeated SwiftShader failures.
+These are concrete renderer failures consistent with the observed black window;
+the underlying graphics compatibility fix has not been established by a
+controlled comparison. `ready`/`visibleButUnverified` must not be reported as a
+usable Steam interface. The current Wine command probes test execution only.
+
+Steam's own updater downloaded approximately 212 MB, and the host subsequently
+recorded a normal exit with status 0, reason `exit`, after 271.954 seconds. At the
+next observation, no Wine/Steam/webhelper process remained. No agent action
+closed or restarted them, and the evidence does not establish whether the user
+or the updater initiated shutdown. No Steam flags, graphics settings, prefix
+contents or trust settings were changed as part of this observation.
+
+The user also observed macOS's Intel compatibility deprecation notification.
+The shipped Wine engine is x86_64 and uses Rosetta on Apple silicon. Apple's
+[Rosetta support guidance](https://support.apple.com/en-ca/102527) states general
+availability through macOS 27, with restricted legacy-game functionality from
+macOS 28; this notification is a future compatibility limit, not the observed
+Mono bootstrap blocker. Screen capture was not authorized, so process/window
+metadata is not claimed as visual acceptance. No account or credential files
+were inspected.
+
+## Steam graphics correction follow-up — 2026-09-07 UTC
+
+**Verified renderer cause and controls, scoped:** the
+[0.1.35 graphics investigation](STEAM_GRAPHICS_FIX.md) used only disposable
+homes/prefixes and the metadata-checked local x86_64 engine archive with SHA-256
+`30fad3f925bdb550cb584833bd43cd70978c628d1bf7ec85e33ff04379ed159b`.
+On the Apple M4 Pro/macOS 26.6.2, WineD3D advertised OpenGL 4.1 but only D3D11
+feature level 9_3. Valve ANGLE created GLES 2 but rejected GLES 3. Its SwiftShader
+fallback loaded Wine's builtin Vulkan loader, which reports no compiled Vulkan
+support, and reproduced Vulkan -9 and GPU initialization failures. Selecting
+Valve's native Vulkan loader allowed its bundled SwiftShader to create GLES 3
+and render the expected RGBA pixel `64,128,191,255`. Vulkan -9 is not SIGKILL 9.
+The updated Steam client (`1788652215`, CEF 126, ANGLE `5d4df51d1d7d`) selected
+`egl-angle/swiftshader`, Vulkan 1.3.0, in the controlled candidate. Identical
+Steam/ANGLE/loader/SwiftShader hashes separated the loader policy from Steam's
+own update. Initial D3D11 errors can remain before successful fallback.
+
+**Implemented but not end-to-end validated:** from local base `0e5a5eb2`, the
+installer now prepares existing and new prefixes once per runtime installation
+or repair. The host runs `wineboot -u -r` with transient Mono/Gecko deferral and
+then sets `vulkan-1=native,builtin` only in Wine's `steamwebhelper.exe` AppDefaults.
+No DLL override is inherited by games. The `-r` avoids Run/Startup programs:
+the baseline fixture executed a synthetic startup command during upgrade,
+whereas the final host did not. Final bootstrap took 15.601 seconds; existing
+prefix update took 7.520 seconds, preserved a synthetic marker, and x64/x86
+controls returned 37/23. Steam software UI rendering can increase CPU/power use;
+game WineD3D and absent native GPU Vulkan support are unchanged.
+
+The desktop now retains an interface-verification screen after
+`visibleButUnverified`. Only explicit user confirmation marks graphical readiness
+and closes the launcher. A blank-window report, Steam closing or an explicit
+current exhausted GPU initialization report fails the attempt. Bounded GPU log
+reads snapshot prelaunch bytes, filter old timestamps and allow newer starts or
+initialized ANGLE reports to clear prior failures. Transient EGL errors alone
+do not fail a launch or prove successful rendering.
+
+**Verified automated checks:** 16 runtime-host tests and host build passed;
+139 desktop tests completed with one optional signed-app probe skipped and no
+failures, and the desktop build passed. The desktop suite initially encountered
+an EPERM reading a protected Sparkle test receipt; an isolated rerun and the
+final complete suite passed without changing file protection. All 65 script
+tests, source audit, Wine/winetricks snapshot checks, production policy,
+workflow lint and diff whitespace checks passed. The detailed report lists
+commands and the before/after real-host controls.
+
+**Blocked rendered interactive Steam acceptance, user-confirmed:** screen capture
+was unavailable; no screenshot was captured or inspected in that investigation.
+The user subsequently confirmed that the open candidate Steam window remains
+entirely black. The loader change fixes the measured initialization failure but
+has not fixed the visible Steam interface. Healthy CEF renderer reports and
+offscreen pixel controls are insufficient; composition/presentation remains under
+investigation.
+No login or game interaction has been accepted. Rosetta remains required, and
+the Intel notice was not suppressed. No installed runtime/prefix or native Steam
+was changed. No new Wine compilation, signature exception, sandbox-disabling
+flag, workflow change, commit, push, dispatch, deploy or publication occurred.
+A newly authenticated runtime/signed app release and installed graphical
+acceptance remain necessary before claiming a customer fix.
+
+## Sikarugir integration direction correction — 2026-09-08
+
+**Verified architectural gap:** the project owner clarified that Portside must
+automate Sikarugir installation/configuration/launch. The current wrapper builds
+an independent Swift host and directly invokes Wine. Using the Sikarugir Wine
+fork is not the requested launcher/SDK/runtime integration. D15 supersedes that
+architectural substitution without relaxing source-build or trust constraints.
+
+**Verified reference inventory, not graphical acceptance:** inspected the
+official Template 1.0.15 archive, 87,477,092 bytes, SHA-256
+`34273bcce885ce5a7fd6937af9ea344bb9961de7d55d6193f7413142e835c8c3`.
+Its actual members include Sikarugir Launcher/SDK, DXMT x86/x64 DLLs and Metal
+bridge, D9VK, MoltenVK, KosmicKrisp and GStreamer. The plist advertises macOS 14.
+These are omitted from or differ from the Portside assembly. The archive was
+read in a disposable directory without extraction, installation or execution.
+The inspection pin is separate from production source locks/build inputs.
+
+**Implemented diagnostic/documentation correction:** added an inspector and
+synthetic regressions, corrected root/host/build instructions, and documented
+the source/build/adapter migration in [SIKARUGIR_INTEGRATION](SIKARUGIR_INTEGRATION.md).
+The app/runtime implementation remains the previous local candidate. No claim
+is made that this change migrates the runtime or fixes the visible black window.
+
+**Verified checks:** `python3.14 -B -m unittest discover -s scripts/tests -v`
+passed all 70 tests, including five new reference-inspection tests. The actual
+pinned template passed the inspector. Source presence, Wine/winetricks snapshot
+audits, `validate-production-policy.sh`, `actionlint .github/workflows/*.yml`,
+changed-document local links, Python/JSON syntax and `git diff --check` passed.
+Prior host/desktop tests and
+build results remain scoped to the preceding candidate; no Swift implementation
+was changed in this direction-correction step.
+
+**Blocked runtime migration:** current public Wrapper/Engines/FOSS trees do not
+provide the launcher/SDK sources and matching complete build recipe. Access was
+requested from the project owner. There was no upstream-author message or
+precompiled commercial fallback. Installing renderers into the independent
+host would not by itself satisfy the clarified integration requirement.
+
+**Graphical result:** the earlier candidate remains user-confirmed black.
+The later fixture-only software-composition-start control changed log behavior
+but has no visual/interaction acceptance. No screenshot or Sikarugir graphical
+success is claimed. Installed runtime, everyday prefix and native Steam remain
+untouched. No Wine rebuild, security exception, commit, push, workflow change,
+dispatch, deployment or publication occurred in this step. A future migration
+needs new source builds, signing/authenticated release and real GUI acceptance.
+
 ## Executive assessment
 
 The repository implements the native application/install/update pipeline, a

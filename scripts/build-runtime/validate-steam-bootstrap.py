@@ -45,6 +45,10 @@ def validate(wrapper, engine, winetricks, install_steam=False, observe_steam=Fal
         server_environment = dict(environment, WINEPREFIX=str(prefix))
         log_directory = home / "Library/Application Support/Portside/Logs"
         checks = [("prefix-bootstrap", ["--create-prefix"], 0, 90),
+                  ("synthetic-autostart-registration", ["--program", "reg", "add", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "PortsideSyntheticProbe", "/t", "REG_SZ", "/d", r"cmd /c echo unexpected > C:\portside-autostart.txt", "/f"], 0, 30),
+                  ("existing-prefix-upgrade", ["--create-prefix"], 0, 90),
+                  ("synthetic-autostart-removal", ["--program", "reg", "delete", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "PortsideSyntheticProbe", "/f"], 0, 30),
+                  ("cef-loader-policy", ["--program", "reg", "query", r"HKCU\Software\Wine\AppDefaults\steamwebhelper.exe\DllOverrides", "/v", "vulkan-1"], 0, 30),
                   ("windows-x64", ["--program", "cmd", "/c", "exit", "37"], 37, 30),
                   ("windows-x86", ["--program", r"C:\windows\syswow64\cmd.exe", "/c", "exit", "23"], 23, 30)]
         if install_steam:
@@ -76,6 +80,13 @@ def validate(wrapper, engine, winetricks, install_steam=False, observe_steam=Fal
                     for directory in ("system32", "syswow64"):
                         if not (prefix / "drive_c/windows" / directory / "kernel32.dll").is_file():
                             raise RuntimeError("Bootstrap did not complete both Windows architectures")
+                    (prefix / "synthetic-preservation-marker").write_text("preserve synthetic data\n")
+                if label == "existing-prefix-upgrade":
+                    if (prefix / "drive_c/portside-autostart.txt").exists():
+                        raise RuntimeError("Prefix upgrade unexpectedly ran a startup program")
+                    if (prefix / "synthetic-preservation-marker").read_text() != "preserve synthetic data\n":
+                        raise RuntimeError("Existing-prefix preparation changed the preservation marker")
+                    print("Existing-prefix upgrade preserved synthetic data; no everyday prefix was used.", flush=True)
             if install_steam:
                 if not (prefix / "drive_c/Program Files (x86)/Steam/steam.exe").is_file():
                     raise RuntimeError("Valve installer did not produce steam.exe")

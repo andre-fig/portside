@@ -1,5 +1,12 @@
 # Builds, publication and updates
 
+The [Sikarugir integration correction](SIKARUGIR_INTEGRATION.md) is blocked on
+missing launcher/SDK sources and matching build inputs. Current direct-Wine
+artifacts are not completion of that migration. That investigation does not
+replace installed runtimes or alter the release workflow. A future integrated
+runtime still requires the same-commit CI/runtime/app chain below, authenticated
+artifacts and graphical acceptance; no publication was authorized or triggered.
+
 This is the current release contract, not evidence that a live release passed.
 See [STATUS.md](STATUS.md) for the audit snapshot and [TESTING.md](TESTING.md)
 for acceptance requirements. All external service, certificate, secret,
@@ -359,6 +366,13 @@ publication is authorized, `./scripts/publish_runtime.sh`. See [RUNTIME.md](RUNT
 for prerequisites and the actual build commands.
 
 ## Fail gates and post-publication acceptance
+
+The local [0.1.35 graphics correction](STEAM_GRAPHICS_FIX.md) changes desktop and
+wrapper-host source, with the existing engine retained. It needs fresh runtime
+assembly and a signed application release through the same-commit CI/runtime
+completion gates. No workflow or cross-workflow polling change is required.
+Its local CEF/software-rendering controls do not establish final installed Steam
+interaction or Developer ID/notarization of the separately downloaded runtime.
 
 Existing fail gates include wrong branch/missing successful CI, absent reusable
 runtime evidence, missing build files/keys, absent or ad hoc commercial identity,

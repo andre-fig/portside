@@ -48,7 +48,9 @@ final class PortsideModel: ObservableObject {
     @Published var licenseKey = ""
     @Published var licenseMessage = "Enter the purchase key from your Portside order."
 
-    enum SetupStep { case checking, license, rosettaRequired, downloading, installing, opening, ready, failed }
+    enum SetupStep { case checking, license, rosettaRequired, downloading, installing, opening, verifyingInterface, ready, failed }
+    private var interfaceCheck: (wrapper: URL, prefix: URL, renderer: SteamRendererDiagnostics)?
+    private var interfaceTask: Task<Void, Never>?
 
     private let store = EnvironmentStore()
     private let logger = PortsideLogger()
@@ -164,6 +166,7 @@ final class PortsideModel: ObservableObject {
         }.value
         if forceRuntimeRepair {
             state.setupCompleted = false
+            state.lastReadiness = nil
             forceRuntimeRepair = false
         }
         diagnostics.breadcrumb("setup_started", context: context(stage: "startup"))
@@ -205,7 +208,10 @@ final class PortsideModel: ObservableObject {
         guard bootstrap.state == .checkingRuntime, bootstrap.appUpdateCompleted, !isWorking else { return }
         if let wrapperPath = state.wrapperPath.map(URL.init(fileURLWithPath:)),
            isValidWrapper(wrapperPath),
-           state.setupCompleted {
+           (state.setupCompleted || state.lastReadiness != nil) {
+            // A previous launch report follows successful runtime/Steam setup.
+            // Closing Portside before confirming the interface must not turn
+            // the next opening into a repair that stops the existing session.
             isWorking = true
             setupStep = .checking
             Task { @MainActor in
@@ -258,7 +264,7 @@ final class PortsideModel: ObservableObject {
                 }
                 _ = advanceBootstrap(to: .ready)
                 showsInstaller = false
-                message = "Steam is ready to play"
+                message = "Your Steam environment is installed"
             }
         } else {
             setUp()
@@ -415,27 +421,18 @@ final class PortsideModel: ObservableObject {
                 state.lastExitCode = nil
                 persist()
                 let baselinePIDs = Set(readinessMonitor.captureProcessSnapshot().map(\.pid))
+                let renderer = SteamRendererDiagnostics(prefix: installed.validation.prefix)
                 let launch = try await steamLauncher.launch(wrapper: installed.validation.wrapper)
                 let launchID = launch.id
                 let report = await readinessMonitor.waitForSteamWindow(wrapper: installed.validation.wrapper, baselinePIDs: baselinePIDs,
-                    launchReceipt: { RuntimeLaunchReceipt.read(launchID: launchID) }, hostTerminated: { await launch.hasTerminated })
+                    launchReceipt: { RuntimeLaunchReceipt.read(launchID: launchID) }, rendererFailure: { renderer.currentFailure() }, hostTerminated: { await launch.hasTerminated })
                 state.lastReadiness = report
                 state.lastExitCode = report.runtimeTermination?.terminationStatus
                 if let failure = report.failure { throw failure }
-                agentLauncher.start(wrapper: installed.validation.wrapper, prefix: installed.validation.prefix)
-                state.setupCompleted = true
-                state.phase = .steamReady
-                state.lastError = nil
-                state.lastErrorCode = nil
                 state.lastSetupDuration = Date().timeIntervalSince(started)
-                persist()
-                agentLauncher.startRuntimeUpdater()
                 diagnostics.event("steam_window_detected", context: context(stage: "window_detected", report: report))
                 progress = 1
-                _ = advanceBootstrap(to: .ready)
-                setupStep = .ready
-                showsInstaller = false
-                hideAfterSteamWindow()
+                awaitInterfaceConfirmation(wrapper: installed.validation.wrapper, prefix: installed.validation.prefix, renderer: renderer)
             } catch {
                 _ = advanceBootstrap(to: .failed)
                 state.phase = .failedRecoverable
@@ -476,23 +473,16 @@ final class PortsideModel: ObservableObject {
         Task { @MainActor in
             do {
                 let baselinePIDs = Set(readinessMonitor.captureProcessSnapshot().map(\.pid))
+                let prefix = URL(fileURLWithPath: state.prefixPath ?? PortsidePaths.steamPrefix.path)
+                let renderer = SteamRendererDiagnostics(prefix: prefix)
                 let launch = try await steamLauncher.launch(wrapper: wrapper)
                 let launchID = launch.id
                 let report = await readinessMonitor.waitForSteamWindow(wrapper: wrapper, baselinePIDs: baselinePIDs,
-                    launchReceipt: { RuntimeLaunchReceipt.read(launchID: launchID) }, hostTerminated: { await launch.hasTerminated })
+                    launchReceipt: { RuntimeLaunchReceipt.read(launchID: launchID) }, rendererFailure: { renderer.currentFailure() }, hostTerminated: { await launch.hasTerminated })
                 state.lastReadiness = report
                 state.lastExitCode = report.runtimeTermination?.terminationStatus
                 if let failure = report.failure { throw failure }
-                agentLauncher.start(wrapper: wrapper, prefix: URL(fileURLWithPath: state.prefixPath ?? PortsidePaths.steamPrefix.path))
-                state.setupCompleted = true
-                state.phase = .steamReady
-                state.lastError = nil
-                state.lastErrorCode = nil
-                persist()
-                agentLauncher.startRuntimeUpdater()
-                _ = advanceBootstrap(to: .ready)
-                showsInstaller = false
-                hideAfterSteamWindow()
+                awaitInterfaceConfirmation(wrapper: wrapper, prefix: prefix, renderer: renderer)
             } catch {
                 _ = advanceBootstrap(to: .failed)
                 let userMessage = userFacingSetupFailure(error)
@@ -605,6 +595,7 @@ final class PortsideModel: ObservableObject {
         case .downloading: return "runtime_download"
         case .installing: return "runtime_installation"
         case .opening: return "steam_launch"
+        case .verifyingInterface: return "steam_interface_unverified"
         case .ready: return "ready"
         case .failed: return "failed"
         }
@@ -669,6 +660,70 @@ final class PortsideModel: ObservableObject {
             managed.contains(snapshot.pid) &&
                 (snapshot.command.localizedCaseInsensitiveContains("steam.exe") || snapshot.command.localizedCaseInsensitiveContains("steamwebhelper"))
         }
+    }
+
+    private func awaitInterfaceConfirmation(wrapper: URL, prefix: URL, renderer: SteamRendererDiagnostics) {
+        interfaceTask?.cancel()
+        interfaceCheck = (wrapper, prefix, renderer)
+        state.phase = .windowWaiting
+        state.lastError = nil
+        state.lastErrorCode = nil
+        setupStep = .verifyingInterface
+        showsInstaller = true
+        message = "A Steam window was detected. Check that its content is visible and responds to clicks."
+        persist()
+        interfaceTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self, self.setupStep == .verifyingInterface else { return }
+                if let failure = renderer.currentFailure() { self.failInterface(failure); return }
+                if !self.isManagedSteamRunning(wrapper: wrapper, prefix: prefix) {
+                    self.failInterface(.steamExitedBeforeReady); return
+                }
+            }
+        }
+    }
+
+    func confirmSteamInterface() {
+        guard setupStep == .verifyingInterface, let check = interfaceCheck, let report = state.lastReadiness else { return }
+        if let failure = check.renderer.currentFailure() { failInterface(failure); return }
+        guard isManagedSteamRunning(wrapper: check.wrapper, prefix: check.prefix) else {
+            failInterface(.steamExitedBeforeReady); return
+        }
+        let confirmed = SteamReadinessReport(state: .uiReady, processStarted: report.processStarted,
+            webHelperStarted: report.webHelperStarted, windowDetected: report.windowDetected,
+            uiReady: true, interfaceVerification: .manualConfirmed,
+            webHelperProcessCount: report.webHelperProcessCount, duration: report.duration)
+        guard confirmed.canCompleteGraphicalHandoff else { return }
+        interfaceTask?.cancel(); interfaceTask = nil; interfaceCheck = nil
+        state.lastReadiness = confirmed
+        state.setupCompleted = true
+        state.phase = .steamReady
+        state.lastError = nil; state.lastErrorCode = nil
+        persist()
+        agentLauncher.start(wrapper: check.wrapper, prefix: check.prefix)
+        agentLauncher.startRuntimeUpdater()
+        _ = advanceBootstrap(to: .ready)
+        setupStep = .ready
+        showsInstaller = false
+        hideAfterSteamWindow()
+    }
+
+    func reportBlankSteamWindow() { failInterface(.rendererInitializationFailed) }
+
+    private func failInterface(_ failure: SteamLaunchFailure) {
+        interfaceTask?.cancel(); interfaceTask = nil; interfaceCheck = nil
+        state.phase = .failedRecoverable
+        state.lastError = failure.localizedDescription; state.lastErrorCode = failure.code
+        state.lastReadiness = SteamReadinessReport(state: .failed,
+            processStarted: state.lastReadiness?.processStarted ?? false,
+            webHelperStarted: state.lastReadiness?.webHelperStarted ?? false,
+            windowDetected: state.lastReadiness?.windowDetected ?? false, failure: failure)
+        persist()
+        _ = advanceBootstrap(to: .failed)
+        message = failure.localizedDescription
+        setupStep = .failed
+        showsInstaller = true
     }
 
     private func hideAfterSteamWindow() {
@@ -738,6 +793,17 @@ struct RootView: View {
                             Spacer()
                         }
                         .padding(.horizontal, 28)
+                    } else if model.setupStep == .verifyingInterface {
+                        VStack(spacing: 14) {
+                            Spacer()
+                            Text("Check the Steam window").font(.title3.weight(.medium))
+                            Text(model.message).font(.subheadline).multilineTextAlignment(.center)
+                            HStack {
+                                Button("The window is blank") { model.reportBlankSteamWindow() }
+                                Button("Steam is usable") { model.confirmSteamInterface() }.buttonStyle(.borderedProminent)
+                            }
+                            Spacer()
+                        }.padding(.horizontal, 28)
                     } else if model.setupStep == .failed {
                         VStack(spacing: 16) {
                             Spacer()
@@ -759,7 +825,7 @@ struct RootView: View {
                 VStack(spacing: 10) {
                     PortsideLogoView(size: 54)
                     Text("Portside").font(.title2.weight(.semibold))
-                    Text("Steam is ready to play").font(.subheadline).foregroundStyle(.secondary)
+                    Text("Your Steam environment is installed").font(.subheadline).foregroundStyle(.secondary)
                     Text("Version \(model.appVersion)").font(.caption).foregroundStyle(.tertiary)
                     Button("Open Steam") { model.launchSteam() }
                         .buttonStyle(.borderedProminent)

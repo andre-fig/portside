@@ -99,7 +99,11 @@ a first-launch scenario.
    download, Sparkle signature verification, installation, relaunch, expected
    version verification and only then runtime installation.
 9. Confirm real rendered Steam login and keyboard/mouse interaction after the
-   complete flow, following `VALIDATION.md`. Process/Dock presence is insufficient.
+   complete flow, following `VALIDATION.md`. Portside must keep its verification
+   screen open after window/webhelper detection; confirm **Steam is usable** only
+   after actual interaction. **The window is blank** and fresh exhausted GPU
+   initialization failures must retain a recoverable error instead of completing
+   graphical handoff. Old or recovered log failures must not block this session.
 10. Exercise permission denial, newer installed build, interrupted update,
     offline feed, timeout and signed minimum-version block. Keep previous apps
     and all runtime/prefix/game data intact.
