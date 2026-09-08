@@ -5,13 +5,19 @@ Inherit the [root rules](../../AGENTS.md). Read
 [security](../../docs/SECURITY.md), then check current source before changes.
 
 - **Responsibility / entry point:** `Sources/PortsideRuntimeHost/main.swift` is
-  the native launcher inside the generated wrapper, not the desktop agent or
+  the maintenance helper in the Sikarugir candidate and the primary launcher in
+  legacy direct-Wine wrappers, not the desktop agent or
   an independent user app. `Package.swift` supports focused tests; production
   wrapper assembly uses `scripts/build-runtime/build-wrapper.sh` and the
   versioned `runtime/wrapper-template` from repository root.
 - **Local architecture:** Foundation resolves the app bundle and its JSON
-  resource; argument arrays select Wine, wineboot, winetricks or a Windows
-  program. Preserve bundle identity and resolved executable containment.
+  resource. Explicit `integration: sikarugir` routes winetricks to the contained
+  original launcher/SDK. Steam opens through the original Sikarugir application
+  entry point; the maintenance host rejects normal Steam launches. Absent integration retains the legacy
+  direct-Wine path. Unknown integrations and missing/escaping Sikarugir code
+  fail closed. Prefix maintenance remains a bounded host command, with addon
+  deferral confined to wineboot and no Wine 11 CEF policy applied to Sikarugir.
+  Preserve bundle identity and resolved executable containment.
 - **Invariants:** use `Process` executable URLs and argument arrays, not shell
   command strings. The host does not fetch a prebuilt engine; the approved
   winetricks Steam verb obtains Steam from Valve. The existing direct-Wine host

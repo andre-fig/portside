@@ -3,9 +3,9 @@ import AppKit
 import Darwin
 import PortsideCore
 
-/// The Portside launcher delegates prefix creation, winetricks and the final
-/// executable handoff to the Portside runtime host. It never invokes Wine
-/// directly and never passes Portside-specific Steam login flags.
+/// Opens the runtime's validated application entry point through LaunchServices.
+/// The original Sikarugir launcher owns Steam; Portside's helper handles setup.
+/// Legacy direct-Wine bundles retain their negotiated host receipt protocol.
 @MainActor
 final class SteamProcessLauncher {
     @MainActor final class Launch {
@@ -38,14 +38,10 @@ final class SteamProcessLauncher {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
         let id = UUID()
-        // Older hosts forward unknown arguments to Steam. Negotiate the receipt
-        // protocol through the authenticated wrapper configuration first.
-        let resource = wrapper.appendingPathComponent("Contents/Resources/portside-runtime.json")
-        if let data = try? Data(contentsOf: resource),
-           let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-           json["launchDiagnosticsVersion"] as? Int == 1 {
-            configuration.arguments = ["--launch-id", id.uuidString]
-        }
+        // Sikarugir remains the real app entry point. Receipt arguments belong
+        // only to the legacy host and must never become upstream program flags.
+        _ = try PortsideBundleComponents.runtimeLauncher(in: wrapper)
+        configuration.arguments = try PortsideSteamFlow.launchArguments(wrapper: wrapper, launchID: id)
         let application: NSRunningApplication = try await withCheckedThrowingContinuation { continuation in
             // AppKit invokes this completion handler on a concurrent queue.
             // Give it an explicitly nonisolated function type so Swift does

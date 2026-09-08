@@ -672,6 +672,66 @@ not yet been migrated to this working reference. Full bundle signing, restored
 product packaging, authenticated release and account/game acceptance remain
 separate work. No new commit, push, dispatch or publication occurred.
 
+## Sikarugir replacement started — 2026-09-08 UTC
+
+**Verified checkpoint:** the owner-requested commit `cb02472b` preserves the
+previous investigation, renderer corrections, original-runtime interaction
+evidence and all existing status records. The commit hook passed; no push,
+dispatch, deployment or publication occurred. The replacement below is subsequent
+uncommitted work. D19 records the approved original component input contract.
+
+**Implemented but not end-to-end validated:** a local candidate builder verifies
+the pinned Template 1.0.11, WS12WineSikarugir10.0_6 and original winetricks by exact
+size/hash, checks original launcher/SDK component signatures, preserves their
+bytes/notices and adds the source-built maintenance helper. Provenance identifies
+Sikarugir as the binary producer and Portside as assembler, with
+`distributionReady: false`. The original Sikarugir launcher remains the native
+application entry point. Desktop validates it separately from the helper, never
+forwards Portside UUID arguments to it, and retains existing legacy runtime
+support. The helper routes component setup through `WSS-winetricks` and limits
+optional-addon deferral to explicit prefix preparation. It rejects normal Steam
+launches in this integration mode.
+
+**Verified native controls:** real first-prefix preparation returned only after
+all three registry files existed (18.803 seconds). Existing-prefix preparation
+completed in 4.686 seconds, preserving a synthetic marker and skipping a
+synthetic startup entry. Windows x64/x86 commands returned expected 37/23.
+Official Steam installation through the original launcher completed in 66.937
+seconds with status 0. The actual desktop core validated and opened the final
+candidate; its helper also prepared an existing prefix in 13.892 seconds. A
+delayed registry-flush defect found in the first candidate was fixed and covered
+by a regression test. These controls used disposable prefixes and private homes.
+
+**Graphical acceptance: Unknown.** Steam updated from its Win32 bootstrap to
+Win64 client 1788652215. An updater window appeared, but capture raced its
+replacement. No final visible login window or interaction was established in
+the candidate. This also occurred when using the previously working synthetic
+prefix and when subsequently replaying the original wrapper. The comparison
+therefore does not prove an entry-point, prefix or updater cause. No new usable
+graphical screenshot was obtained. The earlier original-runtime rendered login
+and checkbox interaction remain valid, separately scoped observations; they do
+not establish acceptance of the new candidate. Both synthetic markers were
+preserved, the candidate link was restored, and only fixture-owned processes
+were stopped. No everyday prefix or installed runtime was modified.
+
+**Verified checks:** `swift test` and `swift build` for both runtime-host and
+desktop passed (23 host tests; 152 desktop tests with one optional signed-app
+network probe skipped). `python3.14 -B -m unittest discover -s scripts/tests -v`
+passed 87 tests. Production policy, source audit, Wine/winetricks snapshot
+validation, JSON/shell syntax, actionlint and `git diff --check` passed. Candidate
+assembly succeeded against the actual pinned archives. No Wine compilation or
+external publication was needed for these checks.
+
+**Remaining product integration:** the local candidate is not yet selected by
+the production installer or commercial assembly. Engine transfer/layout,
+installer migration fixtures, final provenance/SBOM, full bundle signing and
+authenticated app/runtime artifacts from the same commit still require work.
+Component signatures do not prove full-wrapper signing or notarization. Rosetta
+and the original engine's previously documented Steam compatibility behavior
+remain dependencies. Final rendered interaction, account login and game behavior
+are not established. See [the adapter report](SIKARUGIR_ADAPTER.md) for the exact
+contract, controls and limitations.
+
 ## Executive assessment
 
 The repository implements the native application/install/update pipeline, a

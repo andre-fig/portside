@@ -100,7 +100,10 @@ final class LaunchOutputCapture: @unchecked Sendable {
 /// launched directly so its own shebang selects the interpreter.
 @main
 struct PortsideRuntimeHost {
+    enum Integration: String, Decodable { case directWine, sikarugir }
+
     struct Configuration: Decodable {
+        let integration: Integration?
         let version: String
         let wineRelativePath: String
         let prefixRelativePath: String
@@ -139,8 +142,13 @@ struct PortsideRuntimeHost {
         let winetricks = bundle.appendingPathComponent(configuration.winetricksRelativePath)
 
         try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: true)
-        let request = try command(arguments: arguments, engine: engine, winetricks: winetricks, configuration: configuration)
+        let request = try command(arguments: arguments, engine: engine, winetricks: winetricks, configuration: configuration, bundle: bundle)
         var environment = runtimeEnvironment(engine: engine, prefix: prefix, configuration: configuration)
+        if configuration.integration == .sikarugir {
+            // The original engine resolves libinotify and other native companions
+            // from the authenticated template. Do not depend on Homebrew paths.
+            environment["DYLD_FALLBACK_LIBRARY_PATH"] = bundle.appendingPathComponent("Contents/Frameworks").path + ":/usr/lib"
+        }
         if arguments.first == "--create-prefix" {
             // Wine registers these DLLs during prefix creation and upgrade. With no bundled
             // Mono/Gecko, registration opens modal optional-addon installers
@@ -153,6 +161,12 @@ struct PortsideRuntimeHost {
         let status = try await execute(request, environment: environment, bundle: bundle,
                                        configuration: configuration, launchID: launchID)
         guard arguments.first == "--create-prefix", status == 0 else { return status }
+        if configuration.integration == .sikarugir {
+            // This engine can return from wineboot before the new registry files
+            // are flushed. Do not announce prefix completion while they are absent.
+            guard await waitForPrefixRegistry(prefix) else { throw HostError.missingFile("completed prefix registry") }
+            return 0
+        }
         // Wine's builtin Vulkan loader cannot expose Valve's bundled SwiftShader
         // ICD in this OpenGL engine. Let only CEF's executable load Valve's
         // native loader. Games keep Wine's default; no inherited DLL override,
@@ -161,6 +175,19 @@ struct PortsideRuntimeHost {
         return try await execute(compatibility,
                                  environment: runtimeEnvironment(engine: engine, prefix: prefix, configuration: configuration),
                                  bundle: bundle, configuration: configuration, launchID: launchID)
+    }
+
+    static func waitForPrefixRegistry(_ prefix: URL) async -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + 15
+        repeat {
+            let complete = ["system.reg", "user.reg", "userdef.reg"].allSatisfy { name in
+                guard let attributes = try? FileManager.default.attributesOfItem(atPath: prefix.appendingPathComponent(name).path) else { return false }
+                return attributes[.type] as? FileAttributeType == .typeRegular && (attributes[.size] as? NSNumber)?.intValue ?? 0 > 0
+            }
+            if complete { return true }
+            try? await Task.sleep(for: .milliseconds(100))
+        } while !Task.isCancelled && ProcessInfo.processInfo.systemUptime < deadline
+        return false
     }
 
     static func steamWebHelperCompatibilityCommand(engine: URL) throws -> Command {
@@ -174,7 +201,7 @@ struct PortsideRuntimeHost {
                         configuration: Configuration, launchID: UUID?) async throws -> Int32 {
         let commandDescription = diagnosticCommand(request)
         let version = configuration.version.range(of: #"^[0-9]+(?:\.[0-9]+){1,3}$"#, options: .regularExpression) != nil ? configuration.version : "unknown"
-        writeLog("starting \(request.label) version=\(version) renderer=WineD3D \(commandDescription)")
+        writeLog("starting \(request.label) version=\(version) integration=\(configuration.integration?.rawValue ?? "directWine") \(commandDescription)")
 
         let process = Process()
         process.executableURL = request.executable
@@ -282,7 +309,7 @@ struct PortsideRuntimeHost {
         let arguments: [String]
         switch command.label {
         case "version": arguments = ["--version"]
-        case "prefix setup": arguments = ["-u", "-r"]
+        case "prefix setup": arguments = command.arguments
         case "Steam": arguments = ["$STEAM_EXECUTABLE"] + command.arguments.dropFirst().map { _ in "<redacted>" }
         default: arguments = command.arguments.map { _ in "<redacted>" }
         }
@@ -295,7 +322,31 @@ struct PortsideRuntimeHost {
         let arguments: [String]
     }
 
-    static func command(arguments: [String], engine: URL, winetricks: URL, configuration: Configuration) throws -> Command {
+    static func command(arguments: [String], engine: URL, winetricks: URL, configuration: Configuration, bundle: URL? = nil) throws -> Command {
+        if configuration.integration == .sikarugir {
+            guard let bundle else { throw HostError.invalidArguments }
+            let launcher = try sikarugirLauncher(in: bundle)
+            if arguments.first == "--create-prefix" {
+                // This engine has native wine/wineserver, without a bin/wineboot
+                // shell shim. Keep the bundle library search environment intact.
+                return Command(label: "prefix setup", executable: try executable(in: engine, names: ["wine"]),
+                               arguments: ["wineboot.exe", "-u", "-r"])
+            }
+            if arguments.first == "--winetricks" {
+                // The tested launcher accepts WSS-winetricks followed by verbs;
+                // quiet operation is the template's setting, not a new CLI flag.
+                let verbs = arguments.dropFirst().filter { $0 != "-q" }
+                guard !verbs.isEmpty else { throw HostError.invalidArguments }
+                return Command(label: "Sikarugir component setup", executable: launcher, arguments: ["WSS-winetricks"] + verbs)
+            }
+            if !["--version", "--create-prefix", "--program"].contains(arguments.first ?? "") {
+                // Steam must enter through the original LaunchServices app.
+                // A subprocess proxy changes its native application lifecycle.
+                throw HostError.invalidArguments
+            }
+            // Prefix migration and diagnostic controls retain the bounded host
+            // contract. Normal Steam startup and setup belong to Sikarugir/SDK.
+        }
         let wine = try executable(in: engine, names: ["wine64", "wine"])
         if arguments.first == "--version" {
             return Command(label: "version", executable: wine, arguments: ["--version"])
@@ -318,6 +369,19 @@ struct PortsideRuntimeHost {
             return Command(label: "configured program", executable: wine, arguments: Array(arguments.dropFirst()))
         }
         return Command(label: "Steam", executable: wine, arguments: [configuration.steamExecutable] + arguments)
+    }
+
+    static func sikarugirLauncher(in bundle: URL) throws -> URL {
+        let root = bundle.resolvingSymlinksInPath().path + "/"
+        let paths = ["Contents/MacOS/Sikarugir", "Contents/Frameworks/SikarugirSdk.framework/Versions/A/SikarugirSdk"]
+        for path in paths {
+            let candidate = bundle.appendingPathComponent(path)
+            guard candidate.resolvingSymlinksInPath().path.hasPrefix(root),
+                  FileManager.default.isExecutableFile(atPath: candidate.path) else {
+                throw HostError.missingFile("contained Sikarugir launcher and SDK")
+            }
+        }
+        return bundle.appendingPathComponent(paths[0])
     }
 
     static func runtimeEnvironment(engine: URL, prefix: URL, configuration: Configuration) -> [String: String] {

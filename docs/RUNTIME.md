@@ -8,13 +8,13 @@ window.
 
 ## Components and source ownership
 
-The following describes the **current direct-Wine implementation**. The accepted
-target is an automated Sikarugir integration, including its launcher/SDK and
-matching runtime composition. That migration is blocked on missing launcher/SDK
-sources and a matching build recipe under the existing source-build requirement.
-See [SIKARUGIR_INTEGRATION](SIKARUGIR_INTEGRATION.md). The current three archives
-must not be described as an integrated Sikarugir runtime. Setting `DXMT=1` alone
-would not supply the omitted components or implement that migration.
+The production assembly below still uses the direct-Wine pipeline. The approved
+Sikarugir migration now has an explicit native host adapter and a local candidate
+builder, described in [SIKARUGIR_ADAPTER](SIKARUGIR_ADAPTER.md). The project owner
+approved the original binary composition after its rendered-login/interaction
+control; missing matching upstream source is no longer a blocker for that input
+set. Original binaries retain their upstream producer identity and pinned hashes.
+Commercial installer/release integration remains incomplete.
 
 The runtime is downloaded separately from `Portside.app`. Three archives form
 one installed wrapper:
@@ -46,9 +46,10 @@ participates in engine/cache identity. Its renderer-search patch supplies the
 `WINEDLLPATH_PREPEND` contract used by Sikarugir; it does not supply the missing
 Launcher/SDK source or establish a graphical fix by itself.
 
-Sikarugir source repositories are legitimate provenance inputs. Precompiled
-Sikarugir releases are not Portside builds and must never become a hidden
-commercial fallback. Steam is obtained from Valve by the `steam` winetricks
+Sikarugir source repositories remain legitimate provenance inputs. The approved
+original binary set in `upstream/sikarugir-runtime.json` may be assembled with
+Portside's source-built adapter. It must retain its upstream identity and must
+not be described as a Portside compilation or used as an unverified fallback. Steam is obtained from Valve by the `steam` winetricks
 verb at user setup; it is not mirrored or bundled. On Apple silicon,
 [RosettaManager](../apps/desktop/Sources/PortsideCore/RuntimePipeline.swift)
 probes x86 execution and can invoke Apple's `softwareupdate` to install Rosetta.

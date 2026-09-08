@@ -197,3 +197,23 @@ provenance and runtime SPDX source information to agree. Desktop regressions
 cover current CEF window-surface failure separately from device initialization,
 prelaunch bytes, rotation, partial/future records, symlinks, large appends,
 New Year timestamps and newer GPU attempts across both logs.
+
+### Approved Sikarugir candidate checks
+
+[The adapter report](SIKARUGIR_ADAPTER.md) records the subsequent original
+Template 1.0.11 / WS12WineSikarugir10.0_6 candidate. Its dedicated Swift tests
+exercise original application entry-point resolution separately from maintenance
+commands, reject unsupported configurations and escaping/missing components,
+exclude Portside UUID flags from Sikarugir, retain existing-prefix markers and
+wait for delayed registry writes. `scripts/tests/test_sikarugir_candidate.py`
+checks exact inputs, original component preservation/provenance, safe extraction,
+contained hardlinks, output isolation and component-signature failures.
+
+Run both Swift suites/builds, `python3.14 -B -m unittest discover -s scripts/tests -v`,
+production policy, the runtime source/snapshot audits and `git diff --check`.
+The candidate uses verified local archives and a locally compiled maintenance
+host; it does not run a Wine build or publish. Native new/existing-prefix and
+Valve installation controls passed. The new candidate's graphical acceptance is
+still unknown; its later reference replay also did not expose a visible login
+window. Earlier successful original-runtime rendering/interaction is separately
+scoped evidence, not acceptance of the new installer or release.

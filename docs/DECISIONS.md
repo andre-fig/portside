@@ -5,11 +5,43 @@ of operational success. Dates are approximate commit periods (timezone can shift
 a day). [STATUS](STATUS.md) owns validation evidence. Revisit a decision explicitly,
 record its replacement and update related docs; do not silently restore old behavior.
 
+## D19 — Restore the approved original Sikarugir composition
+
+- **Date:** 2026-09-08, project-owner withdrawal of the previously cited
+  restrictions, followed by an explicit request to start replacing the runtime.
+- **Status:** Adopted target; native adapter and local candidate assembly in
+  progress. Commercial installation/publication migration remains incomplete.
+- **Evidence:** the [original baseline retest](SIKARUGIR_RESTORE_VALIDATION.md)
+  rendered the current Steam login and visibly responded to keyboard input.
+- **Decision:** Use the original Template 1.0.11 and WS12WineSikarugir10.0_6
+  composition, pinned by archive size and SHA-256 in
+  [sikarugir-runtime.json](../upstream/sikarugir-runtime.json). Preserve the
+  original launcher/SDK/engine bytes and accurately identify their upstream
+  producer. Compile Portside's adapter from its own source.
+- **Supersedes:** D1's Portside-source-only restriction for this approved input
+  set and the source-access blocker attached to the Sikarugir target in D15.
+  The original engine's observed Steam compatibility switches are accepted by
+  the updated user instruction. This is not a claim that its matching source
+  recipe was found or that the switches are independently necessary.
+- **Boundaries:** Keep exact artifact/provenance checks, authenticated manifests,
+  bundle/host/path checks, external-prefix preservation, honest UI readiness and
+  the same-commit CI/runtime release chain. No automatic workflow dispatch or
+  publication is authorized by this decision.
+- **First implementation:** The original Sikarugir launcher remains the real
+  LaunchServices application entry point. Portside's separate maintenance host
+  handles prefix preparation and delegates winetricks setup to Sikarugir; it
+  rejects normal Steam launches in this mode. A local candidate builder verifies
+  existing downloaded inputs and launcher/SDK component signatures, preserves
+  notices, adds the source-built host and records assembly provenance. It does
+  not download inputs or switch production assembly behind the user's back.
+- **Remaining acceptance:** Complete installer/layout and release assembly
+  integration, installer-level migration controls, full bundle signing and matching
+  app/runtime authentication, then rendered interaction through the final product.
+
 ## D15 — Portside automates Sikarugir rather than replacing its integration
 
 - **Date:** 2026-09-08, explicit project-owner clarification.
-- **Status:** Target adopted; implementation blocked on launcher/SDK source and
-  matching build inputs. See [SIKARUGIR_INTEGRATION](SIKARUGIR_INTEGRATION.md).
+- **Status:** Target adopted; its source-only blocker was superseded by D19. See [SIKARUGIR_INTEGRATION](SIKARUGIR_INTEGRATION.md).
 - **Decision:** Preserve Portside's native installation/update/trust UI, and
   integrate Sikarugir's launcher, SDK, configuration and supported component
   composition underneath it. A custom host directly invoking Sikarugir's Wine

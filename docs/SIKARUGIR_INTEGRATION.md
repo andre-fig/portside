@@ -1,5 +1,10 @@
 # Sikarugir integration — 2026-09-08
 
+**Migration started after checkpoint `cb02472b`:** the native host now has an
+explicit Sikarugir integration mode, and a local builder assembles its candidate
+from the approved original input set. See [SIKARUGIR_ADAPTER](SIKARUGIR_ADAPTER.md)
+for current implementation, controls and remaining product/release integration.
+
 The latest [authorized original-engine retest](SIKARUGIR_RESTORE_VALIDATION.md)
 now establishes rendered login and actual checkbox interaction with the original
 Sikarugir launcher and WS12WineSikarugir10.0_6, using the same updated Steam

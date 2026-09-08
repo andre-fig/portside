@@ -7,7 +7,8 @@ date, commit, actual checks and unverified operations.
 ## Canonical task references
 
 The accepted runtime direction and missing source inputs are recorded in
-[Sikarugir integration](SIKARUGIR_INTEGRATION.md). The current direct-Wine
+[Sikarugir integration](SIKARUGIR_INTEGRATION.md) and the
+[approved candidate adapter](SIKARUGIR_ADAPTER.md). The current direct-Wine
 implementation must not be confused with a completed Sikarugir integration.
 
 | Task                                                       | Read                                  | Purpose                                                              |

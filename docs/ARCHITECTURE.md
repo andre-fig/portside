@@ -5,7 +5,7 @@ configuration, updates and Steam launch. The direct-Wine implementation describe
 below is an architectural gap, not completion of that target. Using Sikarugir's
 Wine fork alone does not integrate its launcher, SDK or renderer composition.
 See [SIKARUGIR_INTEGRATION](SIKARUGIR_INTEGRATION.md) for inspected evidence,
-the source-access blocker and the remaining implementation work.
+the approved original baseline and remaining implementation work.
 
 Portside is a native macOS launcher that prepares a private Windows Steam
 environment using a Portside-built Wine runtime. Valve supplies Steam and games;

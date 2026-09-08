@@ -17,8 +17,10 @@ check. `copilot-instructions.md` routes the same repository rules for Copilot.
 - `production` is the only commercial channel/environment in current YAML.
   Local validation bundles are not staging. Do not mix configurations or invent
   staging/promotion commands; architectural changes require an explicit decision.
-- Keep production-only source controls, signature checks, provenance/SBOM and
-  artifact-host restrictions. Never reintroduce compiled Sikarugir downloads.
+- Keep production-only controls, signature checks, provenance/SBOM and
+  artifact-host restrictions. The owner-approved Sikarugir input set must remain
+  checksum-pinned with accurate upstream provenance. Desktop downloads still use
+  authenticated Portside artifacts; no unverified upstream fallback is allowed.
 - Secrets belong to approved external stores and ephemeral runner files. Public
   keys may enter app/helper configuration; private keys must never enter the
   bundle, repository or uploaded build artifact. Do not print secret values.

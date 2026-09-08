@@ -4,7 +4,10 @@ Read the [root instructions](../../AGENTS.md), [runtime contract](../../docs/RUN
 [release contract](../../docs/RELEASE.md) and [current status](../../docs/STATUS.md)
 before editing. Verify those descriptions against the scripts and lockfiles.
 
-This directory builds Portside runtime components from controlled source inputs.
+This directory builds or assembles Portside runtime components from controlled inputs.
+The approved original Sikarugir set is pinned in `upstream/sikarugir-runtime.json`;
+`build-sikarugir-candidate.py` currently assembles a local integration candidate,
+without changing the commercial workflow or accessing installed prefixes.
 `build-engine.sh`/`build-wine-engine.sh` compile Wine; `resolve-engine.sh` names the
 persistent component; `fetch-engine.sh` validates and reuses it; `build.sh`
 assembles wrapper, engine and winetricks. `build-wrapper.sh` compiles
@@ -20,9 +23,10 @@ back to native storage download or repackaging.
 - Preserve local changes and all user prefixes, Steam installations, games,
   libraries, credentials and installed runtimes. Restrict cleanup to disposable
   build output whose ownership and path have been checked.
-- Keep compiled Sikarugir artifacts out of commercial input. Legitimate upstream
-  source URLs remain provenance, not a binary fallback. Never compile Wine in
-  ordinary runtime assembly to hide a missing persistent engine.
+- The project owner approved the pinned original Sikarugir runtime. Verify exact
+  upstream sizes/checksums and preserve its producer/license identity; never label
+  upstream binaries as Portside-compiled. Keep manifest/host/signature checks.
+  Never compile Wine in ordinary assembly to hide a missing engine input.
 - Do not manually edit `vendor/` snapshots. Use the authorized sync process or
   document patches in `upstream/patches/`; verify that a patch is actually applied
   by the recipe. Do not weaken checksums, source binding, manifest or layout checks.
@@ -30,7 +34,7 @@ back to native storage download or repackaging.
   integrates Sikarugir's launcher/SDK and component composition; WineD3D-only is
   the current legacy implementation, not a permanent architectural requirement.
   See [integration evidence and blockers](../../docs/SIKARUGIR_INTEGRATION.md).
-  An inspected upstream binary is a reference, never a commercial build input.
+  Only the explicitly approved pinned set may become an upstream binary input.
   Keep user-facing host output in English.
 - Keep private keys outside checkout/bundles. Log only sanitized provenance,
   version and validation outcomes, never secrets or account data.

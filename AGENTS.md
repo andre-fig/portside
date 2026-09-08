@@ -73,8 +73,11 @@ Runtime builds require the separate engine/assembly runbook in [RUNTIME](docs/RU
 - Preserve prefixes, Steam credentials, native Steam, games, saves, libraries,
   installed runtimes and unrelated processes. Use new disposable fixtures for
   destructive scenarios; never clean an everyday account to simulate first run.
-- Commercial runtime binaries must be produced by Portside and authenticated
-  through its manifest. Never restore compiled Sikarugir download fallbacks.
+- The project owner approved restoring the original Sikarugir components on
+  2026-09-08. Use the exact inputs pinned in `upstream/sikarugir-runtime.json`,
+  preserve upstream producer identity and notices, and distinguish Portside
+  assembly from source compilation. Keep authenticated Portside manifests and
+  artifact checks; do not introduce unverified or silent download fallbacks.
   Valve Steam and Apple Rosetta remain legitimate external installation sources.
 - Do not hand-edit `vendor/` snapshots; use synchronization or a documented
   Portside patch. Do not hand-edit generated `.build/`, `DerivedData/`,

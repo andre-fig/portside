@@ -1,11 +1,11 @@
 # Builds, publication and updates
 
-The [Sikarugir integration correction](SIKARUGIR_INTEGRATION.md) is blocked on
-missing launcher/SDK sources and matching build inputs. Current direct-Wine
-artifacts are not completion of that migration. That investigation does not
-replace installed runtimes or alter the release workflow. A future integrated
-runtime still requires the same-commit CI/runtime/app chain below, authenticated
-artifacts and graphical acceptance; no publication was authorized or triggered.
+The [Sikarugir integration](SIKARUGIR_ADAPTER.md) now uses an owner-approved
+original input set in its local candidate builder. Production engine/runtime
+workflows remain on the existing direct-Wine assembly until installer, layout,
+provenance and signing integration are complete. A future integrated runtime
+retains the same-commit CI/runtime/app chain below and authenticated artifacts.
+The local candidate command does not dispatch, publish or change installed runtimes.
 
 This is the current release contract, not evidence that a live release passed.
 See [STATUS.md](STATUS.md) for the audit snapshot and [TESTING.md](TESTING.md)

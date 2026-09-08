@@ -125,7 +125,8 @@ public enum PortsideRuntimeValidator {
     public static func validate(wrapper: URL, configuration: PortsideRuntimeConfiguration = .golden, fileManager: FileManager = .default) throws -> PortsideWrapperValidation {
         let host = try PortsideBundleComponents.runtimeHost(in: wrapper, fileManager: fileManager)
         let prefix = wrapper.appendingPathComponent("Contents/SharedSupport/prefix", isDirectory: true)
-        let engine = wrapper.appendingPathComponent("Contents/SharedSupport/engine", isDirectory: true)
+        let integration = try PortsideBundleComponents.runtimeIntegration(in: wrapper, fileManager: fileManager)
+        let engine = wrapper.appendingPathComponent(integration == .sikarugir ? "Contents/SharedSupport/wine" : "Contents/SharedSupport/engine", isDirectory: true)
         let versionURL = engine.appendingPathComponent("version")
         guard fileManager.isExecutableFile(atPath: host.path),
               fileManager.fileExists(atPath: prefix.path),
@@ -144,7 +145,7 @@ public enum PortsideRuntimeValidator {
               info["NSMicrophoneUsageDescription"] == nil else {
             throw PortsideError.invalidArtifact("Portside wrapper options are incomplete or enable an unsupported renderer")
         }
-        return PortsideWrapperValidation(wrapper: wrapper, prefix: prefix, launcher: host, engineVersion: version, configuration: configuration)
+        return PortsideWrapperValidation(wrapper: wrapper, prefix: prefix, launcher: try PortsideBundleComponents.runtimeLauncher(in: wrapper, fileManager: fileManager), engineVersion: version, configuration: configuration)
     }
 }
 
@@ -437,9 +438,19 @@ public enum PortsideSteamFlow {
     }
 
     public static func cleanLaunchSpec(wrapper: URL) throws -> ProcessLaunchSpec {
-        let host = try PortsideBundleComponents.runtimeHost(in: wrapper)
-        guard FileManager.default.isExecutableFile(atPath: host.path) else { throw PortsideError.runtimeUnavailable }
-        return ProcessLaunchSpec(executable: host, environment: processEnvironment, currentDirectory: wrapper, timeout: 60)
+        let launcher = try PortsideBundleComponents.runtimeLauncher(in: wrapper)
+        return ProcessLaunchSpec(executable: launcher, environment: processEnvironment, currentDirectory: wrapper, timeout: 60)
+    }
+
+    public static func launchArguments(wrapper: URL, launchID: UUID) throws -> [String] {
+        guard try PortsideBundleComponents.runtimeIntegration(in: wrapper) == .directWine else { return [] }
+        let resource = wrapper.appendingPathComponent("Contents/Resources/portside-runtime.json")
+        if let data = try? Data(contentsOf: resource),
+           let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+           json["launchDiagnosticsVersion"] as? Int == 1 {
+            return ["--launch-id", launchID.uuidString]
+        }
+        return []
     }
 
     public static func steamExecutable(prefix: URL) -> URL {
