@@ -1,0 +1,29 @@
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -293,13 +293,25 @@
+ 
+ static void set_dll_path(void)
+ {
+-    char *p, *path = getenv( "WINEDLLPATH" );
++    char *p, *path = getenv( "WINEDLLPATH" ), *prepend_path = getenv( "WINEDLLPATH_PREPEND" );
+     int i, count = 0;
+ 
+     if (path) for (p = path, count = 1; *p; p++) if (*p == ':') count++;
++
++    if (prepend_path) for (p = prepend_path, count++; *p; p++) if (*p == ':') count++;
+ 
+     dll_paths = malloc( (count + 2) * sizeof(*dll_paths) );
+     count = 0;
++
++    /* Sikarugir selects renderer overlays ahead of Wine's builtins. Empty
++     * entries do not add the working directory to the search path. */
++    if (prepend_path)
++    {
++        prepend_path = strdup(prepend_path);
++        for (p = strtok( prepend_path, ":" ); p; p = strtok( NULL, ":" ))
++            if (*p == '/') dll_paths[count++] = strdup( p );
++        free( prepend_path );
++    }
+ 
+     if (!build_dir) dll_paths[count++] = dll_dir;
+ 

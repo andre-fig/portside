@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "36b6a2cf679fb395f668a917b76537190e212d9c",
+  "patches": [
+    {
+      "file": "0001-renderer-overlay-search.patch",
+      "sha256": "d9c01f85b72f0eee72b783d0bc3fcc719902ee4ef13128dc7d44ae161359de80",
+      "author": "Portside",
+      "license": "LGPL-2.1-or-later",
+      "purpose": "Support Sikarugir absolute renderer overlays via WINEDLLPATH_PREPEND without modifying prefix DLLs or Steam arguments"
+    }
+  ]
+}

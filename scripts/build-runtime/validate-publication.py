@@ -95,7 +95,14 @@ def validate_runtime(root, sha, run_id):
     manifest = read_json(root, "runtime-manifest-unsigned.json")
     provenance = read_json(root, "provenance.json")
     engine = read_json(root, "engine-input.json")
-    read_json(root, "sbom.spdx.json")
+    sbom = read_json(root, "sbom.spdx.json")
+    patches = engine["source"].get("patches", [])
+    require(provenance["engine"].get("patches", []) == patches, "Runtime patch provenance mismatch")
+    if patches:
+        wine_packages = [item for item in sbom.get("packages", []) if item.get("SPDXID") == "SPDXRef-wine"]
+        require(len(wine_packages) == 1 and
+                json.loads(wine_packages[0].get("sourceInfo", "{}")).get("portsidePatches") == patches,
+                "Runtime SBOM patch inventory mismatch")
     check_build(manifest["portsideCommit"], manifest["buildId"], sha, run_id)
     require(provenance["portsideCommit"] == sha and provenance["sourceCommits"]["portside"] == sha
             and provenance["buildId"] == manifest["buildId"], "Runtime source/build provenance mismatch")

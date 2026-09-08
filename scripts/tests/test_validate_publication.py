@@ -1,6 +1,9 @@
 import hashlib
 import importlib.util
 import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -57,6 +60,73 @@ def runtime_fixture(root):
 
 
 class PublicationTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("jq"), "Runtime metadata recipe requires jq")
+    def test_real_assembly_recipe_emits_patch_inventory(self):
+        # Native compilation/extraction is covered by separate macOS controls.
+        # Exercise the actual metadata recipe with synthetic component archives.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            build = root / "build/runtime"
+            build.mkdir(parents=True)
+            runtime_fixture(build)
+            patches = [{"file": "0001-overlay.patch", "sha256": "d" * 64, "license": "LGPL-2.1-or-later"}]
+            engine = json.loads((build / "engine-input.json").read_text())
+            engine["source"].update(patches=patches, snapshotChecksum="e" * 64)
+            engine["artifact"]["storageKey"] = "runtime/engines/test.tar.xz"
+            write(build, "engine-input.json", engine)
+            recipes = root / "scripts/build-runtime"
+            recipes.mkdir(parents=True)
+            shutil.copyfile(Path(__file__).parents[1] / "build-runtime/build.sh", recipes / "build.sh")
+            for name in ("source-audit.sh", "build-wrapper.sh", "fetch-engine.sh", "build-winetricks.sh", "validate-clean-layout.sh", "validate-manifest.sh"):
+                stub = recipes / name
+                stub.write_text("#!/bin/sh\nexit 0\n")
+                stub.chmod(0o755)
+            upstream_script = root / "scripts/upstream/snapshot_checksum.sh"
+            upstream_script.parent.mkdir()
+            upstream_script.write_text("#!/bin/sh\nprintf '%s\\n' " + "f" * 64 + "\n")
+            upstream_script.chmod(0o755)
+            for name in ("runtime/wrapper-template", "apps/runtime-host", "upstream"):
+                (root / name).mkdir(parents=True)
+            write(root / "upstream", "lock.json", {"repositories": [{"name": "winetricks", "commit": WINETRICKS, "snapshotChecksum": "f" * 64}]})
+            write(root / "upstream", "dependencies.json", {"dependencies": [{"name": "freetype", "version": "2-test", "sha256": "f" * 64}]})
+            env = {"PATH": os.environ["PATH"], "PORTSIDE_RUNTIME_VERSION": "0.1.30", "PORTSIDE_COMMIT": SHA,
+                   "PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX": "https://example.invalid/fixtures", "GITHUB_RUN_ID": "43", "GITHUB_RUN_ATTEMPT": "1"}
+            subprocess.run(["sh", str(recipes / "build.sh")], env=env, check=True, capture_output=True)
+            provenance = json.loads((build / "provenance.json").read_text())
+            self.assertEqual(provenance["engine"]["patches"], patches)
+            publication.validate_runtime(build, SHA, "43")
+
+    def test_runtime_preserves_patches_in_provenance_and_sbom(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime_fixture(root)
+            patches = [{"file": "0001-overlay.patch", "sha256": "d" * 64, "license": "LGPL-2.1-or-later"}]
+            engine = json.loads((root / "engine-input.json").read_text())
+            engine["source"]["patches"] = patches
+            write(root, "engine-input.json", engine)
+            with self.assertRaisesRegex(RuntimeError, "patch provenance mismatch"):
+                publication.validate_runtime(root, SHA, "43")
+            provenance = json.loads((root / "provenance.json").read_text())
+            provenance["engine"]["patches"] = patches
+            write(root, "provenance.json", provenance)
+            with self.assertRaisesRegex(RuntimeError, "SBOM patch inventory mismatch"):
+                publication.validate_runtime(root, SHA, "43")
+            write(root, "sbom.spdx.json", {"packages": [{"SPDXID": "SPDXRef-wine", "sourceInfo": json.dumps({"portsidePatches": patches})}]})
+            publication.validate_runtime(root, SHA, "43")
+
+    def test_patch_provenance_must_match_engine_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            metadata = engine_fixture(root)
+            metadata["source"]["patches"] = [{"file": "0001-overlay.patch", "sha256": "d" * 64}]
+            write(root, "engine-metadata.json", metadata)
+            with self.assertRaisesRegex(RuntimeError, "provenance and metadata disagree"):
+                publication.validate_engine(root, SHA, "42")
+            provenance = json.loads((root / "engine-provenance.json").read_text())
+            provenance["source"] = metadata["source"]
+            write(root, "engine-provenance.json", provenance)
+            publication.validate_engine(root, SHA, "42")
+
     def test_transferred_engine_and_runtime_accepted_without_running_wine(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

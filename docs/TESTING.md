@@ -108,6 +108,14 @@ and adjacent `*.spec.ts` files. Pure policy tests do not prove their wiring into
 production: renderer fallback, remote profiles, runtime rollback and license
 fulfillment need separate integration evidence.
 
+`test_wine_patches.py` applies the checksum-pinned renderer-search patch to a
+disposable source copy and compiles the actual patched `set_dll_path` function
+with a native C compiler. It checks default ordering, absolute overlay priority,
+spaces, empty/relative entries, source identity, altered/unlisted patches and
+reapplication rejection. It does not compile Wine or prove DXMT presentation.
+`test_engine_platform.py` also rejects the observed sandbox-disabling kernelbase
+payload in either PE architecture and ASCII/UTF-16LE, plus missing/external DLLs.
+
 ## Artifact and manual acceptance matrix
 
 Follow the linked runbook for required configuration; command names below are
@@ -176,3 +184,16 @@ offline and interrupted operations, app replacement identity/version checks, run
 handoff races and unrelated process/data preservation. Record actual results and
 missing GUI/certificate/service prerequisites in STATUS instead of promoting
 implementation coverage into operational success.
+
+
+### Sikarugir renderer continuation checks
+
+The [2026-09-08 fixture report](SIKARUGIR_OVERLAY_VALIDATION.md) records real
+new/existing-prefix preservation controls, the two-architecture CreateProcess
+argument probe, the source-patched Wine build, renderer device capabilities and
+black-window screenshots/user confirmation. These do not establish graphical
+acceptance. Publication regression tests require engine patch metadata,
+provenance and runtime SPDX source information to agree. Desktop regressions
+cover current CEF window-surface failure separately from device initialization,
+prelaunch bytes, rotation, partial/future records, symlinks, large appends,
+New Year timestamps and newer GPU attempts across both logs.

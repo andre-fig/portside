@@ -36,6 +36,7 @@ public enum SteamLaunchFailure: Error, LocalizedError, Codable, Equatable, Senda
     case processWithoutWindow
     case windowWithoutWebHelper
     case rendererInitializationFailed
+    case rendererPresentationFailed
 
     public var code: String {
         switch self {
@@ -47,6 +48,7 @@ public enum SteamLaunchFailure: Error, LocalizedError, Codable, Equatable, Senda
         case .processWithoutWindow: "steam_window_failed"
         case .windowWithoutWebHelper: "steam_webhelper_failed"
         case .rendererInitializationFailed: "steam_renderer_failed"
+        case .rendererPresentationFailed: "steam_renderer_presentation_failed"
         }
     }
 
@@ -59,6 +61,7 @@ public enum SteamLaunchFailure: Error, LocalizedError, Codable, Equatable, Senda
         case .steamNotStarted: "Steam did not start. Please try again."
         case .processWithoutWindow: "Steam is running, but its window could not be opened. Please try again."
         case .windowWithoutWebHelper: "A Steam window was detected, but its web helper did not start. Please try again."
+        case .rendererPresentationFailed: "Steam reported a failure creating its window surface. Its interface has not been verified. Close Steam and try again; your Steam data is preserved."
         case .rendererInitializationFailed: "Steam could not render its interface. Its window may be blank. Close Steam and try again; your Steam data is preserved."
         }
     }

@@ -1,5 +1,27 @@
 # Sikarugir integration — 2026-09-08
 
+The latest [authorized original-engine retest](SIKARUGIR_RESTORE_VALIDATION.md)
+now establishes rendered login and actual checkbox interaction with the original
+Sikarugir launcher and WS12WineSikarugir10.0_6, using the same updated Steam
+client as the black-window controls. The project owner withdrew the restrictions
+previously cited against that baseline. Earlier source-only and workaround
+blocker statements below describe the preceding decision scope; they must not
+be used to refuse this authorized reference. Main's product migration and full
+bundle/release validation are still pending.
+
+The [launcher/overlay continuation](SIKARUGIR_OVERLAY_VALIDATION.md) now verifies
+x64/x86 execution through the original Sikarugir launcher with Portside's engine,
+and visually reproduces the black Steam window. It identifies missing
+`WINEDLLPATH_PREPEND` support, now corrected in a locally rebuilt source engine.
+The reference DXMT then creates FL 11_1 devices but rejects Steam's cross-process
+presentation; a safe software control also remains black, confirmed by the user.
+It does not establish source-built Launcher/SDK availability or graphical success.
+
+The later user-authorized [historical runtime test](SIKARUGIR_LEGACY_VALIDATION.md)
+executed the old integration in a disposable environment and identified automatic
+sandbox-disabling flags in its engine. Its results supersede the earlier
+inspection-only scope below; no graphical acceptance has been established.
+
 **Target adopted; runtime migration blocked.** Portside automates Sikarugir
 installation, configuration, updates and Steam launch. Reusing its Wine fork
 inside an independent wrapper does not fulfill the project owner's clarified

@@ -565,6 +565,113 @@ untouched. No Wine rebuild, security exception, commit, push, workflow change,
 dispatch, deployment or publication occurred in this step. A future migration
 needs new source builds, signing/authenticated release and real GUI acceptance.
 
+## Historical Sikarugir test after checkpoint commit — 2026-09-08
+
+**Verified checkpoint and historical source test:** user-authorized commit
+`a4a0b952` preserves the preceding investigation and original live 0.1.35 report;
+no push occurred. A separate detached worktree at `8e9eda9e` passed all 25
+historical desktop tests and its build. Checksum-verified Template 1.0.11,
+WS12WineSikarugir10.0_6 and historical winetricks were tested with the unchanged
+historical installer classes in a new disposable home/prefix.
+
+**Verified runtime progress:** prefix creation and Steam installation returned 0.
+Two fixture Mono prompts required cancellation. The external prefix retained its
+synthetic marker. The first Steam opening reached a fatal-error window during
+the Win32 update; its precise condition was not read. A scoped restart preserved
+downloads and advanced to Win64 Steam `1788652215`, matching the client used in
+the previous 0.1.35 control. No everyday data/runtime was accessed or changed.
+
+**Not an acceptable graphical fix:** the historical engine injects the webhelper
+switches `--no-sandbox --in-process-gpu --disable-gpu`. The observed launch matches
+the app-specific workaround strings in both original `kernelbase.dll` members,
+whose bytes still match the official downloaded archive. Portside's historical
+Steam arguments were empty. The test was stopped upon identifying this behavior;
+only fixture-owned launchers and its explicitly scoped wineserver were stopped.
+No rendered/interactive Steam acceptance or screenshot is claimed. Screen capture
+remains unavailable. The history is not evidence that the unchanged old engine
+satisfies the retained sandbox constraint.
+
+Strict whole-wrapper signing also conflicts with the historical mutable/external
+prefix layout; a separate disposable signing control documented that boundary.
+See [SIKARUGIR_LEGACY_VALIDATION](SIKARUGIR_LEGACY_VALIDATION.md) for exact artifact
+hashes, source/test scope, updater stages, signature limits and inconclusive
+diagnostic probes. These new results remain uncommitted after the authorized
+checkpoint; there was no additional commit, push, release or publication.
+
+## Sikarugir renderer-overlay continuation — 2026-09-08
+
+**Verified, graphical failure persists:** a disposable original Sikarugir
+Template 1.0.11 with Portside's Wine 11.17 ran x64/x86 controls and installed
+Valve Steam. Identical CreateProcess controls reject the old engine's injected
+sandbox/isolation switches (42) and preserve arguments through the new engine
+(0). Steam updated to Win64 `1788652215` without the historical manual restart.
+Owned-window screenshots were captured and inspected; they are black. The user
+also confirmed the final software/native-Vulkan fixture remained black.
+
+**Implemented and locally validated:** a checksum-pinned source patch supplies
+Sikarugir's missing `WINEDLLPATH_PREPEND` contract. A full local Wine rebuild
+completed; patch bytes bind engine/cache identity and accompany engine/runtime
+provenance and the SPDX inventory. The known sandbox-disabling kernelbase
+workaround is rejected before engine execution. No precompiled Sikarugir input
+was added to commercial builds. Existing-prefix preparation with real Wine
+preserved synthetic data and skipped startup entries.
+
+**Verified remaining rendering defects:** without the patch, `DXMT=1` still
+loads WineD3D. With it, the reference DXMT loads but needs its absent bridge PE
+DLL provisioned. Supplying that original dependency only in the fixture allows
+D3D11 FL 11_1 device creation. Actual Steam then reaches an explicit unsupported
+cross-process swapchain path (`E_FAIL` / CEF `EGL_BAD_ALLOC`). That restriction
+also exists in the newer inspected DXMT source. A software control with native
+Valve Vulkan initializes GLES 3 but remains black. Its final presentation cause
+is Unknown; removing log messages is not an accepted fix.
+
+**Implemented diagnostic correction:** current explicit CEF window-surface
+failures now have a separate failure code. Bounded per-session readers reject
+historical/partial/out-of-prefix records, account for rotation and yearless CEF
+timestamps, and compare recovery times across logs. A later device-capability
+report cannot clear a presentation failure. Window/helper detection still cannot
+authorize ready without rendered content and interaction confirmed by the user.
+
+**Verified checks:** 16 host tests/build; 145 desktop tests (one optional skip,
+no failures)/build; 80 script tests; full local Wine build and extracted
+engine Windows/native/privacy checks; real new/existing-prefix preservation
+fixtures; source/snapshot audits, policy, shell/JSON checks and workflow lint.
+The [detailed continuation](SIKARUGIR_OVERLAY_VALIDATION.md) records hashes,
+before/after controls, timings, commands and limitations. Original live and
+historical reports remain intact.
+
+**Blocked:** complete source-built Launcher/SDK integration still needs matching
+sources and a build/configuration recipe absent from the inspected public trees.
+Graphical presentation still needs an isolation-preserving fix and actual
+rendered interaction, followed by signed matching app/runtime release validation.
+The fixture is stopped; installed runtimes, everyday prefixes and native Steam
+are preserved. Rosetta dependence and the Intel deprecation notice remain.
+No further commit, push, dispatch or publication occurred.
+
+## Original Sikarugir baseline authorized retest — 2026-09-08
+
+**Verified: rendered Steam login and real interaction.** After the project owner
+withdrew the restrictions previously cited against the original engine, the
+historical disposable Template 1.0.11 / WS12WineSikarugir10.0_6 test was resumed.
+Original engine DLL hashes and launcher/SDK component signatures passed. Steam
+remained at the same updated client `1788652215`, with an unchanged executable
+hash during this retest.
+
+Owned-window screenshots were captured and visually inspected: the login content
+was rendered. Targeted keyboard navigation and Space changed **Remember me** from
+checked to unchecked in the subsequent image. No account credentials or login
+were supplied. The engine's original injected switches were observed unchanged;
+the result does not isolate which switch or engine patch is necessary.
+
+The [retest report](SIKARUGIR_RESTORE_VALIDATION.md) supersedes the earlier lack
+of historical graphical acceptance. The fixture was stopped using only its
+verified launcher and prefix-scoped wineserver; its synthetic marker remained
+unchanged and no fixture Steam/helper executable holders remained. Everyday data
+and installed runtimes were preserved. Main's current runtime implementation has
+not yet been migrated to this working reference. Full bundle signing, restored
+product packaging, authenticated release and account/game acceptance remain
+separate work. No new commit, push, dispatch or publication occurred.
+
 ## Executive assessment
 
 The repository implements the native application/install/update pipeline, a

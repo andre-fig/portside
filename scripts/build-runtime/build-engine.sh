@@ -28,6 +28,7 @@ macos_version="$(sw_vers -productVersion 2>/dev/null || uname -s)"
 xcode_version="$(xcodebuild -version 2>/dev/null | tr '\n' ';' || true)"
 clang_version="$(clang --version | head -n 1)"
 freetype_source="$(jq -c '.dependencies[] | select(.name == "freetype") | {name, version, origin, sha256, license}' "$ROOT_DIR/upstream/dependencies.json")"
+patch_series="$(python3 "$ROOT_DIR/scripts/build-runtime/apply-wine-patches.py" --verify)"
 
 jq -n \
     --arg engineVersion "$ENGINE_VERSION" \
@@ -44,7 +45,8 @@ jq -n \
     --arg clang "$clang_version" \
     --arg producer "${PORTSIDE_ENGINE_PRODUCER:-github-actions}" \
     --argjson freetype "$freetype_source" \
-    '{schemaVersion: 1, kind: "PortsideRuntimeEngine", engineVersion: $engineVersion, source: {repository: "https://github.com/Sikarugir-App/wine", commit: $sourceCommit, snapshotChecksum: $sourceSnapshotChecksum}, dependencies: [$freetype], artifact: {fileName: $archiveName, storageKey: $archiveKey, sha256: $archiveSHA256, size: ($archiveSize|tonumber)}, build: {id: $buildId, producer: $producer, portsideCommit: $portsideCommit, targetArchitecture: "x86_64", macOS: $macOS, xcode: $xcode, clang: $clang}}' \
+    --argjson patchSeries "$patch_series" \
+    '{schemaVersion: 1, kind: "PortsideRuntimeEngine", engineVersion: $engineVersion, source: {repository: "https://github.com/Sikarugir-App/wine", commit: $sourceCommit, snapshotChecksum: $sourceSnapshotChecksum, patches: $patchSeries.patches}, dependencies: [$freetype], artifact: {fileName: $archiveName, storageKey: $archiveKey, sha256: $archiveSHA256, size: ($archiveSize|tonumber)}, build: {id: $buildId, producer: $producer, portsideCommit: $portsideCommit, targetArchitecture: "x86_64", macOS: $macOS, xcode: $xcode, clang: $clang}}' \
     > "$BUILD_DIR/engine-metadata.json"
 
 jq -n \
@@ -57,7 +59,8 @@ jq -n \
     --arg buildId "$build_id" \
     --arg portsideCommit "$PORTSIDE_COMMIT" \
     --argjson freetype "$freetype_source" \
-    '{schemaVersion: 1, kind: "PortsideRuntimeEngine", sourcePolicy: "Wine from checked-in vendor/wine; checksum-pinned FreeType source; no compiled upstream input", engineVersion: $engineVersion, buildId: $buildId, portsideCommit: $portsideCommit, dependencies: [$freetype], source: {repository: "https://github.com/Sikarugir-App/wine", commit: $sourceCommit, snapshotChecksum: $sourceSnapshotChecksum}, artifact: {fileName: $archiveName, sha256: $archiveSHA256, size: ($archiveSize|tonumber)}}' \
+    --argjson patchSeries "$patch_series" \
+    '{schemaVersion: 1, kind: "PortsideRuntimeEngine", sourcePolicy: "Wine from checked-in vendor/wine with checksum-pinned Portside patches; checksum-pinned FreeType source; no compiled upstream input", engineVersion: $engineVersion, buildId: $buildId, portsideCommit: $portsideCommit, dependencies: [$freetype], source: {repository: "https://github.com/Sikarugir-App/wine", commit: $sourceCommit, snapshotChecksum: $sourceSnapshotChecksum, patches: $patchSeries.patches}, artifact: {fileName: $archiveName, sha256: $archiveSHA256, size: ($archiveSize|tonumber)}}' \
     > "$BUILD_DIR/engine-provenance.json"
 
 printf '%s\n' "$archive_sha256  $ARCHIVE_NAME" > "$BUILD_DIR/$ARCHIVE_NAME.sha256"

@@ -55,6 +55,14 @@ wrapper/winetricks and app changes assemble using the recipe-selected engine.
 The engine workflow never invokes the Wine compiler. Its push paths exclude
 assembly-only scripts. Missing local input fails on Linux before macOS allocation;
 there is no remote compilation or active waiting fallback.
+The Wine patch applicator and `upstream/patches/**` are engine inputs in both
+the workflow filter and component detector. The checksum-pinned patch series
+participates in local-cache and engine identity; it cannot reuse an engine built
+without the renderer-overlay patch under the same name. This does not change
+the same-commit CI/runtime release requirement or add workflow polling.
+Engine metadata/provenance carry the applied patch list. Runtime assembly retains
+it in provenance and the Wine SPDX `sourceInfo`; publication rejects a missing
+or mismatched inventory for patched engines.
 Release event routing and change-filter changes alone do not allocate native
 engine/runtime jobs; CI and local script tests validate that orchestration. Failed
 engine completion events do not allocate runtime runners; other branches do not

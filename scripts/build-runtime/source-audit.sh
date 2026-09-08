@@ -34,4 +34,6 @@ if [ "$missing" -ne 0 ]; then
     exit 2
 fi
 
+python3 "$ROOT_DIR/scripts/build-runtime/apply-wine-patches.py" --verify >/dev/null
+
 echo "Runtime source audit passed."

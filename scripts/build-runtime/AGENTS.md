@@ -58,7 +58,7 @@ certificates or graphical session explicitly; do not execute publication as a
 test. Documentation-only tasks need no Wine build.
 
 Known traps: dependency JSON is not enforced by Homebrew installation; engine
-keys omit toolchain/patch identity; engine upload is not a conditional immutable
+keys omit observed toolchain identity (the applied patch series is included); engine upload is not a conditional immutable
 write; manifest shell validation is structural; the clean-install script deletes
 its configured root and needs an interactive terminal. Read the documented limits
 before claiming reproducibility, safe rollback, signature or GUI success.

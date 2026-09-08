@@ -4,9 +4,15 @@
 #include <windows.h>
 #include <d3d11.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 int main(void)
 {
+    /* Optional fixture-local report survives launchers which redirect stdout. */
+    const char *report = getenv("PORTSIDE_D3D11_REPORT");
+    if (report && !freopen(report, "w", stdout)) return 1;
+    setvbuf(stdout, NULL, _IONBF, 0);
+    printf("D3D11 probe started; rendererOverlayPresent=%d\n", getenv("WINEDLLPATH_PREPEND") != NULL);
     const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0,
         D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0, D3D_FEATURE_LEVEL_9_3};
     for (unsigned int i = 0; i < sizeof(levels) / sizeof(levels[0]); ++i)

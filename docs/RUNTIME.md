@@ -38,9 +38,13 @@ build dependency versions, origins, checksums and licenses. Other `vendor/`
 snapshots preserve source provenance and notices; they are not production
 binaries or authoritative Portside documentation. Source changes go through
 [upstream sync](../scripts/upstream/sync.sh) or documented
-`upstream/patches/`, never manual snapshot surgery. The build recipe currently
-copies Wine sources without a patch-application step; adding a patch file alone
-does not establish that it is applied.
+`upstream/patches/`, never manual snapshot surgery. After copying the verified
+snapshot, the recipe runs [apply-wine-patches.py](../scripts/build-runtime/apply-wine-patches.py)
+against its disposable source tree. The [patch series](../upstream/patches/wine/README.md)
+pins the base commit and every patch checksum, rejects unlisted patches, and
+participates in engine/cache identity. Its renderer-search patch supplies the
+`WINEDLLPATH_PREPEND` contract used by Sikarugir; it does not supply the missing
+Launcher/SDK source or establish a graphical fix by itself.
 
 Sikarugir source repositories are legitimate provenance inputs. Precompiled
 Sikarugir releases are not Portside builds and must never become a hidden
@@ -68,6 +72,15 @@ An explicit arm64 target is rejected. Wine's upstream tests are disabled, but
 [validate-engine-execution.py](../scripts/build-runtime/validate-engine-execution.py)
 must execute both PE architectures in a disposable symlinked prefix before
 packaging and again after archive extraction. `wine --version` alone is insufficient.
+Before any execution, the validator rejects the known sandbox-disabling
+`kernelbase.dll` workaround in either PE architecture. This targeted check is
+not a complete sandbox audit. [probe-steam-command.c](../scripts/build-runtime/probe-steam-command.c)
+provides an additional disposable console control: build for both MinGW targets,
+place a second copy beside it named `steamwebhelper.exe`, and run the parent.
+It tests the actual `CreateProcessW` argument boundary, returns 42 on alteration,
+and writes fixed diagnostics to each executable's `.result` file. It never runs
+CEF or disables a browser sandbox. Runtime rendering still requires separate
+graphical and interaction acceptance.
 The pre-push hook builds engine-changing outgoing `main` commits locally from a
 clean Git export. Its persistent Wine install cache retains the existing recipe,
 dependency, architecture, build flags and observed macOS/Xcode/Clang checks.
@@ -105,7 +118,8 @@ both the persistent engine checksum and the repackaged runtime checksum.
 [create-archive.sh](../scripts/build-runtime/create-archive.sh) normalizes
 staged timestamps, ownership and macOS metadata; byte-identical reproducibility
 has not been demonstrated by this audit. The SPDX document inventories the
-wrapper, Wine, winetricks and bundled FreeType; it is not evidence of a complete
+wrapper, Wine (including the applied patch list in `sourceInfo`), winetricks and
+bundled FreeType; it is not evidence of a complete
 transitive dependency audit.
 
 Important limits visible in the code:
@@ -113,7 +127,7 @@ Important limits visible in the code:
 - Homebrew workflow steps install available native tools and print versions;
   only the newly source-built FreeType dependency enforces its archive checksum.
 - The persistent key includes target architecture and recipe/dependency identity,
-  but not the observed compiler version or a future applied patch set.
+  and the pinned applied patch series, but not the observed compiler version.
   [publish_engine.sh](../scripts/publish_engine.sh) uses ordinary `aws s3 cp`,
   without a conditional write preventing replacement of an existing key.
   Versioned naming alone does not prove immutable storage.
@@ -275,8 +289,13 @@ running without a window, and a window without webhelper have separate errors.
 Only a currently detected window with webhelper yields `visibleButUnverified`.
 The desktop keeps a verification screen open until the user confirms rendered
 content and interaction. Current, explicit exhausted GPU initialization reports
-can fail the attempt; bounded log reads exclude prelaunch bytes and old
-timestamps, allow a recovery grace and clear failure after newer initialization.
+and CEF window-surface creation failures can fail the attempt. Bounded readers
+for `webhelper_gpu.txt` and `cef_log.txt` exclude prelaunch bytes and old/future
+timestamps, reject symlinks, and allow a three-second recovery grace. Newer GPU
+attempts supersede older failures across the two files. A GL initialization
+report cannot clear a presentation failure; CEF timestamps are resolved around
+launch even across New Year. A successful surface retry without a corresponding
+log event cannot be inferred.
 Neither the log monitor nor window detection positively verifies rendering.
 
 ## Update, preservation and rollback limits

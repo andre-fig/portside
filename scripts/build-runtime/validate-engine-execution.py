@@ -15,6 +15,24 @@ import tempfile
 import time
 
 
+def check_steam_command_policy(engine):
+    """Reject the observed legacy kernelbase sandbox-disabling workaround.
+
+    This narrow binary guard runs before executing the engine, including on
+    cached installs and extracted CI inputs. It is not proof of browser sandbox
+    implementation or a substitute for the CreateProcess/graphical controls.
+    """
+    for architecture in ("i386", "x86_64"):
+        binary = engine / "lib/wine" / (architecture + "-windows") / "kernelbase.dll"
+        if not binary.is_file() or not binary.resolve().is_relative_to(engine.resolve()):
+            raise RuntimeError("Engine lacks a contained kernelbase for both Windows architectures")
+        data = binary.read_bytes()
+        for encoding in ("ascii", "utf-16le"):
+            if "--no-sandbox".encode(encoding) in data:
+                raise RuntimeError("Engine kernelbase contains a sandbox-disabling command workaround (" + architecture + ")")
+    print(json.dumps({"probe": "steam-command-policy", "knownSandboxDisablingWorkaround": False}), flush=True)
+
+
 def check_deployment(output):
     versions = re.findall(r"\bminos\s+(\d+(?:\.\d+){0,2})", output)
     versions += re.findall(r"cmd LC_VERSION_MIN_MACOSX\s+cmdsize\s+\d+\s+version\s+(\d+(?:\.\d+){0,2})", output)
@@ -45,6 +63,7 @@ def check_platform(engine):
 
 
 def validate(engine):
+    check_steam_command_policy(engine)
     wine = engine / "bin/wine"
     loader = engine / "lib/wine/x86_64-unix/wine"
     for binary in (wine, loader, engine / "lib/wine/x86_64-unix/ntdll.so"):

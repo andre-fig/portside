@@ -11,6 +11,7 @@ on:
       - "scripts/build-runtime/build-engine.sh"
       - "scripts/build-runtime/build-wine-engine.sh"
       - "scripts/build-runtime/build-freetype.sh"
+      - "scripts/build-runtime/apply-wine-patches.py"
       - "scripts/build-runtime/resolve-engine.sh"
       - "scripts/build-runtime/validate-engine-execution.py"
       - "scripts/build-runtime/validate-engine-privacy.py"

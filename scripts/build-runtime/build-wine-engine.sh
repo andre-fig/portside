@@ -14,6 +14,7 @@ ARCHIVE="$BUILD_DIR/PortsideWineEngine-$VERSION.tar.xz"
 CACHE_ROOT="${PORTSIDE_WINE_CACHE_DIR:-$ROOT_DIR/.cache/portside-wine}"
 
 "$ROOT_DIR/scripts/upstream/validate_snapshot.sh" "$SOURCE_DIR"
+python3 "$ROOT_DIR/scripts/build-runtime/apply-wine-patches.py" --verify >/dev/null
 [ -f "$SOURCE_DIR/configure.ac" ] || { echo "vendor/wine/configure.ac is missing" >&2; exit 1; }
 [ -f "$SOURCE_DIR/VERSION" ] || { echo "vendor/wine/VERSION is missing" >&2; exit 1; }
 case "$BUILD_DIR" in "$ROOT_DIR"/*) ;; *) echo "runtime build directory must be inside the checkout" >&2; exit 1 ;; esac
@@ -78,7 +79,7 @@ wine_snapshot_checksum="$(jq -r '.repositories[] | select(.name == "wine") | .sn
 macos_version="$(sw_vers -productVersion 2>/dev/null || uname -s)"
 xcode_version="$(xcodebuild -version 2>/dev/null | tr '\n' ';' || true)"
 clang_version="$(clang --version | head -n 1)"
-recipe_checksum="$(cat "$0" "$ROOT_DIR/scripts/build-runtime/build-freetype.sh" "$ROOT_DIR/upstream/dependencies.json" | shasum -a 256 | awk '{print $1}')"
+recipe_checksum="$(cat "$0" "$ROOT_DIR/scripts/build-runtime/build-freetype.sh" "$ROOT_DIR/scripts/build-runtime/apply-wine-patches.py" "$ROOT_DIR/upstream/patches/wine/series.json" "$ROOT_DIR/upstream/patches/wine/"*.patch "$ROOT_DIR/upstream/dependencies.json" | shasum -a 256 | awk '{print $1}')"
 cache_signature="$recipe_checksum|$wine_version|$wine_snapshot_checksum|$native_arch|$target_arch|$MACOSX_DEPLOYMENT_TARGET|$native_cflags|$native_cxxflags|$native_ldflags|$target_cflags|$target_cxxflags|$target_ldflags|$cross_cflags|$macos_version|$xcode_version|$clang_version"
 # Keep developer checkout paths out of native/PE debug data and __FILE__.
 # The virtual destination is stable; the disposable source directory is not a
@@ -116,6 +117,7 @@ if command -v rsync >/dev/null 2>&1; then
 else
     cp -R "$SOURCE_DIR" "$SOURCE_COPY"
 fi
+python3 "$ROOT_DIR/scripts/build-runtime/apply-wine-patches.py" "$SOURCE_COPY" > "$WORK_DIR/applied-patches.json"
 
 # The native tools are executed by the build machine. They must use the
 # machine architecture even when a separate target architecture is selected.
