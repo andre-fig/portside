@@ -1,5 +1,26 @@
 # Architectural decisions
 
+## D20 — Prepare Sikarugir through Portside and preserve the external prefix
+
+- **Date:** September 8, 2026; owner requested integration and background setup.
+- **Status:** Local installer and rendered-login interaction verified; customer
+  release validation pending. No publication.
+- **Decision:** Package the approved original inputs as the three authenticated
+  Portside runtime archives. Keep Sikarugir/SDK as the Steam application entry
+  point and the Portside host as the bounded maintenance helper. Reject incomplete
+  launch preparation and interactive winetricks configuration. Keep the user
+  prefix outside the wrapper and prepare it only during runtime installation.
+- **Trust:** Verify original provenance, archive hashes and five native component
+  signatures. Sign the host and launcher with Developer ID for distribution.
+  Do not claim a whole-wrapper resource seal over an external mutable prefix.
+  The desktop app's full signing/notarization and manifest checks remain intact.
+- **Release:** Linux input transfer, native assembly/fixture acceptance and Linux
+  publication remain bound to one checkout/run. CI and runtime from the same
+  commit still gate automatic app release. No hosted Wine rebuild or polling.
+- **Evidence and limits:** See [installation integration](SIKARUGIR_INSTALLATION.md)
+  for actual prefix preservation, rendered login/interaction, signing experiments
+  and pending customer-release acceptance.
+
 These are decisions evidenced by current code or local Git history, not claims
 of operational success. Dates are approximate commit periods (timezone can shift
 a day). [STATUS](STATUS.md) owns validation evidence. Revisit a decision explicitly,

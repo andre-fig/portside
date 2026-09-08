@@ -14,6 +14,12 @@ final class SikarugirIntegrationTests: XCTestCase {
         XCTAssertEqual(try runFixture(launcher: launcher, wine: "exit 91", arguments: ["--winetricks", "-q", "steam"]).status, 0)
     }
 
+    func testInteractiveSetupConfigurationIsRejectedBeforeStartingSikarugir() throws {
+        let result = try runFixture(launcher: "exit 0", wine: "exit 91", arguments: ["--winetricks", "-q", "steam"], invalid: "interactive-setup")
+        XCTAssertEqual(result.status, 1)
+        XCTAssertFalse(result.log.contains("starting Sikarugir"))
+    }
+
     func testExistingPrefixPreparationPreservesMarkerAndDoesNotApplyWine11CEFPolicy() throws {
         let wine = #"""
         [ "$1" = wineboot.exe ] && [ "$2" = -u ] && [ "$3" = -r ] && [ $# -eq 3 ] || exit 90
@@ -66,7 +72,7 @@ final class SikarugirIntegrationTests: XCTestCase {
         try manager.createDirectory(at: executable.deletingLastPathComponent(), withIntermediateDirectories: true)
         let builtHost = Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("PortsideRuntimeHost")
         try manager.copyItem(at: builtHost, to: executable)
-        try PropertyListSerialization.data(fromPropertyList: ["CFBundleExecutable": "Sikarugir", "CFBundleIdentifier": "com.portside.runtime", "CFBundlePackageType": "APPL"], format: .xml, options: 0).write(to: wrapper.appendingPathComponent("Contents/Info.plist"))
+        try PropertyListSerialization.data(fromPropertyList: ["Winetricks silent": invalid == "interactive-setup" ? 0 : 1, "CFBundleExecutable": "Sikarugir", "CFBundleIdentifier": "com.portside.runtime", "CFBundlePackageType": "APPL"], format: .xml, options: 0).write(to: wrapper.appendingPathComponent("Contents/Info.plist"))
         let config = wrapper.appendingPathComponent("Contents/Resources/portside-runtime.json")
         try manager.createDirectory(at: config.deletingLastPathComponent(), withIntermediateDirectories: true)
         let integration = invalid == "unknown-integration" ? "unknown" : "sikarugir"

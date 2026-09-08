@@ -22,7 +22,7 @@ assembly_changed=0
 while IFS= read -r path; do
     [ -n "$path" ] || continue
     case "$path" in
-        scripts/build-runtime/validate-steam-bootstrap.py|scripts/build-runtime/prepared-engine.py)
+        upstream/runtime-integration.json|upstream/sikarugir-runtime.json|scripts/build-runtime/*sikarugir*|scripts/build-runtime/import-runtime-signing-identity.sh|scripts/build-runtime/SikarugirInstallationProbe.swift|scripts/build-runtime/validate-steam-bootstrap.py|scripts/build-runtime/prepared-engine.py)
             assembly_changed=1 ;;
         apps/desktop/*|scripts/*release*.sh|scripts/package_app.sh|scripts/create_dmg.sh|scripts/generate_appcast.sh)
             assembly_changed=1 ;;
@@ -49,6 +49,20 @@ while IFS= read -r path; do
 done <<EOF
 $changed_files
 EOF
+
+# The selected original Sikarugir input requires assembly, never a hosted or
+# pre-push Wine compilation. Preserve legacy recipe checks for legacy revisions.
+selected=directWine
+if policy="$(git -C "$ROOT_DIR" show "$HEAD:upstream/runtime-integration.json" 2>/dev/null)"; then
+    selected="$(printf '%s' "$policy" | jq -er '.integration | select(. == "directWine" or . == "sikarugir")')" || {
+        echo "invalid runtime integration policy" >&2
+        exit 2
+    }
+fi
+if [ "$selected" = sikarugir ] && [ "$engine_changed" -eq 1 ]; then
+    assembly_changed=1
+    engine_changed=0
+fi
 
 case "$COMPONENT" in
     engine) [ "$engine_changed" -eq 1 ] ;;

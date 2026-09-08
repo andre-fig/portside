@@ -1,9 +1,17 @@
 # Sikarugir runtime adapter — 2026-09-08
 
+**2026-09-08 continuation:** [Sikarugir installation integration](SIKARUGIR_INSTALLATION.md)
+now connects the approved original composition to the desktop installer and
+runtime workflow. Preparation belongs to Portside and must not expose an upstream
+setup wizard. Earlier direct-Wine/incomplete-integration descriptions below are
+historical where superseded by that contract. Release and graphical acceptance
+remain separate from local automated checks.
+
 **Implementation started after user-authorized checkpoint `cb02472b`.** The
 checkpoint preserves the renderer investigation and the successful original
-Sikarugir login/interaction test. No push occurred. Subsequent adapter work is
-uncommitted and uses only disposable fixtures.
+Sikarugir login/interaction test. Adapter checkpoint `d4cccd72` was subsequently
+committed at the owner's request. The following installation integration remains
+uncommitted; no push occurred. All runtime controls use disposable fixtures.
 
 ## Adopted input and integration contract
 

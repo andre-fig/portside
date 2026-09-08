@@ -45,7 +45,7 @@ concurrency:
 
 jobs:
   changes:
-    name: Prepare runtime engine on Linux
+    name: Prepare approved runtime inputs on Linux
     # Failed engine completions have no artifact to assemble or release.
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
@@ -53,11 +53,6 @@ jobs:
     environment: production
     env:
       PORTSIDE_RUNTIME_VERSION: ${{ inputs.version || format('0.1.{0}', github.run_number) }}
-      PORTSIDE_PUBLIC_BUCKET: ${{ secrets.PORTSIDE_PUBLIC_BUCKET }}
-      PORTSIDE_S3_ACCESS_KEY_ID: ${{ secrets.PORTSIDE_S3_ACCESS_KEY_ID }}
-      PORTSIDE_S3_SECRET_ACCESS_KEY: ${{ secrets.PORTSIDE_S3_SECRET_ACCESS_KEY }}
-      PORTSIDE_S3_REGION: ${{ secrets.PORTSIDE_S3_REGION }}
-      PORTSIDE_S3_ENDPOINT: ${{ secrets.PORTSIDE_S3_ENDPOINT }}
     outputs:
       assemble_runtime: ${{ steps.detect.outputs.assemble_runtime }}
     steps:
@@ -120,40 +115,21 @@ jobs:
           done
           ./scripts/validate-production-policy.sh
 
-      - name: Prepare the runtime engine archive on Linux
+      - name: Prepare the approved runtime inputs on Linux
         if: steps.detect.outputs.assemble_runtime == 'true'
         run: |
           set -eu
-          if ! command -v bsdtar >/dev/null 2>&1; then
-            sudo apt-get update -qq
-            sudo apt-get install -y --no-install-recommends libarchive-tools
-          fi
-          # Preserve BSD archive metadata options; parallelize XZ only for writes.
-          archive_tools="$RUNNER_TEMP/portside-runtime-archive-tools"
-          mkdir "$archive_tools"
-          cat > "$archive_tools/tar" <<'SH'
-          #!/bin/sh
-          case "${1:-}" in
-            -cJf) exec bsdtar --options xz:threads=0 "$@" ;;
-            *) exec bsdtar "$@" ;;
-          esac
-          SH
-          chmod 755 "$archive_tools/tar"
-          PATH="$archive_tools:$PATH" ./scripts/build-runtime/fetch-engine.sh
-          python3 scripts/build-runtime/prepared-engine.py record build/runtime "$PORTSIDE_RUNTIME_VERSION"
+          python3 scripts/build-runtime/sikarugir-inputs.py prepare build/sikarugir-inputs
 
-      - name: Transfer the prepared engine to native validation
+      - name: Transfer approved inputs to native assembly
         if: steps.detect.outputs.assemble_runtime == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: portside-runtime-engine-${{ github.run_id }}
+          name: portside-runtime-inputs-${{ github.run_id }}
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
-          path: |
-            build/runtime/PortsideWineEngine-*.tar.xz
-            build/runtime/engine-input.json
-            build/runtime/prepared-engine.json
+          path: build/sikarugir-inputs/
 
   build-runtime:
     name: Assemble and validate production runtime
@@ -167,12 +143,18 @@ jobs:
       PORTSIDE_RUNTIME_CHANNEL: production
       PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX: ${{ inputs.artifact_url_prefix || secrets.PORTSIDE_RUNTIME_DOWNLOAD_URL_PREFIX }}
       PORTSIDE_MANIFEST_SIGNING_KEY_ID: ${{ secrets.PORTSIDE_MANIFEST_SIGNING_KEY_ID }}
-      PORTSIDE_USE_PREPARED_ENGINE: 'true'
+      PORTSIDE_RUNTIME_INTEGRATION: sikarugir
+      PORTSIDE_CODESIGN_IDENTITY: ${{ secrets.PORTSIDE_CODESIGN_IDENTITY }}
     steps:
       - name: Check out Portside sources
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Set up archive validation Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
 
       - name: Select fixed toolchain
         run: |
@@ -189,11 +171,14 @@ jobs:
           set -eu
           for tool in jq node python3 swiftc lipo tar shasum; do command -v "$tool"; done
 
-      - name: Download the prepared engine for this workflow
+      - name: Download approved inputs for this workflow
         uses: actions/download-artifact@v7
         with:
-          name: portside-runtime-engine-${{ github.run_id }}
-          path: build/runtime
+          name: portside-runtime-inputs-${{ github.run_id }}
+          path: build/sikarugir-inputs
+
+      - name: Authenticate transferred inputs before assembly
+        run: python3 scripts/build-runtime/sikarugir-inputs.py verify build/sikarugir-inputs
 
       - name: Validate production publication inputs
         run: |
@@ -216,7 +201,15 @@ jobs:
             *) echo "runtime download prefix must use the Portside production signed-download route" >&2; exit 1;;
           esac
 
-      - name: Assemble wrapper, validated engine and winetricks
+      - name: Import runtime signing identity
+        env:
+          CODESIGN_P12_BASE64: ${{ secrets.PORTSIDE_CODESIGN_P12_BASE64 }}
+          CODESIGN_P12_PASSWORD: ${{ secrets.PORTSIDE_CODESIGN_P12_PASSWORD }}
+          CODESIGN_CERT_PEM: ${{ secrets.PORTSIDE_CODESIGN_CERTIFICATE_PEM }}
+          CODESIGN_CERT_BASE64: ${{ secrets.PORTSIDE_CODESIGN_CERTIFICATE_BASE64 }}
+        run: ./scripts/build-runtime/import-runtime-signing-identity.sh
+
+      - name: Assemble original Sikarugir and validate the desktop installer
         run: ./scripts/build-runtime/build.sh
 
       - name: Upload validated runtime assembly
@@ -233,6 +226,11 @@ jobs:
             build/runtime/engine-input.json
             build/runtime/provenance.json
             build/runtime/sbom.spdx.json
+            build/runtime/native-validation.json
+
+      - name: Remove temporary runtime signing keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/portside-runtime-signing.keychain-db" || true
 
   publish-runtime:
     name: Sign and publish production runtime on Linux
@@ -313,6 +311,7 @@ jobs:
             build/runtime/engine-input.json
             build/runtime/provenance.json
             build/runtime/sbom.spdx.json
+            build/runtime/native-validation.json
             build/runtime/runtime-manifest.json
 
       - name: Upload runtime metadata for release orchestration
@@ -328,6 +327,7 @@ jobs:
             build/runtime/engine-input.json
             build/runtime/provenance.json
             build/runtime/sbom.spdx.json
+            build/runtime/native-validation.json
 
       - name: Remove temporary manifest signing key
         if: always()

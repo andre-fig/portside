@@ -1,5 +1,12 @@
 # Testing and evidence
 
+**2026-09-08 continuation:** [Sikarugir installation integration](SIKARUGIR_INSTALLATION.md)
+now connects the approved original composition to the desktop installer and
+runtime workflow. Preparation belongs to Portside and must not expose an upstream
+setup wizard. Earlier direct-Wine/incomplete-integration descriptions below are
+historical where superseded by that contract. Release and graphical acceptance
+remain separate from local automated checks.
+
 The [Sikarugir reference inspector](../scripts/build-runtime/inspect-sikarugir-template.py)
 reads a separately pinned upstream archive without extracting or running it.
 Its tests run with `python3 -B -m unittest discover -s scripts/tests -p test_inspect_sikarugir_template.py -v`.

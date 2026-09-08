@@ -336,7 +336,9 @@ struct PortsideRuntimeHost {
                 // The tested launcher accepts WSS-winetricks followed by verbs;
                 // quiet operation is the template's setting, not a new CLI flag.
                 let verbs = arguments.dropFirst().filter { $0 != "-q" }
-                guard !verbs.isEmpty else { throw HostError.invalidArguments }
+                guard verbs == ["steam"],
+                      let info = try PropertyListSerialization.propertyList(from: Data(contentsOf: bundle.appendingPathComponent("Contents/Info.plist")), format: nil) as? [String: Any],
+                      info["Winetricks silent"] as? Int == 1 else { throw HostError.invalidArguments }
                 return Command(label: "Sikarugir component setup", executable: launcher, arguments: ["WSS-winetricks"] + verbs)
             }
             if !["--version", "--create-prefix", "--program"].contains(arguments.first ?? "") {

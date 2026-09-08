@@ -194,15 +194,21 @@ class ReleaseEventTests(unittest.TestCase):
 
 
 class RuntimeChangeFilterTests(unittest.TestCase):
-    def decisions(self, files):
+    def decisions(self, files, integration=""):
         # Supply a synthetic diff without making commits or changing this checkout.
         with tempfile.TemporaryDirectory() as directory:
             git = Path(directory) / "git"
-            git.write_text('#!/bin/sh\ncase "$3" in cat-file) exit 0 ;; diff) printf "%s\\n" "$TEST_CHANGED_FILES" ;; *) exit 2 ;; esac\n')
+            git.write_text('#!/bin/sh\ncase "$3" in cat-file) exit 0 ;; diff) printf "%s\\n" "$TEST_CHANGED_FILES" ;; show) [ -n "$TEST_INTEGRATION" ] || exit 2; printf "%s" "$TEST_INTEGRATION" ;; *) exit 2 ;; esac\n')
             git.chmod(0o755)
-            env = dict(os.environ, PATH=directory + os.pathsep + os.environ["PATH"], TEST_CHANGED_FILES="\n".join(files))
+            env = dict(os.environ, PATH=directory + os.pathsep + os.environ["PATH"], TEST_CHANGED_FILES="\n".join(files), TEST_INTEGRATION=integration)
             script = Path(__file__).parents[1] / "build-runtime/changed-components.sh"
             return tuple(subprocess.run([str(script), component, OTHER, SHA], env=env, capture_output=True).returncode for component in ("engine", "assembly"))
+
+    def test_selected_sikarugir_never_compiles_wine_for_recipe_changes(self):
+        self.assertEqual(self.decisions(["scripts/build-runtime/build-wine-engine.sh"], '{"integration":"sikarugir"}'), (1, 0))
+
+    def test_unknown_integration_fails_closed(self):
+        self.assertEqual(self.decisions(["scripts/build-runtime/build-wine-engine.sh"], '{"integration":"unknown"}'), (2, 2))
 
     def test_app_and_release_inputs_assemble_without_rebuilding_wine(self):
         for file in ("apps/desktop/Sources/Portside/PortsideApp.swift", "scripts/sign_release.sh",

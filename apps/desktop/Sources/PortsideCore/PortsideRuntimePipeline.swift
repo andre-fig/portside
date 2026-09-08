@@ -4,6 +4,7 @@ import CryptoKit
 public enum PortsideRuntimeCatalog {
     public static let wrapperName = "PortsideBaseline.app"
     public static let requiredComponents = ["wrapper", "engine", "winetricks"]
+    public static let managedPrefixLink = "../../../../Prefixes/PortsideBaseline"
     public static let steamExecutable = "C:\\Program Files (x86)\\Steam\\steam.exe"
 }
 
@@ -103,6 +104,19 @@ public struct PortsideWrapperConfiguration: Sendable, Equatable {
               var info = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
             throw PortsideError.invalidArtifact("Portside wrapper metadata is missing")
         }
+        if try PortsideBundleComponents.runtimeIntegration(in: wrapper, fileManager: fileManager) == .sikarugir {
+            // The approved wrapper is configured before packaging/signing. Do
+            // not rewrite packaged metadata during installation or repair.
+            guard info["Program Name and Path"] as? String == "/Program Files (x86)/Steam/steam.exe",
+                  info["Program Flags"] as? String == "",
+                  ["D3DMETAL", "DXMT", "DXVK"].allSatisfy({ (info[$0] as? NSNumber)?.intValue == 0 }),
+                  (info["WINEMSYNC"] as? NSNumber)?.boolValue == baseline.msync,
+                  (info["WINEESYNC"] as? NSNumber)?.boolValue == baseline.esync else {
+                throw PortsideError.invalidArtifact("Sikarugir wrapper options do not match the approved baseline")
+            }
+            _ = try PortsideBundleComponents.runtimeHost(in: wrapper, fileManager: fileManager)
+            return
+        }
         info.removeValue(forKey: "NSMicrophoneUsageDescription")
         info["CFBundleName"] = "PortsideBaseline"
         info["CFBundleDisplayName"] = "Portside"
@@ -153,27 +167,58 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
     private let runner: ProcessRunning
     private let logger: PortsideLogger
     private let fileManager: FileManager
+    private let rootDirectory: URL
+    private var cacheDirectory: URL { rootDirectory.appendingPathComponent("Cache") }
+    private var runtimeDirectory: URL { rootDirectory.appendingPathComponent("Runtime") }
+    private var prefixesDirectory: URL { rootDirectory.appendingPathComponent("Prefixes") }
+    private var wrapperDirectory: URL { rootDirectory.appendingPathComponent("Wrappers/PortsideBaseline.app") }
     private let storageMaintenance: PortsideStorageMaintenance
 
     public init(
         runner: ProcessRunning = SystemProcessRunner(),
         logger: PortsideLogger = PortsideLogger(),
         fileManager: FileManager = .default,
-        storageMaintenance: PortsideStorageMaintenance? = nil
+        storageMaintenance: PortsideStorageMaintenance? = nil,
+        rootDirectory: URL = PortsidePaths.root
     ) {
         self.runner = runner
         self.logger = logger
         self.fileManager = fileManager
-        self.storageMaintenance = storageMaintenance ?? PortsideStorageMaintenance(fileManager: fileManager)
+        self.rootDirectory = rootDirectory
+        self.storageMaintenance = storageMaintenance ?? PortsideStorageMaintenance(
+            runtimeDirectory: rootDirectory.appendingPathComponent("Runtime"),
+            cacheDirectory: rootDirectory.appendingPathComponent("Cache"),
+            pendingDirectory: rootDirectory.appendingPathComponent("Runtime/Pending"),
+            downloadDirectories: [rootDirectory.appendingPathComponent("Cache/Downloads"), rootDirectory.appendingPathComponent("Downloads")],
+            legacyBackupDirectories: [rootDirectory.appendingPathComponent("Backups"), rootDirectory.appendingPathComponent("Diagnostics/Backups")],
+            fileManager: fileManager)
     }
 
     public func install(artifacts: [PortsideRuntimeArtifact: URL], configuration: PortsideRuntimeConfiguration = .golden) async throws -> PortsideRuntimeInstallResult {
+        guard artifacts.count == 3, Set(artifacts.keys.map(\.component)) == Set(PortsideRuntimeCatalog.requiredComponents) else {
+            throw PortsideError.invalidArtifact("the runtime component set is ambiguous or incomplete")
+        }
+        // Pending files can outlive their download check. Revalidate bytes at
+        // the installation boundary, before extracting or replacing anything.
+        for (artifact, archive) in artifacts {
+            let attributes = try fileManager.attributesOfItem(atPath: archive.path)
+            guard attributes[.type] as? FileAttributeType == .typeRegular,
+                  (attributes[.size] as? NSNumber)?.int64Value == artifact.expectedSize else {
+                throw PortsideError.invalidArtifact("runtime archive type or size changed after download")
+            }
+            let handle = try FileHandle(forReadingFrom: archive)
+            defer { try? handle.close() }
+            var digest = SHA256()
+            while let bytes = try handle.read(upToCount: 1024 * 1024), !bytes.isEmpty { digest.update(data: bytes) }
+            let actual = digest.finalize().map { String(format: "%02x", $0) }.joined()
+            guard actual == artifact.sha256.lowercased() else { throw PortsideError.checksumMismatch(expected: artifact.sha256, actual: actual) }
+        }
         guard let wrapperArchive = artifact("wrapper", in: artifacts),
               let engineArchive = artifact("engine", in: artifacts),
               let winetricksArchive = artifact("winetricks", in: artifacts) else {
             throw PortsideError.invalidArtifact("the Portside runtime manifest must contain wrapper, engine and winetricks")
         }
-        let pending = PortsidePaths.cache.appendingPathComponent("portside-runtime-\(UUID().uuidString)", isDirectory: true)
+        let pending = cacheDirectory.appendingPathComponent("portside-runtime-\(UUID().uuidString)", isDirectory: true)
         defer { try? fileManager.removeItem(at: pending) }
         try fileManager.createDirectory(at: pending, withIntermediateDirectories: true)
         let wrapperExtract = pending.appendingPathComponent("wrapper", isDirectory: true)
@@ -192,7 +237,8 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
         try fileManager.copyItem(at: wrapperBundle, to: wrapperPending)
         let sharedSupport = wrapperPending.appendingPathComponent("Contents/SharedSupport", isDirectory: true)
         try fileManager.createDirectory(at: sharedSupport, withIntermediateDirectories: true)
-        let engineDestination = sharedSupport.appendingPathComponent("engine", isDirectory: true)
+        let integration = try PortsideBundleComponents.runtimeIntegration(in: wrapperPending, fileManager: fileManager)
+        let engineDestination = sharedSupport.appendingPathComponent(integration == .sikarugir ? "wine" : "engine", isDirectory: true)
         try fileManager.copyItem(at: engineRoot, to: engineDestination)
         let shareWine = engineDestination.appendingPathComponent("share-wine", isDirectory: true)
         if fileManager.fileExists(atPath: shareWine.path) {
@@ -200,16 +246,22 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
             try fileManager.moveItem(at: shareWine, to: engineDestination.appendingPathComponent("share/wine", isDirectory: true))
         }
         let winetricksDestination = sharedSupport.appendingPathComponent("winetricks", isDirectory: true)
-        try fileManager.copyItem(at: winetricksRoot, to: winetricksDestination)
+        try fileManager.copyItem(at: integration == .sikarugir ? winetricksRoot.appendingPathComponent("src/winetricks") : winetricksRoot, to: winetricksDestination)
         try PortsideWrapperConfiguration(baseline: configuration).apply(to: wrapperPending, fileManager: fileManager)
 
-        let destination = PortsidePaths.baselineWrapper
+        if integration == .sikarugir {
+            let link = wrapperPending.appendingPathComponent("Contents/SharedSupport/prefix")
+            guard (try? fileManager.destinationOfSymbolicLink(atPath: link.path)) == PortsideRuntimeCatalog.managedPrefixLink else {
+                throw PortsideError.invalidArtifact("the packaged Sikarugir prefix link is invalid")
+            }
+        }
+        let destination = wrapperDirectory
         if fileManager.fileExists(atPath: destination.path) {
             // Setup can be retried several times within the same second. A
             // timestamp-only rollback name makes the second attempt fail with
             // "an item with the same name already exists" before the atomic
             // install can run.
-            let rollback = PortsidePaths.runtime.appendingPathComponent(
+            let rollback = runtimeDirectory.appendingPathComponent(
                 PortsideStorageMaintenance.historyName(prefix: "rollback-"),
                 isDirectory: true
             )
@@ -218,14 +270,14 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
         }
         try AtomicInstaller.installDirectory(from: wrapperPending, to: destination, fileManager: fileManager)
 
-        let managedPrefix = PortsidePaths.steamPrefix
-        try fileManager.createDirectory(at: PortsidePaths.prefixes, withIntermediateDirectories: true)
+        let managedPrefix = prefixesDirectory.appendingPathComponent("PortsideBaseline")
+        try fileManager.createDirectory(at: prefixesDirectory, withIntermediateDirectories: true)
         try await preparePrefix(wrapper: destination, prefix: managedPrefix)
 
         let validation = try PortsideRuntimeValidator.validate(wrapper: destination, configuration: configuration, fileManager: fileManager)
         let canonical = PortsideWrapperValidation(wrapper: validation.wrapper, prefix: managedPrefix, launcher: validation.launcher, engineVersion: validation.engineVersion, configuration: validation.configuration)
         let metadata = ["wrapper": destination.path, "prefix": managedPrefix.path, "engine": validation.engineVersion]
-        try JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys]).write(to: PortsidePaths.prefixes.appendingPathComponent("PortsideBaseline.json"), options: .atomic)
+        try JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys]).write(to: prefixesDirectory.appendingPathComponent("PortsideBaseline.json"), options: .atomic)
         guard let engineArtifact = artifacts.keys.first(where: { $0.component == "engine" }) else { throw PortsideError.invalidArtifact("engine artifact is missing") }
         let record = PortsideRuntimeRecord(manifest: engineArtifact, installedPath: destination, executablePath: validation.launcher, graphicsBackend: configuration.renderer)
         let maintenance = storageMaintenance.run()
@@ -242,12 +294,25 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
     func preparePrefix(wrapper: URL, prefix: URL) async throws {
         let link = wrapper.appendingPathComponent("Contents/SharedSupport/prefix")
         try fileManager.createDirectory(at: prefix, withIntermediateDirectories: true)
-        // Remove the wrapper entry itself, including a dangling old symlink;
-        // never resolve it when removing and never remove the managed prefix.
-        if (try? fileManager.attributesOfItem(atPath: link.path)) != nil {
-            try fileManager.removeItem(at: link)
+        if try PortsideBundleComponents.runtimeIntegration(in: wrapper, fileManager: fileManager) == .sikarugir {
+            guard (try? fileManager.destinationOfSymbolicLink(atPath: link.path)) == PortsideRuntimeCatalog.managedPrefixLink,
+                  link.resolvingSymlinksInPath().path == prefix.resolvingSymlinksInPath().path else {
+                throw PortsideError.invalidArtifact("the Sikarugir prefix link does not target the managed prefix")
+            }
+        } else {
+            // Remove only an old link or an empty wrapper placeholder. Never
+            // delete embedded user data in order to create the external link.
+            if let attributes = try? fileManager.attributesOfItem(atPath: link.path) {
+                let isEmptyDirectory = attributes[.type] as? FileAttributeType == .typeDirectory
+                    ? try fileManager.contentsOfDirectory(atPath: link.path).isEmpty : false
+                guard attributes[.type] as? FileAttributeType == .typeSymbolicLink ||
+                        isEmptyDirectory else {
+                    throw PortsideError.invalidArtifact("the wrapper prefix contains data requiring explicit migration")
+                }
+                try fileManager.removeItem(at: link)
+            }
+            try fileManager.createSymbolicLink(at: link, withDestinationURL: prefix)
         }
-        try fileManager.createSymbolicLink(at: link, withDestinationURL: prefix)
         let result = try await runner.run(PortsideSteamFlow.prefixCreationSpec(wrapper: wrapper), logger: logger)
         guard result.status == 0 else {
             throw PortsideError.processFailed("Portside prefix preparation", result.status)
@@ -256,7 +321,7 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
 
     @discardableResult
     public func performStorageMaintenance() -> PortsideStorageMaintenanceReport {
-        guard (try? PortsideRuntimeValidator.validate(wrapper: PortsidePaths.baselineWrapper, fileManager: fileManager)) != nil else {
+        guard (try? PortsideRuntimeValidator.validate(wrapper: wrapperDirectory, fileManager: fileManager)) != nil else {
             return PortsideStorageMaintenanceReport()
         }
         let report = storageMaintenance.run()
@@ -269,9 +334,9 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
     @discardableResult
     public func rollbackLatest() throws -> PortsideWrapperValidation? {
         guard let previous = storageMaintenance.newestRollback() else { return nil }
-        let destination = PortsidePaths.baselineWrapper
+        let destination = wrapperDirectory
         if fileManager.fileExists(atPath: destination.path) {
-            let failed = PortsidePaths.runtime.appendingPathComponent(
+            let failed = runtimeDirectory.appendingPathComponent(
                 PortsideStorageMaintenance.historyName(prefix: "failed-"),
                 isDirectory: true
             )
@@ -303,7 +368,8 @@ public final class PortsideRuntimeInstaller: @unchecked Sendable {
     private func findEngine(in root: URL) -> URL? {
         (fileManager.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey])?.compactMap { $0 as? URL } ?? []).first {
             fileManager.isExecutableFile(atPath: $0.appendingPathComponent("bin/wine").path)
-                && fileManager.fileExists(atPath: $0.appendingPathComponent("share-wine").path)
+                && (fileManager.fileExists(atPath: $0.appendingPathComponent("share-wine").path)
+                    || fileManager.fileExists(atPath: $0.appendingPathComponent("share/wine").path))
         }
     }
 
@@ -438,11 +504,13 @@ public enum PortsideSteamFlow {
     }
 
     public static func cleanLaunchSpec(wrapper: URL) throws -> ProcessLaunchSpec {
+        try validatePreparedSteam(wrapper: wrapper)
         let launcher = try PortsideBundleComponents.runtimeLauncher(in: wrapper)
         return ProcessLaunchSpec(executable: launcher, environment: processEnvironment, currentDirectory: wrapper, timeout: 60)
     }
 
     public static func launchArguments(wrapper: URL, launchID: UUID) throws -> [String] {
+        try validatePreparedSteam(wrapper: wrapper)
         guard try PortsideBundleComponents.runtimeIntegration(in: wrapper) == .directWine else { return [] }
         let resource = wrapper.appendingPathComponent("Contents/Resources/portside-runtime.json")
         if let data = try? Data(contentsOf: resource),
@@ -451,6 +519,32 @@ public enum PortsideSteamFlow {
             return ["--launch-id", launchID.uuidString]
         }
         return []
+    }
+
+    /// Do not let an incomplete wrapper enter Sikarugir's interactive setup.
+    /// Portside owns preparation; the application entry point only opens Steam.
+    public static func validatePreparedSteam(wrapper: URL) throws {
+        guard try PortsideBundleComponents.runtimeIntegration(in: wrapper) == .sikarugir else { return }
+        let manager = FileManager.default
+        let link = wrapper.appendingPathComponent("Contents/SharedSupport/prefix")
+        guard (try? manager.destinationOfSymbolicLink(atPath: link.path)) != nil else {
+            throw PortsideError.invalidArtifact("Steam preparation requires the managed external prefix")
+        }
+        let prefix = link.resolvingSymlinksInPath()
+        let info = try PropertyListSerialization.propertyList(from: Data(contentsOf: wrapper.appendingPathComponent("Contents/Info.plist")), format: nil) as? [String: Any]
+        guard info?["Program Name and Path"] as? String == "/Program Files (x86)/Steam/steam.exe",
+              info?["Program Flags"] as? String == "" else {
+            throw PortsideError.invalidArtifact("The runtime is not configured to open Steam")
+        }
+        for file in [prefix.appendingPathComponent("system.reg"), prefix.appendingPathComponent("user.reg"),
+                     prefix.appendingPathComponent("userdef.reg"), steamExecutable(prefix: prefix)] {
+            guard file.resolvingSymlinksInPath().path.hasPrefix(prefix.path + "/"),
+                  let attributes = try? manager.attributesOfItem(atPath: file.path),
+                  attributes[.type] as? FileAttributeType == .typeRegular,
+                  (attributes[.size] as? NSNumber)?.intValue ?? 0 > 0 else {
+                throw PortsideError.invalidArtifact("Steam setup is incomplete. Complete preparation in Portside before opening Steam.")
+            }
+        }
     }
 
     public static func steamExecutable(prefix: URL) -> URL {

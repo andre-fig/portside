@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "integration": "sikarugir",
+  "approvedInputs": "upstream/sikarugir-runtime.json"
+}

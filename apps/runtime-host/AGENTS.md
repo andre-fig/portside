@@ -12,7 +12,8 @@ Inherit the [root rules](../../AGENTS.md). Read
   versioned `runtime/wrapper-template` from repository root.
 - **Local architecture:** Foundation resolves the app bundle and its JSON
   resource. Explicit `integration: sikarugir` routes winetricks to the contained
-  original launcher/SDK. Steam opens through the original Sikarugir application
+  original launcher/SDK with the required silent setting; unsupported verbs and
+  interactive configuration fail before launch. Steam opens through the original Sikarugir application
   entry point; the maintenance host rejects normal Steam launches. Absent integration retains the legacy
   direct-Wine path. Unknown integrations and missing/escaping Sikarugir code
   fail closed. Prefix maintenance remains a bounded host command, with addon

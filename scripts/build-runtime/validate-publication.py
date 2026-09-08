@@ -94,6 +94,10 @@ def validate_engine(root, sha, run_id):
 def validate_runtime(root, sha, run_id):
     manifest = read_json(root, "runtime-manifest-unsigned.json")
     provenance = read_json(root, "provenance.json")
+    if manifest.get("integration") == "sikarugir":
+        validate_sikarugir_runtime(root, manifest, provenance, sha, run_id)
+        return
+    require(manifest.get("integration", "directWine") == "directWine", "Unsupported runtime integration")
     engine = read_json(root, "engine-input.json")
     sbom = read_json(root, "sbom.spdx.json")
     patches = engine["source"].get("patches", [])
@@ -130,6 +134,54 @@ def validate_runtime(root, sha, run_id):
                     and engine["source"]["commit"] == component["sourceCommit"],
                     "Runtime engine input provenance mismatch")
     require(sorted(files) == sorted(provenance["artifacts"]), "Runtime archive inventory mismatch")
+
+
+def validate_sikarugir_runtime(root, manifest, provenance, sha, run_id):
+    checkout = Path(__file__).resolve().parents[2]
+    pins = checkout / "upstream/sikarugir-runtime.json"
+    approved = json.loads(pins.read_text())
+    pin_sha = hashlib.sha256(pins.read_bytes()).hexdigest()
+    check_build(manifest["portsideCommit"], manifest["buildId"], sha, run_id)
+    require(provenance.get("kind") == "PortsideSikarugirRuntime" and provenance.get("integration") == "sikarugir"
+            and provenance.get("portsideCommit") == sha and provenance.get("sourceCommits") == {"portside": sha}
+            and provenance.get("buildId") == manifest["buildId"] and provenance.get("version") == manifest["manifestVersion"]
+            and manifest["channel"] == provenance.get("channel") == "production", "Sikarugir runtime source/build mismatch")
+    require(provenance.get("approvedInputsSha256") == pin_sha and provenance.get("inputs") == approved["components"],
+            "Sikarugir original input provenance mismatch")
+    engine = read_json(root, "engine-input.json")
+    require(engine.get("kind") == "PortsideApprovedSikarugirEngine" and engine.get("approvedInputsSha256") == pin_sha
+            and engine.get("input") == next(value for value in approved["components"] if value["id"] == "engine"),
+            "Sikarugir engine input mismatch")
+    names = {"wrapper": "Wrapper", "engine": "WineEngine", "winetricks": "Winetricks"}
+    components = manifest["components"]
+    require(len(components) == 3 and {item["component"] for item in components} == names.keys(), "Invalid Sikarugir component set")
+    files = []
+    for item in components:
+        name = "Portside" + names[item["component"]] + "-" + manifest["manifestVersion"] + ".tar.xz"
+        check_archive(root, name, item)
+        files.append(name)
+        require(item.get("sourceCommit") == sha and item.get("sourceSnapshotChecksum") == pin_sha
+                and item.get("builtBy") == "Portside" and item.get("buildOperation") == "assembly"
+                and item.get("upstreamProducer") == "Sikarugir", "Sikarugir component producer/source mismatch")
+    require(sorted(files) == sorted(provenance["artifacts"]), "Sikarugir archive inventory mismatch")
+    sbom = read_json(root, "sbom.spdx.json")
+    for item in approved["components"]:
+        packages = [p for p in sbom.get("packages", []) if p.get("SPDXID") == "SPDXRef-" + item["id"]]
+        require(len(packages) == 1 and packages[0].get("supplier") == "Organization: Sikarugir"
+                and packages[0].get("checksums") == [{"algorithm": "SHA256", "checksumValue": item["sha256"]}],
+                "Sikarugir SBOM original input mismatch")
+    native = read_json(root, "native-validation.json")
+    require(native.get("kind") == "PortsideSikarugirInstallationProbe" and native.get("portsideCommit") == sha
+            and native.get("buildId") == manifest["buildId"] and native.get("syntheticDataPreserved") is True
+            and native.get("startupSkipped") is True and native.get("wrapperMetadataPreserved") is True
+            and native.get("windowsX64Exit") == 37 and native.get("windowsX86Exit") == 23
+            and native.get("archiveChecksums") == {item["component"]: item["sha256"] for item in components},
+            "Sikarugir native installation acceptance is missing")
+    require(provenance.get("distributionReady") is True and provenance.get("signatureKind") == "Developer ID entry points"
+            and native.get("componentSignaturesVerified") is True
+            and set(native.get("nativeComponentChecksums", {})) == {"host", "launcher", "sdk", "wine", "wineserver"}
+            and native.get("nativeComponentChecksums") == provenance.get("nativeComponentChecksums") and native.get("distributionSignatureVerified") is True,
+            "Sikarugir distribution signing acceptance is pending; local candidates cannot be published")
 
 
 def main():

@@ -1,14 +1,22 @@
 # Portside architecture
 
+**2026-09-08 continuation:** [Sikarugir installation integration](SIKARUGIR_INSTALLATION.md)
+now connects the approved original composition to the desktop installer and
+runtime workflow. Preparation belongs to Portside and must not expose an upstream
+setup wizard. Earlier direct-Wine/incomplete-integration descriptions below are
+historical where superseded by that contract. Release and graphical acceptance
+remain separate from local automated checks.
+
 **Target clarified on 2026-09-08:** Portside automates Sikarugir installation,
-configuration, updates and Steam launch. The direct-Wine implementation described
-below is an architectural gap, not completion of that target. Using Sikarugir's
+configuration, updates and Steam launch. The approved original composition is
+now connected to the desktop installer and runtime assembly. The retained
+direct-Wine path described below is the legacy implementation. Using Sikarugir's
 Wine fork alone does not integrate its launcher, SDK or renderer composition.
 See [SIKARUGIR_INTEGRATION](SIKARUGIR_INTEGRATION.md) for inspected evidence,
 the approved original baseline and remaining implementation work.
 
 Portside is a native macOS launcher that prepares a private Windows Steam
-environment using a Portside-built Wine runtime. Valve supplies Steam and games;
+environment using a Portside-assembled Sikarugir runtime. Valve supplies Steam and games;
 Portside does not redistribute them or bypass DRM or anti-cheat. The desktop
 targets Apple silicon and macOS 13+, with English application UI.
 

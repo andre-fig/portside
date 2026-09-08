@@ -1,11 +1,21 @@
 # Builds, publication and updates
 
-The [Sikarugir integration](SIKARUGIR_ADAPTER.md) now uses an owner-approved
-original input set in its local candidate builder. Production engine/runtime
-workflows remain on the existing direct-Wine assembly until installer, layout,
-provenance and signing integration are complete. A future integrated runtime
-retains the same-commit CI/runtime/app chain below and authenticated artifacts.
-The local candidate command does not dispatch, publish or change installed runtimes.
+**2026-09-08 continuation:** [Sikarugir installation integration](SIKARUGIR_INSTALLATION.md)
+now connects the approved original composition to the desktop installer and
+runtime workflow. Preparation belongs to Portside and must not expose an upstream
+setup wizard. Earlier direct-Wine/incomplete-integration descriptions below are
+historical where superseded by that contract. Release and graphical acceptance
+remain separate from local automated checks.
+
+The [Sikarugir installation integration](SIKARUGIR_INSTALLATION.md) connects the
+approved original inputs to runtime assembly. Linux transfers verified inputs;
+macOS assembles, signs native entry points and exercises the actual desktop
+installer in disposable prefixes; Linux checks the resulting source/run/archive
+and native-signature evidence before the existing publication stages. The
+same-commit CI/runtime/app release chain and authenticated artifacts remain.
+The standalone Wine engine workflow is retained for historical recipes; selected
+Sikarugir changes require assembly rather than hosted Wine compilation.
+These changes have not been dispatched or published in this task.
 
 This is the current release contract, not evidence that a live release passed.
 See [STATUS.md](STATUS.md) for the audit snapshot and [TESTING.md](TESTING.md)

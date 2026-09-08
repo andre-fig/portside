@@ -12,6 +12,25 @@ PORTSIDE_COMMIT="${PORTSIDE_COMMIT:-$(git -C "$ROOT_DIR" rev-parse HEAD)}"
 case "$BUILD_DIR" in "$ROOT_DIR"/*) ;; *) echo "runtime build directory must be inside the checkout" >&2; exit 1 ;; esac
 command -v jq >/dev/null 2>&1 || { echo "jq is required for the Portside runtime build" >&2; exit 1; }
 
+integration="${PORTSIDE_RUNTIME_INTEGRATION:-}"
+if [ -z "$integration" ]; then
+    integration=directWine
+    if [ -f "$ROOT_DIR/upstream/runtime-integration.json" ]; then
+        integration="$(jq -er '.integration' "$ROOT_DIR/upstream/runtime-integration.json")"
+    fi
+fi
+case "$integration" in
+    sikarugir)
+        python3 "$ROOT_DIR/scripts/build-runtime/package-sikarugir-runtime.py" \
+            --inputs "${PORTSIDE_SIKARUGIR_INPUTS:-$ROOT_DIR/build/sikarugir-inputs}" \
+            --output "$BUILD_DIR" --version "$VERSION" --download-prefix "$DOWNLOAD_URL_PREFIX"
+        python3 "$ROOT_DIR/scripts/build-runtime/validate-sikarugir-installation.py" "$BUILD_DIR"
+        "$ROOT_DIR/scripts/build-runtime/validate-manifest.sh" "$BUILD_DIR/runtime-manifest-unsigned.json"
+        exit 0 ;;
+    directWine) ;;
+    *) echo "unsupported runtime integration" >&2; exit 1 ;;
+esac
+
 mkdir -p "$BUILD_DIR"
 "$ROOT_DIR/scripts/build-runtime/source-audit.sh"
 "$ROOT_DIR/scripts/build-runtime/build-wrapper.sh"

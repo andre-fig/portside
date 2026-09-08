@@ -887,3 +887,75 @@ Useful historical validation is scoped to its original report; obsolete duplicat
 recipes now route to canonical references. The largest staleness risks are future
 bootstrap/release changes, service configuration, source locks and milestone
 results; re-check their owners rather than treating this snapshot as live truth.
+
+## Sikarugir installer and background setup — 2026-09-08 UTC
+
+**Checkpoint committed:** `d4cccd72` preserves the initial adapter, following the
+user's explicit request. Subsequent integration changes remain uncommitted.
+No push, workflow dispatch, deployment or publication was performed.
+
+**Implemented but not end-to-end validated:** the three-archive installer now
+accepts the approved original Sikarugir composition, verifies archive bytes before
+replacement, preserves the fixed external prefix and installs the original engine
+layout. Runtime workflow input transfer, provenance, component signing and native
+installation gates are integrated while retaining the same-commit CI/release chain.
+See [SIKARUGIR_INSTALLATION](SIKARUGIR_INSTALLATION.md) for the exact contract.
+
+The user reported an upstream installer appearing during the experimental
+external-prefix environment control. That control was stopped. Background setup
+now rejects interactive winetricks configuration, and normal opening requires a
+prepared external prefix and Steam executable before invoking Sikarugir. The
+reported dialog itself was not captured, so its precise origin remains Unknown.
+
+**Verified, scoped:** actual new/existing installation took 40.716/34.033 seconds;
+synthetic data and wrapper metadata were preserved, Run autostart was skipped,
+x64/x86 controls returned 37/23, and quiet official Steam installation completed.
+Individual strict native signature checks passed; the initial ad-hoc candidate
+correctly remained ineligible for publication. This does not prove whole-wrapper
+signing: the external mutable prefix failed a separate full-seal experiment.
+
+**Graphical result:** a captured integrated Steam updater rendered text and
+progress. Final login content and interaction remain unconfirmed in the integrated
+fixture after Steam updated to client 1788652215. The earlier original-stock
+rendered-login/checkbox evidence remains scoped to that session. No everyday
+prefix, installed runtime, account, games or native Steam was modified.
+
+**Checks:** desktop 159 tests (one optional signed-app probe skipped), host 24
+tests, both Swift builds, 93 script tests, source/snapshot audits, shell/JSON
+validation, actionlint and production policy passed. Signing and the final silent
+fixture continuation are recorded below. No hosted Wine build was
+started. Rosetta dependency and upstream command-policy limits remain explicit.
+
+**Final graphical continuation — Verified, local fixture:** the integrated
+Developer ID candidate completed official silent installation and Steam's update
+to client 1788652215. Owned-window screenshots showed the complete login form,
+then Remember me changing from checked to unchecked using targeted keyboard
+input. No credentials were entered. The login appeared about 50 seconds after
+the updated client started. This supersedes the unconfirmed integrated-login
+observation above, but does not establish customer installation or gameplay.
+Only fixture processes were stopped; the preservation marker remained intact.
+Exact archive bindings and screenshots' scope are recorded in
+[SIKARUGIR_INSTALLATION](SIKARUGIR_INSTALLATION.md); images remain outside Git.
+
+**Final signature/native acceptance — Verified, scoped:** corrected inline
+`codesign -R` syntax now evaluates the intended Developer ID requirement rather
+than treating it as a filename. Both actual entry signatures passed. A new archive
+build and real installer probe passed strict verification of all five native
+components, both Developer ID requirements, new/existing prefix preparation in
+40.576/35.121 seconds, marker/metadata preservation and expected x64/x86 exits.
+The newly signed archive did not receive a second graphical run; the successful
+GUI control used the preceding signature instance of the same runtime source.
+All 93 script tests passed after the attestation fix. Local builds record the
+checkpoint plus uncommitted integration work, not an executed CI release.
+
+**Final review:** 93 script tests, actionlint, production policy and `git diff --check`
+passed after the final workflow/documentation review. Known integration fixtures
+were stopped using exact prefix/executable ownership; their synthetic data was retained.
+
+## Authorized release handoff — 2026-09-08 UTC
+
+The owner explicitly requested committing and pushing the integrated Sikarugir
+changes to generate the automatic release. The outgoing change includes the
+verified local login/interaction and prefix-preservation work above. Existing
+CI and runtime completion for the same commit remain prerequisites; this entry
+is authorization and local evidence, not a claim that publication has completed.

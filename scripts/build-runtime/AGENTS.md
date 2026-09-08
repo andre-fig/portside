@@ -6,8 +6,12 @@ before editing. Verify those descriptions against the scripts and lockfiles.
 
 This directory builds or assembles Portside runtime components from controlled inputs.
 The approved original Sikarugir set is pinned in `upstream/sikarugir-runtime.json`;
-`build-sikarugir-candidate.py` currently assembles a local integration candidate,
-without changing the commercial workflow or accessing installed prefixes.
+`build-sikarugir-candidate.py` assembles the local candidate;
+`package-sikarugir-runtime.py` and `validate-sikarugir-installation.py` implement
+the selected original-composition packaging and native installer checks. See
+[the installation contract](../../docs/SIKARUGIR_INSTALLATION.md). The runtime
+workflow transfers pinned inputs and requires native/signature acceptance before
+publication. No installed prefix is used by validation.
 `build-engine.sh`/`build-wine-engine.sh` compile Wine; `resolve-engine.sh` names the
 persistent component; `fetch-engine.sh` validates and reuses it; `build.sh`
 assembles wrapper, engine and winetricks. `build-wrapper.sh` compiles

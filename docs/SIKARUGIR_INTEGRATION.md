@@ -1,5 +1,12 @@
 # Sikarugir integration — 2026-09-08
 
+**2026-09-08 continuation:** [Sikarugir installation integration](SIKARUGIR_INSTALLATION.md)
+now connects the approved original composition to the desktop installer and
+runtime workflow. Preparation belongs to Portside and must not expose an upstream
+setup wizard. Earlier direct-Wine/incomplete-integration descriptions below are
+historical where superseded by that contract. Release and graphical acceptance
+remain separate from local automated checks.
+
 **Migration started after checkpoint `cb02472b`:** the native host now has an
 explicit Sikarugir integration mode, and a local builder assembles its candidate
 from the approved original input set. See [SIKARUGIR_ADAPTER](SIKARUGIR_ADAPTER.md)

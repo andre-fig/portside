@@ -23,6 +23,23 @@ final class SikarugirComponentTests: XCTestCase {
         XCTAssertEqual(try PortsideSteamFlow.launchArguments(wrapper: wrapper, launchID: UUID()), [])
     }
 
+    func testIncompleteSteamCannotOpenUpstreamConfigurationUI() throws {
+        let wrapper = try fixture()
+        let steam = wrapper.appendingPathComponent("Contents/SharedSupport/prefix/drive_c/Program Files (x86)/Steam/steam.exe")
+        try FileManager.default.removeItem(at: steam)
+        XCTAssertThrowsError(try PortsideSteamFlow.launchArguments(wrapper: wrapper, launchID: UUID()))
+        XCTAssertThrowsError(try PortsideSteamFlow.cleanLaunchSpec(wrapper: wrapper))
+        XCTAssertEqual(try PortsideSteamFlow.installationSpec(wrapper: wrapper).arguments, ["--winetricks", "-q", "steam"])
+    }
+
+    func testEmbeddedEmptyPrefixCannotLaunchWithOnlyEnvironmentOverride() throws {
+        let wrapper = try fixture()
+        let link = wrapper.appendingPathComponent("Contents/SharedSupport/prefix")
+        try FileManager.default.removeItem(at: link)
+        try FileManager.default.createDirectory(at: link, withIntermediateDirectories: true)
+        XCTAssertThrowsError(try PortsideSteamFlow.launchArguments(wrapper: wrapper, launchID: UUID()))
+    }
+
     func testMissingMaintenanceHelperCannotFallBackToOriginalLauncher() throws {
         let wrapper = try fixture()
         try FileManager.default.removeItem(at: wrapper.appendingPathComponent("Contents/MacOS/PortsideRuntimeHost"))
@@ -76,7 +93,7 @@ final class SikarugirComponentTests: XCTestCase {
         try executable(wrapper.appendingPathComponent("Contents/MacOS/PortsideRuntimeHost"))
         try executable(wrapper.appendingPathComponent("Contents/Frameworks/SikarugirSdk.framework/Versions/A/SikarugirSdk"))
         try FileManager.default.createSymbolicLink(at: wrapper.appendingPathComponent("Contents/MacOS/launcher"), withDestinationURL: original)
-        let info: [String: Any] = ["CFBundleExecutable": primary, "CFBundleIdentifier": "com.portside.runtime", "CFBundlePackageType": "APPL", "PortsideRuntime": true, "PortsideRenderer": "WineD3D", "PortsideD3DMetal": 0, "PortsideDXMT": 0, "PortsideDXVK": 0]
+        let info: [String: Any] = ["Program Name and Path": "/Program Files (x86)/Steam/steam.exe", "Program Flags": "", "CFBundleExecutable": primary, "CFBundleIdentifier": "com.portside.runtime", "CFBundlePackageType": "APPL", "PortsideRuntime": true, "PortsideRenderer": "WineD3D", "PortsideD3DMetal": 0, "PortsideDXMT": 0, "PortsideDXVK": 0]
         try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: wrapper.appendingPathComponent("Contents/Info.plist"))
         let resource = wrapper.appendingPathComponent("Contents/Resources/portside-runtime.json")
         try FileManager.default.createDirectory(at: resource.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -85,7 +102,11 @@ final class SikarugirComponentTests: XCTestCase {
         try executable(engine.appendingPathComponent("bin/wine"))
         try FileManager.default.createDirectory(at: engine.appendingPathComponent("share/wine"), withIntermediateDirectories: true)
         try Data("Wine Sikarugir fixture".utf8).write(to: engine.appendingPathComponent("version"))
-        try FileManager.default.createDirectory(at: wrapper.appendingPathComponent("Contents/SharedSupport/prefix"), withIntermediateDirectories: true)
+        let prefix = root.appendingPathComponent("ExternalPrefix")
+        try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: true)
+        for name in ["system.reg", "user.reg", "userdef.reg"] { try Data("registry".utf8).write(to: prefix.appendingPathComponent(name)) }
+        try executable(PortsideSteamFlow.steamExecutable(prefix: prefix))
+        try FileManager.default.createSymbolicLink(at: wrapper.appendingPathComponent("Contents/SharedSupport/prefix"), withDestinationURL: prefix)
         return wrapper
     }
 }

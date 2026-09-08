@@ -1,5 +1,12 @@
 # Runtime architecture and build
 
+**2026-09-08 continuation:** [Sikarugir installation integration](SIKARUGIR_INSTALLATION.md)
+now connects the approved original composition to the desktop installer and
+runtime workflow. Preparation belongs to Portside and must not expose an upstream
+setup wizard. Earlier direct-Wine/incomplete-integration descriptions below are
+historical where superseded by that contract. Release and graphical acceptance
+remain separate from local automated checks.
+
 Read [ARCHITECTURE.md](ARCHITECTURE.md) for the application flow,
 [SECURITY.md](SECURITY.md) for trust checks, and [STATUS.md](STATUS.md) for dated
 validation evidence. This document describes the implementation at the audit
@@ -8,13 +15,15 @@ window.
 
 ## Components and source ownership
 
-The production assembly below still uses the direct-Wine pipeline. The approved
-Sikarugir migration now has an explicit native host adapter and a local candidate
-builder, described in [SIKARUGIR_ADAPTER](SIKARUGIR_ADAPTER.md). The project owner
-approved the original binary composition after its rendered-login/interaction
-control; missing matching upstream source is no longer a blocker for that input
-set. Original binaries retain their upstream producer identity and pinned hashes.
-Commercial installer/release integration remains incomplete.
+The selected assembly uses the approved original Sikarugir composition. The
+[installation contract](SIKARUGIR_INSTALLATION.md) describes the current archive,
+external-prefix, background setup, signature and workflow integration. Portside
+assembles the pinned original inputs and compiles its maintenance helper; it does
+not claim to compile the upstream launcher, SDK or engine. Local installation and
+rendered-login interaction passed; customer release validation remains pending.
+
+The source-built Wine recipes and component table below describe the retained
+legacy `directWine` path. They are not the selected Sikarugir build recipe.
 
 The runtime is downloaded separately from `Portside.app`. Three archives form
 one installed wrapper:
