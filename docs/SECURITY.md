@@ -111,7 +111,9 @@ disabled library validation, but the current
 through codesign. Its existence is not evidence of hardened/signed runtime code.
 
 [`PortsideBundleComponents`](../apps/desktop/Sources/PortsideCore/PortsideBundleComponents.swift)
-uses bundle metadata, expected IDs and resolved executable containment. Signature
+uses current on-disk plist metadata for replaceable runtime wrappers, Foundation
+Bundle metadata for immutable embedded app helpers, expected IDs and resolved
+executable containment. Cached metadata cannot authorize a replaced runtime. Signature
 status in component-resolution diagnostics is informational; it is not a
 signature-enforcement gate for every helper launch. RuntimeHost likewise trusts
 the manifest/installation path and reports signature state diagnostically.

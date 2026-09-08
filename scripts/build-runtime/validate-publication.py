@@ -172,6 +172,7 @@ def validate_sikarugir_runtime(root, manifest, provenance, sha, run_id):
                 "Sikarugir SBOM original input mismatch")
     native = read_json(root, "native-validation.json")
     require(native.get("kind") == "PortsideSikarugirInstallationProbe" and native.get("portsideCommit") == sha
+            and native.get("legacyMetadataReplacementVerified") is True
             and native.get("buildId") == manifest["buildId"] and native.get("syntheticDataPreserved") is True
             and native.get("startupSkipped") is True and native.get("wrapperMetadataPreserved") is True
             and native.get("windowsX64Exit") == 37 and native.get("windowsX86Exit") == 23

@@ -61,6 +61,32 @@ final class PortsideBundleComponentsTests: XCTestCase {
         }
     }
 
+    func testCachedRuntimeCannotHideReplacedInvalidMetadata() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let wrapper = root.appendingPathComponent("Runtime.app")
+        try createBundle(at: wrapper, identifier: "com.portside.runtime", executable: "Host")
+        let cached = try XCTUnwrap(Bundle(url: wrapper))
+        XCTAssertEqual(cached.bundleIdentifier, "com.portside.runtime")
+        _ = try PortsideBundleComponents.runtimeHost(in: wrapper)
+        let info = wrapper.appendingPathComponent("Contents/Info.plist")
+        for metadata in [
+            ["CFBundleIdentifier": "unexpected.identifier", "CFBundleExecutable": "Host"],
+            ["CFBundleIdentifier": "com.portside.runtime", "CFBundleExecutable": "../Host"],
+            ["CFBundleIdentifier": "com.portside.runtime", "CFBundleExecutable": "MissingHost"]
+        ] {
+            try PropertyListSerialization.data(fromPropertyList: metadata, format: .xml, options: 0).write(to: info, options: .atomic)
+            XCTAssertThrowsError(try PortsideBundleComponents.runtimeHost(in: wrapper))
+        }
+        try Data("invalid plist".utf8).write(to: info)
+        XCTAssertThrowsError(try PortsideBundleComponents.runtimeHost(in: wrapper))
+        let external = root.appendingPathComponent("ExternalInfo.plist")
+        try FileManager.default.moveItem(at: info, to: external)
+        try FileManager.default.createSymbolicLink(at: info, withDestinationURL: external)
+        XCTAssertThrowsError(try PortsideBundleComponents.runtimeHost(in: wrapper))
+        withExtendedLifetime(cached) {}
+    }
+
     private func temporaryDirectory() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("PortsideBundleTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

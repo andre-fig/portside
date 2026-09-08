@@ -27,6 +27,18 @@ import PortsideCore
             artifacts[PortsideRuntimeArtifact(component: component)] = artifactsRoot.appendingPathComponent(component.downloadURL.lastPathComponent)
         }
         let installer = PortsideRuntimeInstaller(runner: runner, logger: logger, rootDirectory: state)
+        // Reproduce the running desktop's cached legacy entry point before
+        // replacing the same URL. This is synthetic metadata, never a copied
+        // installed wrapper, real user prefix or executable that we run.
+        let legacyWrapper = state.appendingPathComponent("Wrappers/PortsideBaseline.app")
+        let legacyHost = legacyWrapper.appendingPathComponent("Contents/MacOS/PortsideRuntimeHost")
+        try FileManager.default.createDirectory(at: legacyHost.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("synthetic legacy entry point".utf8).write(to: legacyHost)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: legacyHost.path)
+        try PropertyListSerialization.data(fromPropertyList: ["CFBundleIdentifier": "com.portside.runtime", "CFBundleExecutable": "PortsideRuntimeHost", "CFBundlePackageType": "APPL"], format: .xml, options: 0).write(to: legacyWrapper.appendingPathComponent("Contents/Info.plist"))
+        guard let cachedLegacy = Bundle(url: legacyWrapper), cachedLegacy.executableURL?.lastPathComponent == "PortsideRuntimeHost" else {
+            throw PortsideError.invalidArtifact("Fixture legacy bundle cache was not populated")
+        }
         let start = Date()
         let first = try await installer.install(artifacts: artifacts)
         let firstDuration = Date().timeIntervalSince(start)
@@ -61,6 +73,7 @@ import PortsideCore
             installedSteam = true
         }
         let report: [String: Any] = ["kind": "PortsideSikarugirInstallationProbe", "firstInstallationSeconds": firstDuration,
+                                   "legacyMetadataReplacementVerified": true,
                                    "existingPrefixInstallationSeconds": secondDuration, "syntheticDataPreserved": true,
                                    "startupSkipped": true, "wrapperMetadataPreserved": true, "windowsX64Exit": 37, "windowsX86Exit": 23,
                                    "officialSteamInstalled": installedSteam, "renderedInteractionVerified": false,
@@ -70,6 +83,7 @@ import PortsideCore
         // Keep this synthetic fixture for a separate LaunchServices/UI control.
         // Its exact root is local evidence only; never publish its contents.
         print(String(data: try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]), encoding: .utf8)!)
+        withExtendedLifetime(cachedLegacy) {}
     }
 }
 

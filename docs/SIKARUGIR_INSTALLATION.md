@@ -135,3 +135,20 @@ requests Apple's timestamp service; these commands do not publish anything.
 The optional Steam flag downloads only Valve's official installer and fixture
 prerequisites. Cleanup uses the fixture's exact engine and prefix. Graphical
 acceptance requires a separate owned-window capture and actual interaction.
+
+## Live upgrade metadata cache correction
+
+The live 0.1.35-to-0.1.36 upgrade exposed a missed transition: Foundation cached
+the old runtime's `CFBundleExecutable` at the persistent wrapper URL. Installation
+replaced the bundle correctly, but the still-running desktop combined the old
+entry point with the new integration configuration and rejected it. Recovery
+restored the legacy wrapper before Steam was opened.
+
+Runtime resolution now reads current on-disk plist bytes through Foundation,
+retaining bundle identifier and executable containment/existence checks. It does
+not flush global caches, restart unrelated processes or modify installed binaries.
+The native probe holds synthetic legacy Bundle metadata across real installation,
+in addition to new/existing-prefix checks. Publication requires the corresponding
+`legacyMetadataReplacementVerified` result. Unit controls reproduce the original
+failure and cover rollback plus invalid metadata replacement. A corrected desktop
+release is required for a live migration; the existing 0.1.36 app lacks this fix.

@@ -959,3 +959,46 @@ changes to generate the automatic release. The outgoing change includes the
 verified local login/interaction and prefix-preservation work above. Existing
 CI and runtime completion for the same commit remain prerequisites; this entry
 is authorization and local evidence, not a claim that publication has completed.
+
+## Live 0.1.36 migration follow-up — 2026-09-08 UTC
+
+**Verified live failure:** the installed desktop reported version 0.1.36.
+At 19:31:35 UTC, runtime replacement failed with `Sikarugir must remain the
+runtime application entry point`; Steam was not opened. Read-only inspection
+found the failed 0.1.36 wrapper correctly configured with `CFBundleExecutable`
+set to `launcher` and `integration: sikarugir`. The app's recovery restored the
+0.1.35 direct-Wine wrapper. No direct edits were made to the user's installed
+app, runtime or everyday prefix during this investigation.
+
+**Proven regression:** an isolated test retained a Foundation `Bundle` for the
+legacy wrapper, installed the new archives at that same URL, and reproduced the
+exact rejection. `Bundle.executableURL` retained `PortsideRuntimeHost` while the
+fresh runtime configuration identified Sikarugir. Earlier native checks covered
+new prefixes and Sikarugir-to-Sikarugir replacement, which kept the same entry
+point; they missed this legacy-to-Sikarugir transition in a running desktop.
+
+**Implemented correction:** mutable runtime resolution now reads current
+`Info.plist` bytes with Foundation property-list parsing. Identifier, regular-file,
+size, executable-name, contained-path and executable checks remain enforced.
+Immutable embedded desktop helpers continue using Foundation Bundle resolution.
+Tests cover the actual old/new directory replacement, rollback, preserved
+synthetic data and replaced invalid metadata despite a cached valid bundle.
+The native installation probe now primes synthetic legacy Bundle metadata before
+installing the real runtime. Publication requires that migration check to pass.
+
+**Validation:** the original regression failed before the correction and passed
+afterwards. Desktop 161 tests (one optional probe skipped), host 24 tests, both
+Swift builds, 93 script tests, source/snapshot audits and production policy passed.
+Native migration acceptance is recorded in the continuation below. This is an
+installation-migration fix; it does not invalidate the earlier rendered-login
+fixture evidence or establish a new live graphical session.
+
+**Native continuation — Verified:** using the existing signed 0.1.36 runtime
+archives and the corrected desktop core, the synthetic cached-legacy transition
+completed in 41.763 seconds and the existing-prefix pass in 33.786 seconds.
+Markers and wrapper metadata were preserved, Run autostart was skipped, x64/x86
+returned 37/23, and native signatures plus Developer ID requirements passed.
+The fixture was stopped by its exact wineserver/prefix and removed. No Steam
+installation or new graphical run was performed in this maintenance-only control.
+The previously authorized integration release handoff also covers the corrective
+commit/push; live customer migration still requires the corrected app release.

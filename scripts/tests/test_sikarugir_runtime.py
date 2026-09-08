@@ -69,6 +69,7 @@ class SikarugirRuntimeTests(unittest.TestCase):
             _, _, output = self.fixture(root)
             manifest = json.loads((output / "runtime-manifest-unsigned.json").read_text())
             native = {"kind": "PortsideSikarugirInstallationProbe", "portsideCommit": SHA, "buildId": "42-1",
+                      "legacyMetadataReplacementVerified": True,
                       "syntheticDataPreserved": True, "startupSkipped": True, "wrapperMetadataPreserved": True,
                       "windowsX64Exit": 37, "windowsX86Exit": 23,
                       "archiveChecksums": {v["component"]: v["sha256"] for v in manifest["components"]}}
@@ -77,6 +78,12 @@ class SikarugirRuntimeTests(unittest.TestCase):
             with patch.object(publication, "__file__", str(root / "scripts/build-runtime/validate-publication.py")):
                 with self.assertRaisesRegex(RuntimeError, "distribution signing acceptance is pending"):
                     publication.validate_runtime(output, SHA, "42")
+                native["legacyMetadataReplacementVerified"] = False
+                write_report()
+                with self.assertRaisesRegex(RuntimeError, "native installation acceptance"):
+                    publication.validate_runtime(output, SHA, "42")
+                native["legacyMetadataReplacementVerified"] = True
+                write_report()
                 provenance_path = output / "provenance.json"
                 provenance = json.loads(provenance_path.read_text())
                 provenance.update(distributionReady=True, signatureKind="Developer ID entry points")

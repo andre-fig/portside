@@ -35,6 +35,39 @@ final class SikarugirInstallationTests: XCTestCase {
         try await assertRejectedWithoutReplacement(artifacts)
     }
 
+    func testLegacyToSikarugirReplacementAndRollbackIgnoreCachedBundleMetadata() async throws {
+        let artifacts = try archives()
+        let state = root.appendingPathComponent("State")
+        let wrapper = state.appendingPathComponent("Wrappers/PortsideBaseline.app")
+        try FileManager.default.createDirectory(at: wrapper.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: root.appendingPathComponent("inputs/PortsideBaseline.app"), to: wrapper)
+        let infoURL = wrapper.appendingPathComponent("Contents/Info.plist")
+        var oldInfo = try XCTUnwrap(PropertyListSerialization.propertyList(from: Data(contentsOf: infoURL), format: nil) as? [String: Any])
+        oldInfo["CFBundleExecutable"] = "PortsideRuntimeHost"
+        try PropertyListSerialization.data(fromPropertyList: oldInfo, format: .xml, options: 0).write(to: infoURL)
+        try Data("{}".utf8).write(to: wrapper.appendingPathComponent("Contents/Resources/portside-runtime.json"))
+        try FileManager.default.copyItem(at: root.appendingPathComponent("inputs/Engine"), to: wrapper.appendingPathComponent("Contents/SharedSupport/engine"))
+        let prefix = state.appendingPathComponent("Prefixes/PortsideBaseline")
+        try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: true)
+        let marker = prefix.appendingPathComponent("synthetic-save")
+        try Data("preserve".utf8).write(to: marker)
+        // The running desktop has already inspected the installed legacy app.
+        // Keep that Foundation bundle alive across the real directory replacement.
+        let cached = try XCTUnwrap(Bundle(url: wrapper))
+        XCTAssertEqual(cached.executableURL?.lastPathComponent, "PortsideRuntimeHost")
+        XCTAssertEqual(try PortsideRuntimeValidator.validate(wrapper: wrapper).launcher.lastPathComponent, "PortsideRuntimeHost")
+        let runner = InstallationRunner()
+        let installer = PortsideRuntimeInstaller(runner: runner, logger: PortsideLogger(logDirectory: root.appendingPathComponent("Logs")), rootDirectory: state)
+        let installed = try await installer.install(artifacts: artifacts)
+        XCTAssertEqual(installed.validation.launcher.lastPathComponent, "Sikarugir")
+        XCTAssertEqual(try PortsideBundleComponents.runtimeHost(in: wrapper).lastPathComponent, "PortsideRuntimeHost")
+        XCTAssertEqual(try String(contentsOf: marker, encoding: .utf8), "preserve")
+        let rolledBack = try XCTUnwrap(installer.rollbackLatest())
+        XCTAssertEqual(rolledBack.launcher.lastPathComponent, "PortsideRuntimeHost")
+        XCTAssertEqual(try String(contentsOf: marker, encoding: .utf8), "preserve")
+        withExtendedLifetime(cached) {}
+    }
+
     func testModifiedArchiveFailsBeforeExtractionAndReplacement() async throws {
         let artifacts = try archives()
         let file = try XCTUnwrap(artifacts.first?.value)

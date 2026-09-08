@@ -39,10 +39,7 @@ public enum PortsideBundleComponents {
     }
 
     public static func runtimeLauncher(in wrapper: URL, fileManager: FileManager = .default) throws -> URL {
-        guard let bundle = Bundle(url: wrapper) else {
-            throw rejection(bundleURL: wrapper, helperURL: nil, reason: "The Portside runtime bundle could not be loaded", fileManager: fileManager)
-        }
-        let primary = try executable(in: bundle, expectedIdentifier: "com.portside.runtime", container: wrapper, fileManager: fileManager)
+        let primary = try runtimeExecutableFromCurrentMetadata(in: wrapper, fileManager: fileManager)
         if try runtimeIntegration(in: wrapper, fileManager: fileManager) == .sikarugir {
             guard primary.resolvingSymlinksInPath().lastPathComponent == "Sikarugir" else {
                 throw rejection(bundleURL: wrapper, helperURL: primary, reason: "Sikarugir must remain the runtime application entry point", fileManager: fileManager)
@@ -50,6 +47,31 @@ public enum PortsideBundleComponents {
             _ = try containedRuntimeExecutable("Contents/Frameworks/SikarugirSdk.framework/Versions/A/SikarugirSdk", in: wrapper, fileManager: fileManager)
         }
         return primary
+    }
+
+    private static func runtimeExecutableFromCurrentMetadata(in wrapper: URL, fileManager: FileManager) throws -> URL {
+        // Foundation caches Bundle metadata by URL. Runtime installation and
+        // rollback replace that URL while this desktop process is still alive.
+        // Read the current plist with Foundation instead of reusing executableURL
+        // from the previous wrapper. Immutable embedded app helpers retain Bundle.
+        let infoURL = wrapper.appendingPathComponent("Contents/Info.plist")
+        guard let attributes = try? fileManager.attributesOfItem(atPath: infoURL.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              infoURL.resolvingSymlinksInPath().path.hasPrefix(wrapper.resolvingSymlinksInPath().path + "/"),
+              (attributes[.size] as? NSNumber)?.intValue ?? 0 <= 1_048_576,
+              let data = try? Data(contentsOf: infoURL),
+              let info = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any] else {
+            throw rejection(bundleURL: wrapper, helperURL: infoURL, reason: "The current runtime bundle metadata could not be loaded", fileManager: fileManager)
+        }
+        guard let name = info["CFBundleExecutable"] as? String, !name.isEmpty,
+              name != ".", name != "..", !name.contains("/"), !name.contains("\\"),
+              name.rangeOfCharacter(from: .controlCharacters) == nil else {
+            throw rejection(bundleURL: wrapper, helperURL: nil, reason: "The helper executable could not be resolved from CFBundleExecutable", fileManager: fileManager)
+        }
+        guard info["CFBundleIdentifier"] as? String == "com.portside.runtime" else {
+            throw rejection(bundleURL: wrapper, helperURL: wrapper.appendingPathComponent("Contents/MacOS/" + name), reason: "The helper bundle identifier does not match com.portside.runtime", fileManager: fileManager)
+        }
+        return try containedRuntimeExecutable("Contents/MacOS/" + name, in: wrapper, fileManager: fileManager).standardizedFileURL
     }
 
     public static func runtimeHost(in wrapper: URL, fileManager: FileManager = .default) throws -> URL {
