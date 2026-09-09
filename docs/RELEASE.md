@@ -233,6 +233,12 @@ guarantee.
    Gatekeeper assessment, creates a compressed DMG, submits and staples it,
    then archives the stapled app as `Portside-<version>-notarized.zip`.
    A ZIP is not itself stapled; the app inside is.
+   After each accepted submission, [staple_release.sh](../scripts/staple_release.sh)
+   allows up to five stapling attempts only for exit 65 accompanied by both
+   the CloudKit query failure and missing base64 ticket messages. Delays are
+   5, 10, 20 and 40 seconds; the submission is not repeated. Other failures
+   stop immediately, and exhausted retries fail the release. Ticket validation,
+   strict signature verification and Gatekeeper assessment remain required.
 4. [validate_release_bundle.sh](../scripts/validate_release_bundle.sh) verifies
    production plist configuration, matching Agent public configuration,
    Installer signature, English development region, app signature and a

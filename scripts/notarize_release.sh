@@ -35,7 +35,7 @@ else
 fi
 
 submit_for_notarization "$ZIP"
-xcrun stapler staple "$BUILD_DIR/Portside.app"
+"$ROOT_DIR/scripts/staple_release.sh" "$BUILD_DIR/Portside.app"
 xcrun stapler validate "$BUILD_DIR/Portside.app"
 codesign --verify --deep --strict --verbose=2 "$BUILD_DIR/Portside.app"
 spctl --assess --type execute --verbose=4 "$BUILD_DIR/Portside.app"
@@ -45,7 +45,7 @@ rm -f "$BUILD_DIR/Portside-${VERSION}.dmg" "$BUILD_DIR/Portside-${VERSION}-notar
   "$BUILD_DIR/Portside-${VERSION}.dmg" \
   Portside
 submit_for_notarization "$BUILD_DIR/Portside-${VERSION}.dmg"
-xcrun stapler staple "$BUILD_DIR/Portside-${VERSION}.dmg"
+"$ROOT_DIR/scripts/staple_release.sh" "$BUILD_DIR/Portside-${VERSION}.dmg"
 xcrun stapler validate "$BUILD_DIR/Portside-${VERSION}.dmg"
 ditto -c -k --sequesterRsrc --keepParent "$BUILD_DIR/Portside.app" "$BUILD_DIR/Portside-${VERSION}-notarized.zip"
 shasum -a 256 "$BUILD_DIR/Portside-${VERSION}-notarized.zip" >> "$BUILD_DIR/checksums.txt"

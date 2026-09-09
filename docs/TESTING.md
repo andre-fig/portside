@@ -75,6 +75,14 @@ for the full suite (the native CI job pins Python 3.12).
 `actionlint .github/workflows/*.yml` checks wiring;
 no workflow dispatch is required for these local checks.
 
+Notarization regression tests execute `notarize_release.sh` with synthetic
+artifacts and isolated mock Apple tools. They cover recovered app/DMG ticket
+lookups without resubmission, bounded persistent failures, unrelated stapler
+errors, rejected submissions and failed ticket validation. Run them with
+`python3 -B -m unittest discover -s scripts/tests -p test_notarize_release.py -v`.
+These controls do not establish current Apple service availability or a valid
+ticket on a distributable app.
+
 Extracted-layout validation also invokes
 `python3 scripts/build-runtime/validate-steam-bootstrap.py WRAPPER ENGINE WINETRICKS`.
 This uses a fresh wrapper/home/symlinked prefix and the actual host, without

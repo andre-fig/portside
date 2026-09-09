@@ -1021,3 +1021,31 @@ was removed. Historical release-evidence compatibility remains available.
 **Validation passed:** all 93 script tests, actionlint, shell syntax, production
 policy and `git diff --check`. No app, Wine or installed-prefix change is
 part of this workflow cleanup; no graphical retest is required for it.
+
+## Release ticket lookup failure — 2026-09-09 UTC
+
+**Verified failure:** [release run 34295188258](https://github.com/andre-fig/portside/actions/runs/34295188258)
+for `4820ea24` passed its prerequisites, app build and signing. Apple accepted
+the 0.1.40 ZIP submission at 00:31:49 UTC. At 00:31:51, stapling the app failed
+with a CloudKit query error, a missing base64 ticket response and exit 65.
+The script attempted stapling once; downstream publication was skipped. This
+run did not publish app 0.1.40. **Unknown:** whether ticket propagation delay
+or another CloudKit lookup problem caused the missing response; acceptance
+alone does not establish that the ticket was retrievable.
+
+**Implemented but not end-to-end validated:** app and DMG stapling now retry
+that specific exit/message combination up to five times, with 5/10/20/40-second
+delays. Submission rejection, unrelated stapler errors, exhausted retries and
+ticket/signature/Gatekeeper validation failures still block publication.
+Retries do not resubmit to Apple or change workflow prerequisites and triggers.
+
+**Verified local controls:** five regression tests execute the real shell
+orchestration with disposable synthetic artifacts and mock tools. They cover
+app/DMG recovery without resubmission, persistent failure, unrelated errors,
+rejected submissions and failed ticket validation. Actual Apple service recovery
+and a completed release require a subsequent authorized production execution.
+All 98 script tests passed with Python 3.14, as did actionlint, shell syntax,
+`validate-production-policy.sh` and `git diff --check`. Swift builds and source
+audits were not repeated because this change only affects release stapling,
+its shell regression tests and documentation.
+No installed app, runtime, user prefix or graphical Steam session was changed.
