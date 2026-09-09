@@ -266,8 +266,10 @@ future accumulation without treating user-owned Steam data as disposable cache.
 
 The Steam flow installs the `steam` verb, launches the wrapper for the initial
 updater cycle and launches it again for interactive use. Subsequent desktop
-startup performs app/runtime checks and offers Open Steam. The detached wrapper
-and Agent permit activity after the primary UI closes. Lease/handoff logic
+startup performs app/runtime checks and automatically opens Steam when no managed
+Steam session is running. LaunchServices registration is refreshed for the
+validated runtime before opening, including after replacement at the same URL.
+The detached wrapper and Agent permit activity after the primary UI closes. Lease/handoff logic
 serializes foreground bootstrap and the Agent's update worker; see
 [UPDATE_ARCHITECTURE.md](UPDATE_ARCHITECTURE.md). These process relationships
 are implemented; real interactive continuity remains a separate GUI test.

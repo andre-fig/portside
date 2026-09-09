@@ -152,3 +152,25 @@ in addition to new/existing-prefix checks. Publication requires the correspondin
 `legacyMetadataReplacementVerified` result. Unit controls reproduce the original
 failure and cover rollback plus invalid metadata replacement. A corrected desktop
 release is required for a live migration; the existing 0.1.36 app lacks this fix.
+
+## Automatic opening and LaunchServices refresh — 2026-09-09
+
+After app/runtime/Steam checks, an existing installation now opens Steam
+automatically when no managed Steam session is running, including after a
+runtime replacement. Fresh setup retains its automatic launch. An existing
+session is preserved, and visual confirmation remains necessary after launch.
+
+Live 0.1.41 logs recorded successful runtime installation at 23:13:54 UTC,
+then a maintenance-host argument rejection at 23:14:07 and no detected Steam
+process at 23:14:08. The installed plist selected `launcher` with Sikarugir
+integration. This is consistent with stale LaunchServices registration selecting
+the previous host; the logs do not independently prove the cache contents.
+
+Before NSWorkspace opens the validated wrapper URL, the desktop now forces
+`LSRegisterURL` to refresh that wrapper's registration even when replacement
+preserves timestamps. Registration failure stops opening with an explicit error.
+Preparation checks and the separation of Sikarugir and legacy receipt arguments
+remain mandatory. No global cache reset or installed-bundle edits are used.
+The regression fixture holds old Bundle metadata across replacement and checks
+forced registration, argument selection, registration errors, and rejection of
+incomplete Steam preparation before registration. It does not launch real Steam.

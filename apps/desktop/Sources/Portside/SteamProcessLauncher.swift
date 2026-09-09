@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import CoreServices
 import Darwin
 import PortsideCore
 
@@ -35,31 +36,49 @@ final class SteamProcessLauncher {
         guard FileManager.default.fileExists(atPath: wrapper.path) else {
             throw PortsideError.runtimeUnavailable
         }
+        let id = UUID()
+        let configuration = try Self.openConfiguration(wrapper: wrapper, launchID: id)
+        let application: NSRunningApplication = try await withCheckedThrowingContinuation { continuation in
+            Self.open(wrapper: wrapper, configuration: configuration, continuation: continuation)
+        }
+        return Launch(id: id, application: application)
+    }
+
+    static func openConfiguration(wrapper: URL, launchID: UUID,
+                                  register: (URL, Bool) -> OSStatus = { LSRegisterURL($0 as CFURL, $1) }) throws -> NSWorkspace.OpenConfiguration {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
-        let id = UUID()
         // Sikarugir remains the real app entry point. Receipt arguments belong
         // only to the legacy host and must never become upstream program flags.
         _ = try PortsideBundleComponents.runtimeLauncher(in: wrapper)
-        configuration.arguments = try PortsideSteamFlow.launchArguments(wrapper: wrapper, launchID: id)
-        let application: NSRunningApplication = try await withCheckedThrowingContinuation { continuation in
-            // AppKit invokes this completion handler on a concurrent queue.
-            // Give it an explicitly nonisolated function type so Swift does
-            // not insert a MainActor precondition into Launch Services' own
-            // callback path. The suspended @MainActor task resumes on its
-            // actor after the continuation is completed.
-            let completionHandler: @Sendable (NSRunningApplication?, (any Error)?) -> Void = { application, error in
-                if let error {
-                    continuation.resume(throwing: PortsideError.processLaunchFailed("Portside runtime could not be opened: \(error.localizedDescription)"))
-                } else if let application {
-                    continuation.resume(returning: application)
-                } else {
-                    continuation.resume(throwing: PortsideError.processLaunchFailed("Portside runtime did not start."))
-                }
-            }
-            NSWorkspace.shared.openApplication(at: wrapper, configuration: configuration, completionHandler: completionHandler)
+        configuration.arguments = try PortsideSteamFlow.launchArguments(wrapper: wrapper, launchID: launchID)
+        // Runtime replacement keeps the same URL and may preserve timestamps.
+        // Refresh LaunchServices too: fresh plist validation alone does not stop
+        // it from opening the previous maintenance-host entry point.
+        let status = register(wrapper, true)
+        guard status == noErr else {
+            throw PortsideError.processLaunchFailed("Portside could not register its runtime application (OSStatus=\(status)).")
         }
-        return Launch(id: id, application: application)
+        return configuration
+    }
+
+    private static func open(wrapper: URL, configuration: NSWorkspace.OpenConfiguration,
+                             continuation: CheckedContinuation<NSRunningApplication, any Error>) {
+        // AppKit invokes this completion handler on a concurrent queue.
+        // Give it an explicitly nonisolated function type so Swift does
+        // not insert a MainActor precondition into Launch Services' own
+        // callback path. The suspended @MainActor task resumes on its
+        // actor after the continuation is completed.
+        let completionHandler: @Sendable (NSRunningApplication?, (any Error)?) -> Void = { application, error in
+            if let error {
+                continuation.resume(throwing: PortsideError.processLaunchFailed("Portside runtime could not be opened: \(error.localizedDescription)"))
+            } else if let application {
+                continuation.resume(returning: application)
+            } else {
+                continuation.resume(throwing: PortsideError.processLaunchFailed("Portside runtime did not start."))
+            }
+        }
+        NSWorkspace.shared.openApplication(at: wrapper, configuration: configuration, completionHandler: completionHandler)
     }
 
     func stopManagedProcesses(wrapper: URL, prefix: URL) {

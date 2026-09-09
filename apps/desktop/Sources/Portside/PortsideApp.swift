@@ -215,7 +215,11 @@ final class PortsideModel: ObservableObject {
             isWorking = true
             setupStep = .checking
             Task { @MainActor in
-                defer { isWorking = false }
+                var openSteamAfterChecks = false
+                defer {
+                    isWorking = false
+                    if openSteamAfterChecks { launchSteam() }
+                }
                 var requiresRuntimeUpdate = false
                 do {
                     // Fetch the signed runtime policy on every launch, including
@@ -265,6 +269,8 @@ final class PortsideModel: ObservableObject {
                 _ = advanceBootstrap(to: .ready)
                 showsInstaller = false
                 message = "Your Steam environment is installed"
+                let currentWrapper = URL(fileURLWithPath: state.wrapperPath ?? wrapperPath.path)
+                openSteamAfterChecks = !isManagedSteamRunning(wrapper: currentWrapper, prefix: currentPrefix)
             }
         } else {
             setUp()
@@ -467,6 +473,8 @@ final class PortsideModel: ObservableObject {
         }
         guard advanceBootstrap(to: .launchingSteam) else { return }
         isWorking = true
+        showsInstaller = true
+        setupStep = .opening
         message = "Starting Steam…"
         state.lastReadiness = nil
         state.lastExitCode = nil

@@ -14,6 +14,33 @@ scope; update [DECISIONS](DECISIONS.md) when architecture changes.
 - **Actions:** local documentation edits and non-destructive local checks only.
   No dependency installs/builds, GUI, credentials, service calls or publication.
 
+## Automatic Steam opening follow-up — 2026-09-09 UTC
+
+**Implemented but not end-to-end validated:** the existing-installation path now
+opens Steam automatically after successful app/runtime/Steam checks, including
+runtime replacement, unless a managed Steam session is already running. Fresh
+setup already opens Steam automatically. The launch progress UI is shown while
+opening; rendered interaction still requires explicit confirmation.
+
+The live 0.1.41 installation reached ready at 23:13:54 UTC, followed by
+`runtime host arguments are invalid` at 23:14:07 and
+`steam_process_not_started` at 23:14:08. The installed plist selected the
+Sikarugir launcher. Stale LaunchServices registration is the suspected routing
+cause, not directly captured cache evidence. The desktop now forces registration
+of the validated runtime URL before NSWorkspace opening, failing closed if that
+registration fails. See [the launch correction](SIKARUGIR_INSTALLATION.md#automatic-opening-and-launchservices-refresh--2026-09-09).
+
+**Verified local checks:** `swift test --package-path apps/desktop` completed
+162 tests, one optional signed-app probe skipped, zero failures. The new fixture
+checks legacy-to-Sikarugir replacement with cached Bundle metadata, forced
+registration, argument separation, registration failure, and incomplete setup.
+`swift test --package-path apps/runtime-host` passed 24 tests. Both corresponding
+`swift build` commands, `./scripts/validate-production-policy.sh` and
+`git diff --check` passed. These checks do not prove real LaunchServices cache
+recovery or automatic rendered Steam startup in a customer installation.
+No installed app/runtime was modified and no release was published; the fix
+requires a corrected desktop distribution and graphical acceptance.
+
 ## Installation follow-up — 2026-09-05 UTC
 
 **Verified, scoped:** the [reopen correction](INSTALLATION_REOPEN_FIX.md) passed
