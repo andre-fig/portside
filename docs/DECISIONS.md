@@ -1,5 +1,20 @@
 # Architectural decisions
 
+## D21 — Trigger Sikarugir assembly independently of the legacy engine workflow
+
+- **Date:** September 8, 2026; explicitly requested after explaining the 0.1.37 gap.
+- **Decision:** Remove the engine-completion trigger and its dead dispatch branch
+  from the runtime workflow. Use the triggering commit for naming, concurrency
+  and every checkout. Keep relevant main pushes and explicit main dispatches.
+- **Reason:** Sikarugir assembly consumes pinned original inputs. Engine
+  completion caused a second run with assembly/publication skipped, consuming
+  version 37 without a published runtime. The same happened to run 39.
+- **Consequences:** The automatic application release still requires CI and
+  published runtime evidence for the same commit, without polling. The version
+  counter is unchanged and gaps remain possible after other skipped/failed runs.
+  Retained legacy workflow evidence remains readable by the release selector.
+
+
 ## D20 — Prepare Sikarugir through Portside and preserve the external prefix
 
 - **Date:** September 8, 2026; owner requested integration and background setup.

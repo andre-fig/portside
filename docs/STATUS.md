@@ -1002,3 +1002,22 @@ The fixture was stopped by its exact wineserver/prefix and removed. No Steam
 installation or new graphical run was performed in this maintenance-only control.
 The previously authorized integration release handoff also covers the corrective
 commit/push; live customer migration still requires the corrected app release.
+
+## Remove redundant runtime completion trigger — 2026-09-08 UTC
+
+**Verified cause:** runtime run 37 (`34265050548`) was triggered by completion
+of the engine workflow for `d95332e6`. Its preparation job succeeded while native
+assembly and publication were skipped. It consumed the workflow counter between
+published runtime 36 and the subsequent push build 38. Run 39 repeated that
+redundant completion event for `c3fbc983`.
+
+**Implemented:** at the owner's request, runtime assembly now triggers only on
+relevant main pushes or explicit main dispatch. Removed the engine event branch,
+its API request and event-only variables. Runtime naming, concurrency and all
+checkouts use the triggering commit. Automatic release still checks CI and
+runtime publication for the same source; no publication gate or version counter
+was removed. Historical release-evidence compatibility remains available.
+
+**Validation passed:** all 93 script tests, actionlint, shell syntax, production
+policy and `git diff --check`. No app, Wine or installed-prefix change is
+part of this workflow cleanup; no graphical retest is required for it.

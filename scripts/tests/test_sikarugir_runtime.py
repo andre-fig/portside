@@ -134,6 +134,13 @@ class SikarugirRuntimeTests(unittest.TestCase):
         self.assertIn("build/runtime/native-validation.json", workflow)
         self.assertNotIn("build-wine-engine.sh", workflow)
         self.assertNotIn("fetch-engine.sh", workflow)
+        # Engine completion used to create an extra no-op run and consume a
+        # runtime version even though Sikarugir assembly has no engine dependency.
+        self.assertNotIn("workflow_run", workflow)
+        self.assertNotIn("ENGINE_RUN_ID", workflow)
+        self.assertIn("  push:", workflow)
+        self.assertIn("  workflow_dispatch:", workflow)
+        self.assertIn("run-name: Runtime production ${{ github.sha }}", workflow)
         script = (ROOT / "scripts/build-runtime/build.sh").read_text()
         self.assertIn("package-sikarugir-runtime.py", script)
         self.assertIn("validate-sikarugir-installation.py", script)

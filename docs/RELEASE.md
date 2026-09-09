@@ -52,7 +52,7 @@ the YAML's `environment: production` alone does not prove required reviewers.
 | [Build Desktop Validation](../.github/workflows/build-desktop.yml)                 | Successful CI on `main` with relevant desktop/packaging paths, or dispatch; arm64 app ZIP, DMG, dSYM and checksums, retained 14 days.                                      | Development bundle, ad hoc by default; no notarization or GUI acceptance.                                                                     |
 | Railway connector                                                                  | Provider-side deployment of the Landing service from `main`; local pre-push runs Bun lint, typecheck and build before publication.                                         | External to GitHub Actions; service variables, domains and the deployed revision remain provider-side state.                                  |
 | [Build Portside Engine](../.github/workflows/build-engine.yml)                     | Relevant `main` changes or dispatch; Pre-push compiles locally; Linux verifies the uploaded input, macOS runs short execution checks, then Linux publishes with 30-day evidence.                                                            | Independent source engine; no app release or runtime manifest.                                                                                |
-| [Build Portside Runtime](../.github/workflows/build-runtime.yml)                   | Assembly changes or successful engine workflow; dispatch requires runtime version and artifact URL prefix. Linux detection/preflight and engine repackaging, macOS host build/validation, then Linux manifest signing and storage upload.  | Uses existing engine; one-day assembly handoff, full and metadata-only evidence retained 30 days. No backend manifest registration here.                               |
+| [Build Portside Runtime](../.github/workflows/build-runtime.yml)                   | Relevant main pushes or explicit dispatch with runtime version and artifact URL prefix. Linux verifies pinned Sikarugir inputs, macOS assembles/signs/validates, then Linux signs the manifest and uploads.  | No engine-completion trigger. One-day assembly handoff; full and metadata-only evidence retained 30 days. No backend manifest registration here.                               |
 | [Release Portside](../.github/workflows/release-production.yml)                    | CI or runtime completion on `main` rechecks both prerequisites for the same source; every validated/published runtime qualifies, including runtime-only changes.                                               | Configured app, signature, notarization, upload, then backend runtime and app registration. Automatic publication, not gated by GUI workflow. |
 | [Validate Clean Portside Runtime](../.github/workflows/validate-clean-install.yml) | Dispatch with selected current/optional previous runtime artifact; self-hosted macOS arm64 GUI session.                                                                    | Operator-assisted test. Script needs an interactive terminal to confirm checks; otherwise it exits 2 without accepting GUI success.           |
 | Railway connector                                                                  | Provider-side deployment of the API, Worker and Cron services using the three `apps/backend/railway.*.json` configurations.                                                | External to GitHub Actions; service variables, domains and the deployed revision remain provider-side state.                                  |
@@ -60,23 +60,22 @@ the YAML's `environment: production` alone does not prove required reviewers.
 
 Engine/assembly change decisions come from
 [changed-components.sh](../scripts/build-runtime/changed-components.sh), in
-addition to YAML path filters. Engine inputs trigger local pre-push Wine compilation/cache reuse;
-wrapper/winetricks and app changes assemble using the recipe-selected engine.
-The engine workflow never invokes the Wine compiler. Its push paths exclude
-assembly-only scripts. Missing local input fails on Linux before macOS allocation;
-there is no remote compilation or active waiting fallback.
-The Wine patch applicator and `upstream/patches/**` are engine inputs in both
-the workflow filter and component detector. The checksum-pinned patch series
-participates in local-cache and engine identity; it cannot reuse an engine built
-without the renderer-overlay patch under the same name. This does not change
-the same-commit CI/runtime release requirement or add workflow polling.
-Engine metadata/provenance carry the applied patch list. Runtime assembly retains
-it in provenance and the Wine SPDX `sourceInfo`; publication rejects a missing
-or mismatched inventory for patched engines.
-Release event routing and change-filter changes alone do not allocate native
-engine/runtime jobs; CI and local script tests validate that orchestration. Failed
-engine completion events do not allocate runtime runners; other branches do not
-trigger the runtime completion path.
+addition to YAML path filters. The selected Sikarugir composition maps engine
+source changes to assembly; it consumes pinned original inputs and does not wait
+for the separate source-Wine engine workflow. Runtime assembly starts only on
+relevant `main` pushes or an explicit `main` dispatch. Every job checks out the
+triggering `github.sha`. Engine completion no longer starts a second runtime run.
+
+The separate engine workflow and local pre-push source build remain available
+for historical direct-Wine recipes. No hosted job compiles Wine. Legacy source
+metadata retains its applied patch inventory and associated publication checks.
+The release selector can still interpret retained historical engine-completion
+runtime evidence; that compatibility does not create new workflow triggers.
+
+Runtime versions still derive from `github.run_number`. Removing the redundant
+engine-completion event avoids its no-op version consumption, but does not
+promise gapless published versions: skipped, failed or cancelled workflow runs
+also consume numbers. Existing version numbers are never reassigned.
 
 Every app release requires successful CI and runtime assembly/publication of the
 same `target_sha`. The runtime workflow's push-wide component decisions are the
