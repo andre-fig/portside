@@ -9,6 +9,7 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,16 @@ import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def verify_launcher_privacy(launcher):
+    details = subprocess.run(["codesign", "-dv", str(launcher)], check=True, capture_output=True, text=True).stderr
+    flags = re.search(r"flags=0x([0-9a-fA-F]+)", details)
+    if not flags or not int(flags.group(1), 16) & 0x10000:
+        raise RuntimeError("Sikarugir launcher must enable Hardened Runtime")
+    data = subprocess.run(["codesign", "-d", "--entitlements", ":-", str(launcher)], check=True, capture_output=True).stdout
+    if plistlib.loads(data) != {"com.apple.security.cs.disable-library-validation": True}:
+        raise RuntimeError("Sikarugir launcher resource-access entitlements do not match the privacy policy")
 
 
 def sha256(path):
@@ -109,7 +120,7 @@ def assemble(inputs, output, host, version, specification, checkout=ROOT):
         info.update({"CFBundleIdentifier": "com.portside.runtime",
                      "CFBundleName": "PortsideBaseline", "CFBundleDisplayName": "Portside",
                      "CFBundleShortVersionString": version, "CFBundleVersion": version,
-                     "Program Name and Path": "/Program Files (x86)/Steam/steam.exe", "Program Flags": "",
+                     "Program Name and Path": "/Program Files (x86)/Steam/steam.exe", "Program Flags": "-preventsteamdiscovery",
                      "D3DMETAL": 0, "DXMT": 0, "DXVK": 0, "WINEMSYNC": 1, "WINEESYNC": 1,
                      "Skip Mono": 0, "Skip Gecko": 0, "Winetricks silent": 1,
                      "PortsideRuntime": True, "PortsideIntegration": "sikarugir",

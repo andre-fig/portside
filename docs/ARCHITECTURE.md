@@ -108,11 +108,18 @@ issuance connection. The diagram is a dependency map, not deployment evidence.
    Stop only processes attributed to this wrapper/prefix after setup, then open
    the wrapper through LaunchServices for a clean second launch.
 7. The readiness monitor requires a window-sized on-screen entry and a webhelper
-   process to report `visibleButUnverified`. The app keeps a verification screen
-   open and monitors current renderer failures/process lifetime. Only user
-   confirmation of visible content and interaction marks setup complete, starts
-   the compatibility agent/runtime updater and closes `Portside.app`.
+   process to report `visibleButUnverified`. With no detected launch/renderer
+   failure, the app marks automatic setup complete, starts the compatibility
+   agent/runtime updater and closes `Portside.app` without a questionnaire.
+   The diagnostic report remains unverified; automatic completion does not
+   establish rendered content or interaction.
    Game acceptance remains a separate [manual validation](VALIDATION.md).
+
+When a copy outside Applications detects a newer trusted installed app, it opens
+that app automatically and exits after successful LaunchServices handoff. It
+also handles a newer app arriving during the installation transaction. The
+signature, same-publisher and no-downgrade checks still apply; actual opening
+failure retains the retry UI. See [the installation follow-up](INSTALLATION_REOPEN_FIX.md).
 
 ## Subsequent openings and process lifetime
 
@@ -122,9 +129,9 @@ including when the wrapper already exists. If managed Steam is stopped, it
 prepares and applies a pending runtime update. If Steam is running, runtime
 application is deferred. Missing `steam.exe` sends the user through repair.
 
-A prepared existing installation shows **Open Steam**; clicking it launches the
-wrapper, waits for window/webhelper evidence and asks for interface confirmation
-before starting helpers and exiting the main app. LaunchServices owns the wrapper launch independently; closing the launcher
+A prepared existing installation automatically launches Steam when it is stopped,
+waits for window/webhelper evidence, then starts helpers and exits the main app
+without requiring user confirmation. LaunchServices owns the wrapper launch independently; closing the launcher
 does not intentionally terminate Wine/Steam. This process model is implemented,
 but persistence of a real rendered Steam session remains an acceptance test.
 

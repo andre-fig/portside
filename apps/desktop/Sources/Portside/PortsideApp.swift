@@ -48,9 +48,7 @@ final class PortsideModel: ObservableObject {
     @Published var licenseKey = ""
     @Published var licenseMessage = "Enter the purchase key from your Portside order."
 
-    enum SetupStep { case checking, license, rosettaRequired, downloading, installing, opening, verifyingInterface, ready, failed }
-    private var interfaceCheck: (wrapper: URL, prefix: URL, renderer: SteamRendererDiagnostics)?
-    private var interfaceTask: Task<Void, Never>?
+    enum SetupStep { case checking, license, rosettaRequired, downloading, installing, opening, ready, failed }
 
     private let store = EnvironmentStore()
     private let logger = PortsideLogger()
@@ -117,6 +115,9 @@ final class PortsideModel: ObservableObject {
         if assessment.requiresMove {
             needsInstallationMove = true
             showsInstaller = true
+            if (try? installationService.hasNewerInstalledApplication()) == true {
+                moveToApplications(openInstalled: true)
+            }
             return
         }
         do {
@@ -210,7 +211,7 @@ final class PortsideModel: ObservableObject {
            isValidWrapper(wrapperPath),
            (state.setupCompleted || state.lastReadiness != nil) {
             // A previous launch report follows successful runtime/Steam setup.
-            // Closing Portside before confirming the interface must not turn
+            // Closing Portside before the handoff finishes must not turn
             // the next opening into a repair that stops the existing session.
             isWorking = true
             setupStep = .checking
@@ -438,7 +439,7 @@ final class PortsideModel: ObservableObject {
                 state.lastSetupDuration = Date().timeIntervalSince(started)
                 diagnostics.event("steam_window_detected", context: context(stage: "window_detected", report: report))
                 progress = 1
-                awaitInterfaceConfirmation(wrapper: installed.validation.wrapper, prefix: installed.validation.prefix, renderer: renderer)
+                try completeSteamHandoff(wrapper: installed.validation.wrapper, prefix: installed.validation.prefix, renderer: renderer)
             } catch {
                 _ = advanceBootstrap(to: .failed)
                 state.phase = .failedRecoverable
@@ -490,7 +491,7 @@ final class PortsideModel: ObservableObject {
                 state.lastReadiness = report
                 state.lastExitCode = report.runtimeTermination?.terminationStatus
                 if let failure = report.failure { throw failure }
-                awaitInterfaceConfirmation(wrapper: wrapper, prefix: prefix, renderer: renderer)
+                try completeSteamHandoff(wrapper: wrapper, prefix: prefix, renderer: renderer)
             } catch {
                 _ = advanceBootstrap(to: .failed)
                 let userMessage = userFacingSetupFailure(error)
@@ -603,7 +604,6 @@ final class PortsideModel: ObservableObject {
         case .downloading: return "runtime_download"
         case .installing: return "runtime_installation"
         case .opening: return "steam_launch"
-        case .verifyingInterface: return "steam_interface_unverified"
         case .ready: return "ready"
         case .failed: return "failed"
         }
@@ -670,68 +670,27 @@ final class PortsideModel: ObservableObject {
         }
     }
 
-    private func awaitInterfaceConfirmation(wrapper: URL, prefix: URL, renderer: SteamRendererDiagnostics) {
-        interfaceTask?.cancel()
-        interfaceCheck = (wrapper, prefix, renderer)
-        state.phase = .windowWaiting
-        state.lastError = nil
-        state.lastErrorCode = nil
-        setupStep = .verifyingInterface
-        showsInstaller = true
-        message = "A Steam window was detected. Check that its content is visible and responds to clicks."
-        persist()
-        interfaceTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
-                guard let self, self.setupStep == .verifyingInterface else { return }
-                if let failure = renderer.currentFailure() { self.failInterface(failure); return }
-                if !self.isManagedSteamRunning(wrapper: wrapper, prefix: prefix) {
-                    self.failInterface(.steamExitedBeforeReady); return
-                }
-            }
+    private func completeSteamHandoff(wrapper: URL, prefix: URL, renderer: SteamRendererDiagnostics) throws {
+        if let failure = renderer.currentFailure() { throw failure }
+        guard let report = state.lastReadiness, report.canCompleteAutomaticHandoff else {
+            throw state.lastReadiness?.failure ?? SteamLaunchFailure.processWithoutWindow
         }
-    }
-
-    func confirmSteamInterface() {
-        guard setupStep == .verifyingInterface, let check = interfaceCheck, let report = state.lastReadiness else { return }
-        if let failure = check.renderer.currentFailure() { failInterface(failure); return }
-        guard isManagedSteamRunning(wrapper: check.wrapper, prefix: check.prefix) else {
-            failInterface(.steamExitedBeforeReady); return
+        guard isManagedSteamRunning(wrapper: wrapper, prefix: prefix) else {
+            throw SteamLaunchFailure.steamExitedBeforeReady
         }
-        let confirmed = SteamReadinessReport(state: .uiReady, processStarted: report.processStarted,
-            webHelperStarted: report.webHelperStarted, windowDetected: report.windowDetected,
-            uiReady: true, interfaceVerification: .manualConfirmed,
-            webHelperProcessCount: report.webHelperProcessCount, duration: report.duration)
-        guard confirmed.canCompleteGraphicalHandoff else { return }
-        interfaceTask?.cancel(); interfaceTask = nil; interfaceCheck = nil
-        state.lastReadiness = confirmed
+        // Completion records the automatic handoff, not a human assessment of
+        // rendered content. Preserve the monitor's unverified readiness report.
         state.setupCompleted = true
         state.phase = .steamReady
-        state.lastError = nil; state.lastErrorCode = nil
+        state.lastError = nil
+        state.lastErrorCode = nil
         persist()
-        agentLauncher.start(wrapper: check.wrapper, prefix: check.prefix)
+        agentLauncher.start(wrapper: wrapper, prefix: prefix)
         agentLauncher.startRuntimeUpdater()
         _ = advanceBootstrap(to: .ready)
         setupStep = .ready
         showsInstaller = false
         hideAfterSteamWindow()
-    }
-
-    func reportBlankSteamWindow() { failInterface(.rendererInitializationFailed) }
-
-    private func failInterface(_ failure: SteamLaunchFailure) {
-        interfaceTask?.cancel(); interfaceTask = nil; interfaceCheck = nil
-        state.phase = .failedRecoverable
-        state.lastError = failure.localizedDescription; state.lastErrorCode = failure.code
-        state.lastReadiness = SteamReadinessReport(state: .failed,
-            processStarted: state.lastReadiness?.processStarted ?? false,
-            webHelperStarted: state.lastReadiness?.webHelperStarted ?? false,
-            windowDetected: state.lastReadiness?.windowDetected ?? false, failure: failure)
-        persist()
-        _ = advanceBootstrap(to: .failed)
-        message = failure.localizedDescription
-        setupStep = .failed
-        showsInstaller = true
     }
 
     private func hideAfterSteamWindow() {
@@ -801,17 +760,6 @@ struct RootView: View {
                             Spacer()
                         }
                         .padding(.horizontal, 28)
-                    } else if model.setupStep == .verifyingInterface {
-                        VStack(spacing: 14) {
-                            Spacer()
-                            Text("Check the Steam window").font(.title3.weight(.medium))
-                            Text(model.message).font(.subheadline).multilineTextAlignment(.center)
-                            HStack {
-                                Button("The window is blank") { model.reportBlankSteamWindow() }
-                                Button("Steam is usable") { model.confirmSteamInterface() }.buttonStyle(.borderedProminent)
-                            }
-                            Spacer()
-                        }.padding(.horizontal, 28)
                     } else if model.setupStep == .failed {
                         VStack(spacing: 16) {
                             Spacer()

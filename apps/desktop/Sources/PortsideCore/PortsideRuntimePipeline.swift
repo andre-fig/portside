@@ -108,7 +108,7 @@ public struct PortsideWrapperConfiguration: Sendable, Equatable {
             // The approved wrapper is configured before packaging/signing. Do
             // not rewrite packaged metadata during installation or repair.
             guard info["Program Name and Path"] as? String == "/Program Files (x86)/Steam/steam.exe",
-                  info["Program Flags"] as? String == "",
+                  PortsideSteamFlow.acceptsProgramFlags(info["Program Flags"] as? String),
                   ["D3DMETAL", "DXMT", "DXVK"].allSatisfy({ (info[$0] as? NSNumber)?.intValue == 0 }),
                   (info["WINEMSYNC"] as? NSNumber)?.boolValue == baseline.msync,
                   (info["WINEESYNC"] as? NSNumber)?.boolValue == baseline.esync else {
@@ -484,6 +484,12 @@ public final class PortsideUpdateService: @unchecked Sendable {
 }
 
 public enum PortsideSteamFlow {
+    // Older authenticated wrappers remain usable during app/runtime updates.
+    // Newly packaged wrappers disable Steam's remote-device discovery.
+    static func acceptsProgramFlags(_ flags: String?) -> Bool {
+        flags == "" || flags == "-preventsteamdiscovery"
+    }
+
     private static var processEnvironment: [String: String] {
         var environment = ProcessInfo.processInfo.environment
         environment["HOME"] = NSHomeDirectory()
@@ -533,7 +539,7 @@ public enum PortsideSteamFlow {
         let prefix = link.resolvingSymlinksInPath()
         let info = try PropertyListSerialization.propertyList(from: Data(contentsOf: wrapper.appendingPathComponent("Contents/Info.plist")), format: nil) as? [String: Any]
         guard info?["Program Name and Path"] as? String == "/Program Files (x86)/Steam/steam.exe",
-              info?["Program Flags"] as? String == "" else {
+              acceptsProgramFlags(info?["Program Flags"] as? String) else {
             throw PortsideError.invalidArtifact("The runtime is not configured to open Steam")
         }
         for file in [prefix.appendingPathComponent("system.reg"), prefix.appendingPathComponent("user.reg"),

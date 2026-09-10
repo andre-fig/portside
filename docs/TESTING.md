@@ -43,7 +43,9 @@ The [0.1.35 graphics investigation](STEAM_GRAPHICS_FIX.md) adds installer tests
 for new/existing/interrupted prefixes and preservation, host tests for scoped
 CEF configuration and temporary addon suppression, and desktop tests for fresh,
 old, rotated, partial and recovered renderer records. Window/process detection
-cannot authorize graphical handoff without user confirmation. The real
+permits automatic product handoff, but does not prove rendered interaction.
+Human graphical acceptance is a separate release/test activity, not a customer
+questionnaire. The real
 `validate-steam-bootstrap.py` additionally repeats prefix preparation with a
 synthetic preservation marker and a synthetic Run entry: upgrades must preserve
 the marker without launching the startup command. It queries the CEF loader

@@ -158,7 +158,8 @@ release is required for a live migration; the existing 0.1.36 app lacks this fix
 After app/runtime/Steam checks, an existing installation now opens Steam
 automatically when no managed Steam session is running, including after a
 runtime replacement. Fresh setup retains its automatic launch. An existing
-session is preserved, and visual confirmation remains necessary after launch.
+session is preserved. The subsequent automatic-closure policy removes customer
+confirmation after launch; manual graphical acceptance remains a separate test.
 
 Live 0.1.41 logs recorded successful runtime installation at 23:13:54 UTC,
 then a maintenance-host argument rejection at 23:14:07 and no detected Steam
@@ -174,3 +175,44 @@ remain mandatory. No global cache reset or installed-bundle edits are used.
 The regression fixture holds old Bundle metadata across replacement and checks
 forced registration, argument selection, registration errors, and rejection of
 incomplete Steam preparation before registration. It does not launch real Steam.
+
+## Startup privacy restrictions — 2026-09-10 UTC
+
+**Implemented but not end-to-end validated:** newly assembled wrappers configure
+Steam with `-preventsteamdiscovery`. This option is present next to the remote
+client broadcast/listener implementation in the inspected Valve Steam client.
+It targets Steam device discovery; it is not a network firewall or proof that
+no game, LAN transfer, or other Steam feature can request local-network access.
+The desktop accepts the exact new flag and the empty legacy flag for upgrades
+and rollback, rejecting other program flags. Signed installed metadata is not
+rewritten. New privacy defaults require a newly packaged runtime.
+
+The user reported microphone permission during Steam startup, without using
+voice chat. Local TCC logs attributed the microphone request to Wine under the
+Sikarugir launcher. That installed launcher lacked Hardened Runtime. New runtime
+packaging enables Hardened Runtime on the launcher without audio-input or other
+resource-access entitlements. The only exception is library validation, because
+the pinned original SDK retains its upstream signature. Existing component
+signature checks remain; the SDK and engine bytes/signatures are preserved.
+Packaging and native installation validation inspect the actual launcher code
+flags and exact entitlements and reject missing hardening or extra permissions.
+
+Apple documents microphone access under the
+[audio-input entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.device.audio-input)
+and explains that
+[local-network privacy](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)
+is triggered by network operations. Removing usage-description strings is not an
+access-denial policy. These changes do not modify macOS privacy decisions or
+reset permissions. Voice input and automatic remote-device discovery are outside
+the new startup defaults; playback, internet access and the original Wine engine
+are retained. Real startup without prompts, audio playback, and games still need
+graphical acceptance with the packaged runtime.
+
+## Automatic desktop closure — 2026-09-10 UTC
+
+The customer flow no longer asks whether the Steam window is blank or usable.
+Fresh setup and subsequent launch close Portside automatically after managed
+Steam/window/webhelper detection and the final process/renderer check. Helpers
+start before closure, and Steam remains independent. Diagnostic readiness stays
+unverified; this product transition does not assert rendered interaction.
+Detected startup failures still show the retry screen.

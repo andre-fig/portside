@@ -1,5 +1,35 @@
 # Architectural decisions
 
+## D23 — Close Portside automatically after Steam window detection
+
+- **Date:** September 10, 2026 UTC; explicitly requested by the owner.
+- **Decision:** Remove the customer-facing blank/usable interface questionnaire.
+  After detecting managed Steam, its webhelper and a window, with no detected
+  launch/renderer failure, persist setup completion, start the existing helpers
+  and close the Portside UI. Steam continues independently.
+- **Evidence boundary:** Preserve `visibleButUnverified`/`notVerified` diagnostics.
+  Never synthesize manual confirmation. Rendered interaction and game validation
+  remain separate operator acceptance checks.
+- **Failure behavior:** Detected startup errors retain the retry screen. Closing
+  Portside does not stop Steam or delete its data.
+
+
+## D22 — Restrict startup microphone access and Steam device discovery
+
+- **Date:** September 10, 2026 UTC; owner requested removing both startup prompts.
+- **Status:** Implemented but not end-to-end validated.
+- **Decision:** Harden the Sikarugir launcher without audio-input permission;
+  retain only the library-validation exception needed for the original SDK's
+  signature. Configure new wrappers with Steam's `-preventsteamdiscovery` option.
+- **Boundary:** Keep original engine/SDK bytes, component checks, LaunchServices
+  entry point and external prefix. Do not edit TCC databases or grant permissions.
+  Older authenticated wrappers remain accepted while awaiting a runtime update.
+- **Limits:** The launcher restriction needs real Wine/TCC attribution acceptance;
+  the discovery flag is not a blanket LAN block. Voice capture and automatic
+  remote discovery are not promised. Audio output, login and game acceptance
+  require testing of the final packaged runtime.
+
+
 ## D21 — Trigger Sikarugir assembly independently of the legacy engine workflow
 
 - **Date:** September 8, 2026; explicitly requested after explaining the 0.1.37 gap.

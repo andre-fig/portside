@@ -16,6 +16,21 @@ spec.loader.exec_module(candidate)
 
 
 class SikarugirCandidateTests(unittest.TestCase):
+    def test_launcher_privacy_rejects_missing_hardening_and_microphone_entitlement(self):
+        allowed = {"com.apple.security.cs.disable-library-validation": True}
+        for flags, entitlements, valid in [
+            ("flags=0x10000(runtime)", allowed, True),
+            ("flags=0x0(none)", allowed, False),
+            ("flags=0x10000(runtime)", dict(allowed, **{"com.apple.security.device.audio-input": True}), False),
+        ]:
+            with self.subTest(flags=flags, entitlements=entitlements):
+                replies = [subprocess.CompletedProcess([], 0, stderr=flags),
+                           subprocess.CompletedProcess([], 0, stdout=plistlib.dumps(entitlements))]
+                with patch.object(candidate.subprocess, "run", side_effect=replies):
+                    if valid: candidate.verify_launcher_privacy(Path("fixture-launcher"))
+                    else:
+                        with self.assertRaises(RuntimeError): candidate.verify_launcher_privacy(Path("fixture-launcher"))
+
     def fixture(self, root):
         inputs = root / "inputs"
         inputs.mkdir()
@@ -66,7 +81,7 @@ class SikarugirCandidateTests(unittest.TestCase):
             info = plistlib.loads((wrapper / "Contents/Info.plist").read_bytes())
             self.assertEqual(info["CFBundleExecutable"], "Sikarugir")
             self.assertEqual(info["CFBundleIdentifier"], "com.portside.runtime")
-            self.assertEqual(info["Program Flags"], "")
+            self.assertEqual(info["Program Flags"], "-preventsteamdiscovery")
             config = json.loads((wrapper / "Contents/Resources/portside-runtime.json").read_text())
             self.assertEqual(config["integration"], "sikarugir")
             self.assertFalse((wrapper / config["prefixRelativePath"]).exists())

@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import plistlib
 import shutil
 import subprocess
 import tarfile
@@ -39,6 +40,13 @@ class SikarugirRuntimeTests(unittest.TestCase):
                 host.chmod(0o755)
                 return subprocess.CompletedProcess(command, 0)
             if command[0] == "codesign":
+                if "-dv" in command:
+                    return subprocess.CompletedProcess(command, 0, stdout="", stderr="flags=0x10000(runtime)")
+                if "-d" in command and "--entitlements" in command:
+                    return subprocess.CompletedProcess(command, 0, stdout=plistlib.dumps({"com.apple.security.cs.disable-library-validation": True}), stderr=b"")
+                if "--sign" in command and command[-1].endswith("/Sikarugir"):
+                    self.assertEqual(command[command.index("--options") + 1], "runtime")
+                    self.assertTrue(command[command.index("--entitlements") + 1].endswith("sikarugir-launcher.entitlements"))
                 if "-R" in command:
                     self.assertTrue(command[command.index("-R") + 1].startswith("="), "Inline requirements must not be interpreted as filenames")
                 return subprocess.CompletedProcess(command, 0, stdout="", stderr="Signature=adhoc")

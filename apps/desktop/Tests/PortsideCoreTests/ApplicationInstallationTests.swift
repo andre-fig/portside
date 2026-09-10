@@ -86,14 +86,74 @@ final class ApplicationInstallationTests: XCTestCase {
         XCTAssertFalse(installer.events.contains("install"))
     }
 
-    @MainActor func testNewerInstallationPreventsCopyAndRelaunch() async throws {
+    @MainActor func testNewerInstallationOpensAutomaticallyWithoutCopying() async throws {
         let root = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }
         let installer = InstallationMock(identity: identity("1"), existing: identity("2"))
         let service = PortsideInstallationService(bundle: try XCTUnwrap(Bundle(url: root)), installer: installer)
-        do { try await service.moveToApplicationsAndReopen(); XCTFail("A downgrade was accepted") }
-        catch { XCTAssertEqual(error as? PortsideInstallationError, .newerInstallation) }
-        XCTAssertEqual(installer.events, ["validateSource", "validateInstalled"])
+        try await service.moveToApplicationsAndReopen { installer.events.append("opening") }
+        XCTAssertEqual(installer.events, ["validateSource", "validateInstalled", "opening", "validateSource", "validateInstalled", "reopen", "scheduleEjection"])
+    }
+
+    @MainActor func testAutomaticOpeningSelectsOnlyTrustedNewerInstalledVersions() throws {
+        let root = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let installer = InstallationMock(identity: identity("2"))
+        let service = PortsideInstallationService(bundle: try XCTUnwrap(Bundle(url: root)), installer: installer)
+        XCTAssertFalse(try service.hasNewerInstalledApplication())
+        for version in ["1", "2"] {
+            installer.existing = identity(version)
+            XCTAssertFalse(try service.hasNewerInstalledApplication())
+        }
+        installer.existing = identity("3")
+        XCTAssertTrue(try service.hasNewerInstalledApplication())
+        installer.existing = identity("2", build: "3")
+        XCTAssertTrue(try service.hasNewerInstalledApplication())
+        installer.existing = identity("3", build: "1")
+        XCTAssertThrowsError(try service.hasNewerInstalledApplication())
+        installer.existing = PortsideSignedApplication(identifier: "com.portside.app", teamIdentifier: "OTHER", version: "3", buildVersion: "3", codeDirectoryHash: "other")
+        XCTAssertThrowsError(try service.hasNewerInstalledApplication())
+        installer.existing = identity("3")
+        installer.invalidInstalledSignature = true
+        XCTAssertThrowsError(try service.hasNewerInstalledApplication())
+        XCTAssertFalse(installer.events.contains("install"))
+        XCTAssertFalse(installer.events.contains("reopen"))
+    }
+
+    @MainActor func testNewerInstalledCopyOpeningFailureDoesNotCopyOrEject() async throws {
+        let root = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let installer = InstallationMock(identity: identity("1"), existing: identity("2"))
+        installer.reopenFailure = true
+        let service = PortsideInstallationService(bundle: try XCTUnwrap(Bundle(url: root)), installer: installer)
+        do { try await service.moveToApplicationsAndReopen(); XCTFail("Opening failure was ignored") }
+        catch { XCTAssertEqual(error as? PortsideInstallationError, .reopenFailed) }
+        XCTAssertFalse(installer.events.contains("install"))
+        XCTAssertFalse(installer.events.contains("scheduleEjection"))
+    }
+
+    @MainActor func testNewerVersionArrivingDuringInstallIsRevalidatedAndOpened() async throws {
+        let root = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let installer = InstallationMock(identity: identity("1"))
+        installer.replacementDuringInstall = identity("2")
+        let service = PortsideInstallationService(bundle: try XCTUnwrap(Bundle(url: root)), installer: installer)
+        try await service.moveToApplicationsAndReopen()
+        XCTAssertEqual(installer.existing, identity("2"))
+        XCTAssertEqual(installer.events, ["validateSource", "install", "validateSource", "validateInstalled", "reopen", "scheduleEjection"])
+    }
+
+    @MainActor func testAutomaticOpenRechecksDestinationAfterOpeningCallback() async throws {
+        let root = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let installer = InstallationMock(identity: identity("1"), existing: identity("2"))
+        let service = PortsideInstallationService(bundle: try XCTUnwrap(Bundle(url: root)), installer: installer)
+        do {
+            try await service.moveToApplicationsAndReopen { installer.invalidInstalledSignature = true }
+            XCTFail("Changed destination was opened")
+        } catch { XCTAssertEqual(error as? PortsideInstallationError, .invalidSignature) }
+        XCTAssertFalse(installer.events.contains("reopen"))
+        XCTAssertFalse(installer.events.contains("scheduleEjection"))
     }
 
     @MainActor func testCopyPermissionFailureDoesNotRelaunch() async throws {
@@ -268,6 +328,7 @@ final class ApplicationInstallationTests: XCTestCase {
     var invalidInstalledSignature = false
     var reopenFailure = false
     var suspendInstall = false
+    var replacementDuringInstall: PortsideSignedApplication?
     var installContinuation: CheckedContinuation<Void, Never>?
 
     init(identity: PortsideSignedApplication, existing: PortsideSignedApplication? = nil) {
@@ -286,6 +347,10 @@ final class ApplicationInstallationTests: XCTestCase {
     func exists(_ url: URL) -> Bool { existing != nil }
     func install(source: URL, identity: PortsideSignedApplication) async throws {
         events.append("install")
+        if let replacementDuringInstall {
+            existing = replacementDuringInstall
+            throw PortsideInstallationError.newerInstallation
+        }
         if let failure { throw failure }
         if suspendInstall { await withCheckedContinuation { installContinuation = $0 } }
         existing = identity

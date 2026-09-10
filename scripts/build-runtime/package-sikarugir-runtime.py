@@ -72,10 +72,14 @@ def package(inputs, output, version, download_prefix, commit, build_id, checkout
             for name in ["host", "launcher"]:
                 command = ["codesign", "--force", "--sign", signing_identity,
                            "--identifier", "com.portside.runtime." + name]
+                if name == "launcher":
+                    command += ["--options", "runtime", "--entitlements",
+                                str(checkout / "scripts/build-runtime/sikarugir-launcher.entitlements")]
                 if signing_identity != "-": command.append("--timestamp")
                 subprocess.run(command + [str(native_components[name])], check=True, capture_output=True)
             for component in native_components.values():
                 subprocess.run(["codesign", "--verify", "--strict", str(component)], check=True, capture_output=True)
+            candidate.verify_launcher_privacy(native_components["launcher"])
             for name in ["host", "launcher"]:
                 requirement = 'anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and identifier "com.portside.runtime.' + name + '"'
                 result = subprocess.run(["codesign", "--verify", "--strict", "-R", "=" + requirement, str(native_components[name])], capture_output=True)

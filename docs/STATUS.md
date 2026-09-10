@@ -14,6 +14,102 @@ scope; update [DECISIONS](DECISIONS.md) when architecture changes.
 - **Actions:** local documentation edits and non-destructive local checks only.
   No dependency installs/builds, GUI, credentials, service calls or publication.
 
+## Automatic newer installed app follow-up — 2026-09-10 UTC
+
+**Implemented but not end-to-end validated:** an older Portside copy launched
+outside Applications now detects and opens the newer trusted installed copy
+without requesting confirmation. If the installer discovers a newer version
+while attempting replacement, it also revalidates and opens that installed copy.
+No downgrade is performed. Both signature identities, publisher, release and
+build ordering remain enforced. The old instance exits only after successful
+opening; failures keep the retry UI and do not schedule disk-image ejection.
+
+**Verified local checks:** `swift test --package-path apps/desktop` completed
+168 tests, one optional signed-app probe skipped, zero failures. Fixtures cover
+newer/equal/older versions, build ordering, invalid publisher/signature, a changed
+destination, a newer version arriving during installation and failed reopening.
+`swift build --package-path apps/desktop`, `./scripts/validate-production-policy.sh`
+and `git diff --check` passed. No installed app was replaced or opened by these
+checks; signed-DMG and actual LaunchServices handoff remain graphical acceptance
+work. Prior local privacy/automatic-closure changes were preserved. No commit,
+push or publication was performed.
+
+
+## Automatic desktop closure follow-up — 2026-09-10 UTC
+
+**Implemented but not end-to-end validated:** the owner requested removing the
+customer-facing “The window is blank” / “Steam is usable” questionnaire. Fresh
+setup and subsequent Steam launch now complete automatically after managed Steam,
+webhelper and on-screen window detection, followed by a final renderer/process
+check. Portside persists setup completion, starts its existing helpers and exits
+its UI process without stopping Steam. Known launch failures retain the retry UI.
+This supersedes earlier requirements for customer confirmation in this document.
+
+The readiness report remains `visibleButUnverified` / `notVerified`; automatic
+product completion does not synthesize manual graphical acceptance. Rendering,
+interaction and game validation remain separate operator checks.
+
+**Verified local checks:** `swift test --package-path apps/desktop` completed
+164 tests, one optional signed-app probe skipped, zero failures. The new regression
+checks automatic completion with detected Steam/window/webhelper and rejects
+missing evidence or a renderer failure while preserving unverified diagnostics.
+`swift build --package-path apps/desktop`, `./scripts/validate-production-policy.sh`
+and `git diff --check` passed. No installed app/runtime was replaced, no graphical
+session was relaunched, and no commit, push or publication was performed. Existing
+local startup-privacy changes were preserved.
+
+
+## Startup privacy follow-up — 2026-09-10 UTC
+
+**Implemented but not end-to-end validated:** the owner reported microphone and
+local-network permission prompts during Steam startup, without voice-chat use.
+Read-only TCC inspection attributed microphone requests to Wine under the
+Sikarugir launcher, whose installed signature lacked Hardened Runtime. New
+packages harden the original launcher without audio-input permission, retaining
+only the library-validation exception needed by the original signed SDK.
+Packaging and native validation check the actual code flags and exact entitlement
+set. The original SDK/engine signatures and bytes remain unchanged.
+
+New wrappers configure Valve's `-preventsteamdiscovery` flag, observed next to
+remote-client broadcast/listener code in the installed client. The desktop accepts
+only this flag or the empty legacy configuration. This is targeted discovery
+suppression, not a proof of no LAN access by all Steam/game features. See
+[the policy and acceptance limits](SIKARUGIR_INSTALLATION.md#startup-privacy-restrictions--2026-09-10-utc).
+
+**Verified local checks:** `python3.14 -B -m unittest discover -s scripts/tests`
+passed 99 tests. The first run with system Python was rejected by the existing
+Python 3.12+ safe-extraction requirement; no check was weakened. Desktop Swift
+tests completed 163 tests, one optional signed-app probe skipped, zero failures;
+runtime-host tests passed 24 tests. Both Swift builds, source audit, Wine and
+winetricks snapshot validation, shell/JSON/plist syntax, production policy and
+`git diff --check` passed. Local ad-hoc packaging from the exact verified pins
+completed and its actual launcher restriction check passed. No installed runtime,
+Steam session or macOS privacy decision was modified, and no publication occurred.
+
+**Verified native runtime installation, scoped:** the separate
+`python3.14 -B scripts/build-runtime/validate-sikarugir-installation.py`
+run against the local working-tree archives passed new-prefix installation
+(39.68 seconds), existing-prefix replacement (34.82 seconds), x64/x86 Windows
+controls (exits 37/23), synthetic-data/metadata preservation, all component
+signature checks and the new launcher restriction check. This ad-hoc build has
+`distributionSignatureVerified=false` and `renderedInteractionVerified=false`.
+The successful fixture was cleaned up by the validation script.
+
+The optional native `--install-steam` probe exercised both Windows command
+architectures and preserved its synthetic prefix through replacement. Its hardened
+launcher ran winetricks and created the fixture Steam executable, but remained in
+`SikarugirWineApp.waitUntilAllProcessesEnd()` with no launcher descendants. The
+fixture server shutdown reported no running fixture server. Only that exact
+fixture launcher was then stopped, causing the optional probe to fail. This is
+not successful end-to-end Steam installation/termination evidence. The existing
+user Steam session was preserved; the reason for the upstream wait remains
+unknown, and the interrupted fixture diagnostics were retained locally.
+
+Graphical startup without permission prompts, audio playback, and games with the
+final Developer ID distribution remain unvalidated. Existing authenticated
+runtimes keep their earlier behavior until a corrected runtime is installed.
+
+
 ## Automatic Steam opening follow-up — 2026-09-09 UTC
 
 **Implemented but not end-to-end validated:** the existing-installation path now

@@ -197,16 +197,40 @@ public enum PortsideApplicationSignature {
         isMoving = true
         defer { isMoving = false }
         let identity = try installer.validate(bundle.bundleURL)
-        if installer.exists(Self.destination) {
-            try identity.validateReplacement(of: installer.validate(Self.destination))
+        do {
+            if installer.exists(Self.destination) {
+                try identity.validateReplacement(of: installer.validate(Self.destination))
+            }
+            try await installer.install(source: bundle.bundleURL, identity: identity)
+        } catch PortsideInstallationError.newerInstallation {
+            // Also handle a newer app arriving between preflight and the
+            // installation transaction. Revalidate it before automatic opening.
+            onOpening()
+            try await openInstalledApplication()
+            logger.write("Newer installed Portside copy opened automatically.")
+            return
         }
-        try await installer.install(source: bundle.bundleURL, identity: identity)
         let installed = try installer.validate(Self.destination)
         guard identity == installed else { throw PortsideInstallationError.installationChanged }
         onOpening()
         try await installer.reopen(Self.destination)
         logger.write("Installed Portside copy opened successfully; the installer instance can now exit.")
         installer.scheduleDiskImageEjection(source: bundle.bundleURL, installed: Self.destination)
+    }
+
+    public func hasNewerInstalledApplication() throws -> Bool {
+        guard installer.exists(Self.destination) else { return false }
+        let source = try installer.validate(bundle.bundleURL)
+        let installed = try installer.validate(Self.destination)
+        do {
+            try source.validateReplacement(of: installed)
+            return false
+        } catch PortsideInstallationError.newerInstallation {
+            // A higher release with a lower build (or another publisher) is
+            // not an eligible destination for this automatic handoff.
+            try installed.validateReplacement(of: source)
+            return true
+        }
     }
 
     public func openInstalledApplication() async throws {

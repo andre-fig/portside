@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build and run the real desktop installer in a new private disposable home."""
 import argparse
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,9 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
+spec = importlib.util.spec_from_file_location("sikarugir_candidate", ROOT / "scripts/build-runtime/build-sikarugir-candidate.py")
+candidate = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(candidate)
 
 
 def main():
@@ -55,6 +59,8 @@ def main():
             }
             for component in native_components.values():
                 subprocess.run(["codesign", "--verify", "--strict", str(component)], check=True, capture_output=True)
+            candidate.verify_launcher_privacy(native_components["launcher"])
+            report["launcherResourceRestrictionsVerified"] = True
             report["componentSignaturesVerified"] = True
             developer_id = True
             for name in ["host", "launcher"]:

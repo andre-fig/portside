@@ -3,6 +3,22 @@ import XCTest
 @testable import PortsideCore
 
 final class SteamReadinessTests: XCTestCase {
+    func testAutomaticHandoffRequiresSteamWindowAndWebHelperWithoutClaimingVisualConfirmation() {
+        let report = SteamReadinessReport(state: .visibleButUnverified, processStarted: true,
+            webHelperStarted: true, windowDetected: true, visibleButUnverified: true)
+        XCTAssertTrue(report.canCompleteAutomaticHandoff)
+        XCTAssertFalse(report.uiReady)
+        XCTAssertEqual(report.interfaceVerification, .notVerified)
+        XCTAssertFalse(report.canCompleteGraphicalHandoff)
+        for (process, helper, window, failure) in [
+            (false, true, true, nil), (true, false, true, nil), (true, true, false, nil),
+            (true, true, true, SteamLaunchFailure.rendererInitializationFailed)
+        ] {
+            XCTAssertFalse(SteamReadinessReport(state: .visibleButUnverified, processStarted: process,
+                webHelperStarted: helper, windowDetected: window, failure: failure).canCompleteAutomaticHandoff)
+        }
+    }
+
     private let wrapper = URL(fileURLWithPath: "/PortsideFixture/Runtime.app")
     private let logs = FileManager.default.temporaryDirectory.appendingPathComponent("PortsideReadinessTests-\(UUID().uuidString)")
 

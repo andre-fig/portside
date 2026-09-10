@@ -50,3 +50,24 @@ commercial location gate stopped before runtime, license or Steam initialization
 It proves staged trust/quarantine preparation and LaunchServices reopening. It
 does not establish a complete customer bootstrap, new UI interaction, real
 administrator authorization, or rendered Steam/game acceptance.
+
+## Automatic newer-version handoff — 2026-09-10 UTC
+
+When an older copy starts outside Applications, the desktop detects a newer
+installed copy and opens it automatically without presenting an install/open
+choice. Both copies must have valid signatures and the same application/publisher
+identity; the installed release and build must satisfy the existing no-downgrade
+rules. A newer copy detected during the install transaction follows the same
+handoff, with fresh signature/identity/version validation before opening.
+
+No copy or downgrade is attempted when preflight finds the newer installed app.
+The old process exits only after LaunchServices successfully opens the installed
+copy, then the existing deferred disk-image ejection behavior applies. Actual
+opening failures retain the retry UI. Signature, publisher and version conflicts
+never qualify for automatic opening.
+
+Regression fixtures cover startup selection, equal/older versions, build-only
+updates, mixed version/build ordering, invalid signatures/publishers, destination
+changes before opening, a newer app arriving during installation, and reopening
+failure without ejection. They do not replace real signed-DMG/LaunchServices
+acceptance in a graphical session.

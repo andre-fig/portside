@@ -235,7 +235,11 @@ applied to Steam/game launches. Mono/.NET and Gecko-dependent applications still
 need separate component installation and acceptance; Steam bootstrap does not
 claim those capabilities. The official Steam verb runs as `--winetricks -q steam`
 so Valve's installer uses its supported silent mode, with normal checksums and
-no extra Steam launch flags. After successful prefix preparation the host sets
+no extra installer flags beyond quiet mode. New Sikarugir wrappers separately
+configure `-preventsteamdiscovery` for normal Steam startup and restrict microphone
+resource access on their hardened launcher; see
+[the privacy policy and acceptance limits](SIKARUGIR_INSTALLATION.md#startup-privacy-restrictions--2026-09-10-utc).
+After successful prefix preparation the legacy direct-Wine host sets
 the Wine app-specific `steamwebhelper.exe` override `vulkan-1=native,builtin`.
 This lets Valve's CEF load its bundled Vulkan loader and SwiftShader fallback;
 Wine's builtin loader in this engine has no Vulkan support. The policy applies
@@ -299,8 +303,9 @@ failure instead of waiting for the 90-second graphical deadline. Execution
 failure, signal, nonzero exit, no Steam process, Steam closing before readiness,
 running without a window, and a window without webhelper have separate errors.
 Only a currently detected window with webhelper yields `visibleButUnverified`.
-The desktop keeps a verification screen open until the user confirms rendered
-content and interaction. Current, explicit exhausted GPU initialization reports
+The desktop completes automatic handoff and closes after this evidence and a
+final process/renderer check. It does not ask the user to validate the interface
+and does not upgrade the report to `manualConfirmed`. Current, explicit exhausted GPU initialization reports
 and CEF window-surface creation failures can fail the attempt. Bounded readers
 for `webhelper_gpu.txt` and `cef_log.txt` exclude prelaunch bytes and old/future
 timestamps, reject symlinks, and allow a three-second recovery grace. Newer GPU

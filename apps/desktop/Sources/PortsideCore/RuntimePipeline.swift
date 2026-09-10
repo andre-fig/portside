@@ -104,6 +104,11 @@ public struct SteamReadinessReport: Codable, Equatable, Sendable {
     public let failure: SteamLaunchFailure?
     public let runtimeTermination: RuntimeLaunchReceipt?
 
+    /// Product completion only; this is not proof of rendered content or interaction.
+    public var canCompleteAutomaticHandoff: Bool {
+        failure == nil && processStarted && windowDetected && webHelperStarted
+    }
+
     public var canCompleteGraphicalHandoff: Bool {
         failure == nil && windowDetected && webHelperStarted && uiReady && interfaceVerification == .manualConfirmed
     }

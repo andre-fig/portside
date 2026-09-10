@@ -23,6 +23,21 @@ final class SikarugirComponentTests: XCTestCase {
         XCTAssertEqual(try PortsideSteamFlow.launchArguments(wrapper: wrapper, launchID: UUID()), [])
     }
 
+    func testDiscoveryPolicyAcceptsOnlyExplicitNewAndLegacyFlags() throws {
+        let wrapper = try fixture()
+        let path = wrapper.appendingPathComponent("Contents/Info.plist")
+        var info = try XCTUnwrap(PropertyListSerialization.propertyList(from: Data(contentsOf: path), format: nil) as? [String: Any])
+        for flags in ["-preventsteamdiscovery", ""] {
+            info["Program Flags"] = flags
+            try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: path)
+            XCTAssertNoThrow(try PortsideSteamFlow.validatePreparedSteam(wrapper: wrapper))
+            XCTAssertTrue(try PortsideSteamFlow.launchArguments(wrapper: wrapper, launchID: UUID()).isEmpty)
+        }
+        info["Program Flags"] = "-preventsteamdiscovery -allowremotediscovery"
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: path)
+        XCTAssertThrowsError(try PortsideSteamFlow.validatePreparedSteam(wrapper: wrapper))
+    }
+
     func testIncompleteSteamCannotOpenUpstreamConfigurationUI() throws {
         let wrapper = try fixture()
         let steam = wrapper.appendingPathComponent("Contents/SharedSupport/prefix/drive_c/Program Files (x86)/Steam/steam.exe")
