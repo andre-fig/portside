@@ -10,6 +10,7 @@ body:
       label: macOS Version
       description: What version of macOS are you running?
       options:
+        - "Golden Gate (macOS 27)"
         - "Tahoe (macOS 26)"
         - "Sequoia (macOS 15)"
         - "Sonoma (macOS 14)"
@@ -35,22 +36,25 @@ body:
     attributes:
       label: Wrapper Version
       options:
-        - "Template-1.0.15"
-        - "Template-1.0.14"
-        - "Template-1.0.13"
-        - "Template-1.0.12"
-        - "Template-1.0.11"
-        - "Template-1.0.10"
-        - "Template-1.0.9"
-        - "Template-1.0.8"
-        - "Template-1.0.7"
-        - "Template-1.0.6"
-        - "Template-1.0.5"
-        - "Template-1.0.4"
-        - "Template-1.0.3"
-        - "Template-1.0.2"
-        - "Template-1.0.1"
-        - "Template-1.0"
+        - "Template-1.0.18"
+        - "Template-1.0.17 (not supported)"
+        - "Template-1.0.16 (not supported)"
+        - "Template-1.0.15 (not supported)"
+        - "Template-1.0.14 (not supported)"
+        - "Template-1.0.13 (not supported)"
+        - "Template-1.0.12 (not supported)"
+        - "Template-1.0.11 (not supported)"
+        - "Template-1.0.10 (not supported)"
+        - "Template-1.0.9 (not supported)"
+        - "Template-1.0.8 (not supported)"
+        - "Template-1.0.7 (not supported)"
+        - "Template-1.0.6 (not supported)"
+        - "Template-1.0.5 (not supported)"
+        - "Template-1.0.4 (not supported)"
+        - "Template-1.0.3 (not supported)"
+        - "Template-1.0.2 (not supported)"
+        - "Template-1.0.1 (not supported)"
+        - "Template-1.0 (not supported)"
       default: 0
     validations:
       required: true
@@ -61,7 +65,8 @@ body:
       description: What Engine where you using
       options:
         - "WS12WineSikarugir10.0_6"
-        - "WS11WineSikarugir11.0 (No D3DMetal)"
+        - "WS11WineSikarugir11.0_1 (No D3DMetal)"
+        - "WS11WineSikarugir11.0 (not supported)"
         - "WS12WineSikarugir10.0_5 (not supported)"
         - "WS12WineSikarugir10.0_4 (not supported)"
         - "WS12WineSikarugir10.0_3 (not supported)"
@@ -115,12 +120,11 @@ body:
       label: Render Used
       description: What render backend was used
       options:
-        - "WineD3D (default)"
         - "D3DMetal (Apple silicon, 64-bit only & macOS Sonoma or
         greater)"
-        - "DXMT (macOS Sonoma or greater)"
         - "DXVK"
-        - "D9VK (winetricks verb)"
+        - "D9VK (enabled by default when supported)"
+        - "DXMT (default)"
       default: 0
     validations:
       required: true
